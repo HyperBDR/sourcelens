@@ -1134,6 +1134,12 @@
       "codeAnalysis": "Code Analysis",
       "generalChat": "General Chat"
     },
+    "routingModes": {
+      "direct": "Standard Mode",
+      "smart": "Smart Collaboration",
+      "directHint": "Runs directly with a single assistant and the selected capability.",
+      "smartHint": "Completes tasks through collaboration among configured members."
+    },
     "columns": {
       "assistant": "Assistant",
       "lensnode": "Node",
@@ -1397,7 +1403,8 @@
       "maxDepth": "Max Depth",
       "feishuAppId": "Feishu App ID",
       "feishuAppSecret": "Feishu App Secret",
-      "visibility": "Visibility"
+      "visibility": "Visibility",
+      "routingMode": "Assistant mode"
     },
     "placeholders": {
       "assistantDescription": "Describe what this assistant helps users do.",
@@ -1491,7 +1498,9 @@
       "archiveTitle": "Archive assistant",
       "archiveMessage": "Archive {name}? Links stop working until restored.",
       "skillCount": "{count} Skills",
-      "mcpCount": "{count} MCP Servers"
+      "mcpCount": "{count} MCP Servers",
+      "collaborationMembers": "Collaboration members",
+      "noCollaborationMembers": "No collaboration members configured"
     },
     "datasourceWizard": {
       "createTitle": "Create Data Source",
@@ -1717,20 +1726,28 @@
       "step1Title": "Basics & Models",
       "step1Desc": "Set name, slug, agent model (required), and optional multimodal model",
       "agentModelHint": "Required — the LensNode uses this model to run deep analysis agents.",
+      "smartAgentModelHint": "Required — the Smart coordinator uses this model to route and synthesize work.",
       "multimodalModelHint": "Optional — for vision or image-aware tasks.",
       "noVisionModel": "No model supporting image input is currently configured.",
       "configureVisionModel": "Configure a vision model",
       "maxConcurrencyHint": "Maximum simultaneous runs for this assistant. Extra requests queue automatically.",
       "step2Title": "Execution",
       "step2Desc": "Choose the type first, then configure its node, directories, and retrieval policy",
+      "step2SmartDesc": "Choose the Direct Assistants that this Smart Assistant can collaborate with.",
+      "collaborationMembers": "Collaboration members",
+      "collaborationMembersHint": "Choose active direct assistants. This team is reused for new sessions.",
+      "noCollaborationMembers": "Create an active direct assistant first.",
+      "smartResourcesHint": "Smart Assistants use their selected members. Skills, MCP, LensNode, and execution workspaces are managed by each member; add collaboration guidance below.",
       "generalChatExecutionHint": "General Chat uses bound Skills, bundled scripts, and bundled binaries. Workspace directory retrieval is disabled for this assistant.",
       "noAssistantDescription": "No assistant description",
       "step3Title": "Skills & Workspace",
       "step3Desc": "Bind Skills and MCP, and add workspace context — all optional",
+      "step3SmartDesc": "Add workspace guidance for Smart collaboration",
       "step4Title": "Access",
       "step4Desc": "Set visibility and choose which groups or users can access it",
       "contextLabel": "Workspace Guide (optional)",
       "contextHint": "Tell the Assistant about workspace structure, business context, team conventions, search priorities, and directories to avoid. It is injected as this Assistant's private context after saving.",
+      "smartContextHint": "Add project context, division-of-work principles, and retrieval priorities for Smart collaboration.",
       "contextPlaceholder": "# Information the model can't know just from reading code — write it here.\n\n## Project overview\n# SourceLens is a self-hosted AI code Q&A platform.\n# backend/ is the Django REST API; lensnode/ is a separately deployed execution node\n# that runs Deep Agents and pushes results back to the main service via WebSocket.\n# frontend/ is the Vue 3 admin console; it only talks to backend/ REST APIs.\n\n## Search priorities\n# Business logic lives in backend/lens/. backend/agentcore/ is a git submodule — don't look for business code there.\n# Frontend pages: frontend/src/pages/lens/. Admin components: frontend/src/admin/.\n# Agent behavior: lensnode/lensnode/agent_runtime.py.\n\n## Avoid misreading\n# references/ contains reference documents, not source code — don't analyze it as code.\n# For current field structure, read the latest migration only, not historical ones.",
       "back": "Back",
       "next": "Next",

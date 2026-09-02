@@ -79,7 +79,9 @@ test('Smart Collaboration starts with an empty searchable routing scope', async 
   assert.match(picker, /participatingAssistantsTitle/)
   assert.match(picker, /routing-scope-entry/)
   assert.doesNotMatch(picker, /class="routing-scope-trigger"/)
-  assert.match(picker, /participatingAssistantsRecommended/)
+  assert.doesNotMatch(picker, /participatingAssistantsRecommended/)
+  assert.doesNotMatch(picker, /hyperbdr-ai-assistant/i)
+  assert.doesNotMatch(picker, /company-knowledge/i)
   assert.match(picker, /routing-scope-avatar-stack/)
   assert.doesNotMatch(picker, /routing-scope-option-type/)
   assert.match(picker, /routing-scope-group-title/)
@@ -121,10 +123,42 @@ test('Smart Collaboration exposes the picker above the composer', async () => {
   assert.match(picker, /:class="\{ 'is-mobile': mobile \}"/)
   assert.match(picker, /class="routing-scope-panel"/)
   assert.match(picker, /role="dialog"/)
-  assert.match(picker, /class="routing-scope-recommend"/)
+  assert.doesNotMatch(picker, /class="routing-scope-recommend"/)
   assert.match(picker, /candidates: \{ type: Array/)
   assert.match(picker, /selectedUuids: \{ type: Array/)
   assert.match(chat, /v-model:draft="routingScopeDraft"/)
   assert.match(chat, /:candidates="routingCandidates"/)
   assert.match(chat, /:selected-uuids="routingScopeAssistantUuids"/)
+})
+
+test('fixed Smart Assistants allow member inspection without editing', async () => {
+  const [chat, picker] = await Promise.all([
+    chatSource(),
+    routingScopePickerSource()
+  ])
+
+  assert.doesNotMatch(
+    picker,
+    /if \(!props\.readonly\) emit\('open'\)/
+  )
+  assert.match(picker, /:disabled="readonly \|\| !candidateCount"/)
+  assert.match(picker, /:disabled="readonly"/)
+  assert.match(picker, /v-if="!readonly"/)
+  assert.match(picker, /readonly \? t\('common\.close'\)/)
+  assert.match(
+    chat,
+    /if \(!isFixedSmartAssistant\.value\) return candidates/
+  )
+  assert.match(
+    chat,
+    /selectedAssistant\.value\?\.collaboration_members/
+  )
+  assert.match(
+    chat,
+    /return candidates\.filter\(\(assistant\) => configured\.has\(assistant\.uuid\)\)/
+  )
+  assert.doesNotMatch(
+    chat,
+    /function openRoutingScope\(\) \{\s*if \(isFixedSmartAssistant\.value\) return/
+  )
 })

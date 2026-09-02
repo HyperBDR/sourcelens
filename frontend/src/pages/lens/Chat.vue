@@ -1509,6 +1509,7 @@
                 :mobile="isMobile"
                 :open="routingScopeOpen"
                 :selected-uuids="routingScopeAssistantUuids"
+                :readonly="isFixedSmartAssistant"
                 @cancel="cancelRoutingScope"
                 @open="openRoutingScope"
                 @save="saveRoutingScope"
@@ -2080,8 +2081,15 @@ const routingScopeSnapshot = ref([])
 const routingScopeQuery = ref('')
 const mentionedAssistantUuids = ref([])
 const mentionActiveIndex = ref(0)
+const isSmartCollaborationRoute = computed(() => route.name === 'LensSmartChat')
+const isFixedSmartAssistant = computed(
+  () =>
+    !isSmartCollaborationRoute.value &&
+    (selectedAssistant.value?.mode || selectedAssistant.value?.routing_mode) ===
+      'smart'
+)
 const isSmartCollaborationConversation = computed(
-  () => route.name === 'LensSmartChat'
+  () => isSmartCollaborationRoute.value || isFixedSmartAssistant.value
 )
 
 const selectedAssistant = computed(
@@ -2101,9 +2109,22 @@ const selectedSessionArchived = computed(
   () => selectedSession.value?.status === 'archived'
 )
 
-const routingCandidates = computed(() =>
-  assistants.value.filter((assistant) => assistant.status === 'active')
-)
+const routingCandidates = computed(() => {
+  const candidates = assistants.value.filter(
+    (assistant) =>
+      assistant.status === 'active' &&
+      (assistant.mode || assistant.routing_mode || 'direct') === 'direct'
+  )
+
+  if (!isFixedSmartAssistant.value) return candidates
+
+  const configured = new Set(
+    (selectedAssistant.value?.collaboration_members || []).map(
+      (member) => member.uuid
+    )
+  )
+  return candidates.filter((assistant) => configured.has(assistant.uuid))
+})
 
 const filteredRoutingCandidates = computed(() =>
   filterRoutingCandidates(routingCandidates.value, routingScopeQuery.value)
@@ -2120,7 +2141,11 @@ const routingAllSelected = computed(() => {
 const routingScopeAssistantUuids = computed(() =>
   selectedSession.value
     ? selectedSession.value.allowed_assistant_uuids || []
-    : routingScopeDraft.value
+    : isFixedSmartAssistant.value
+      ? (selectedAssistant.value?.collaboration_members || []).map(
+          (member) => member.uuid
+        )
+      : routingScopeDraft.value
 )
 
 const mentionToken = computed(() => {
@@ -2239,14 +2264,14 @@ const emptyVariant = computed(() =>
 )
 
 const assistantName = computed(() =>
-  isSmartCollaborationConversation.value
+  isSmartCollaborationRoute.value
     ? t('lens.chat.smartCollaboration')
     : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const assistantDescription = computed(
   () =>
-    (isSmartCollaborationConversation.value
+    (isSmartCollaborationRoute.value
       ? t('lens.chat.smartCollaborationDescription')
       : '') ||
     selectedAssistant.value?.description?.trim() ||
@@ -2468,6 +2493,10 @@ async function handleComposerKeydown(event) {
 }
 
 async function saveRoutingScope() {
+  if (isFixedSmartAssistant.value) {
+    routingScopeOpen.value = false
+    return
+  }
   if (!selectedSession.value) {
     routingScopeOpen.value = false
     return
@@ -3259,7 +3288,7 @@ async function bootstrap() {
     // renders immediately (no flash) and skips its own redundant fetch.
     lensStore.assistants = assistants.value
 
-    if (isSmartCollaborationConversation.value) {
+    if (isSmartCollaborationRoute.value) {
       selectedAssistantUuid.value = ''
       routingScopeDraft.value = []
       await loadMyShareState()
@@ -3286,6 +3315,10 @@ async function bootstrap() {
     }
 
     selectedAssistantUuid.value = current.uuid
+    routingScopeDraft.value =
+      (current.mode || current.routing_mode) === 'smart'
+        ? (current.collaboration_members || []).map((member) => member.uuid)
+        : []
     await loadMyShareState()
     await loadSessions()
     booted.value = true
@@ -3333,10 +3366,17 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
     return
   }
 
-  sessions.value = await listSessions(selectedAssistant.value?.slug || '', {
-    routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
-    archived: showArchivedSessions.value
-  })
+  const loadGeneration = ++sessionLoadGeneration
+  const loadedSessions = await listSessions(
+    selectedAssistant.value?.slug || '',
+    {
+      routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
+      archived: showArchivedSessions.value
+    }
+  )
+  if (loadGeneration !== sessionLoadGeneration) return
+
+  sessions.value = loadedSessions
 
   const requestedUuid =
     selectUuid || (useRouteSession ? route.query.session || '' : '')
@@ -3370,7 +3410,7 @@ async function createNewSession(notify = true, allowedAssistantUuids = []) {
   let session
   try {
     session = await createSession(
-      isSmartCollaborationConversation.value
+      isSmartCollaborationRoute.value
         ? {
             routing_mode: 'smart',
             title: '',
@@ -3444,10 +3484,10 @@ function clearSessionSelection() {
 
 async function switchSessionView(archived) {
   if (showArchivedSessions.value === archived) return
+  sessionLoadGeneration += 1
   showArchivedSessions.value = archived
   cancelRename()
   closeDeleteSession()
-  await router.replace({ path: route.path })
   await loadSessions('', {
     useRouteSession: false
   })
@@ -4650,7 +4690,7 @@ watch(
   (sessionUuid) => {
     if (
       !['LensAssistantChat', 'LensSmartChat'].includes(route.name) ||
-      (!isSmartCollaborationConversation.value &&
+      (!isSmartCollaborationRoute.value &&
         route.params.slug !== selectedAssistant.value?.slug) ||
       !sessionUuid ||
       sessionUuid === selectedSessionUuid.value
@@ -4665,7 +4705,7 @@ watch(
 )
 
 watch(
-  () => [route.name, route.params.slug],
+  [() => route.name, () => route.params.slug],
   () => {
     // On a hard load with a stored token, defer the first bootstrap to
     // onMounted so it runs after the user is hydrated — avoids a flash of

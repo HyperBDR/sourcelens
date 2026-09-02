@@ -44,6 +44,18 @@
           </div>
           <div>
             <dt class="detail-label">
+              {{ t('lensAdmin.fields.routingMode') }}
+            </dt>
+            <dd class="detail-value">
+              {{
+                t(
+                  `lensAdmin.routingModes.${(assistant.mode || assistant.routing_mode) === 'smart' ? 'smart' : 'direct'}`
+                )
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt class="detail-label">
               {{ t('lensAdmin.fields.visibility') }}
             </dt>
             <dd class="detail-value">
@@ -63,6 +75,31 @@
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section
+        v-if="(assistant.mode || assistant.routing_mode) === 'smart'"
+        data-testid="assistant-detail-collaboration-members"
+        class="space-y-3"
+      >
+        <h3 class="detail-heading">
+          {{ t('lensAdmin.assistantDetail.collaborationMembers') }}
+        </h3>
+        <ul v-if="assistant.collaboration_members?.length" class="detail-list">
+          <li
+            v-for="member in assistant.collaboration_members"
+            :key="member.uuid"
+            class="flex items-center justify-between gap-3 px-4 py-3"
+          >
+            <span class="min-w-0 truncate text-sm text-ink-700">
+              {{ member.name }}
+            </span>
+            <span class="text-xs text-ink-400">{{ member.capability }}</span>
+          </li>
+        </ul>
+        <p v-else class="detail-empty">
+          {{ t('lensAdmin.assistantDetail.noCollaborationMembers') }}
+        </p>
       </section>
 
       <section data-testid="assistant-detail-directories" class="space-y-3">

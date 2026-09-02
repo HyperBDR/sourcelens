@@ -1,7 +1,10 @@
 import api from '@/api'
 import { citationSourceUrl } from '@/pages/lens/codeCitations'
 
+import { createInFlightRequestCache } from './inFlight'
 import { collectPaginatedResults } from './pagination'
+
+const assistantListRequests = createInFlightRequestCache()
 
 function unwrapResponse(response) {
   return response?.data?.data ?? response?.data ?? null
@@ -18,12 +21,15 @@ function unwrapList(payload) {
 }
 
 export async function listAssistants(params = {}) {
-  return collectPaginatedResults(async (page) => {
-    const response = await api.get('/lens/assistants/', {
-      params: { page_size: 1000, ...params, page }
+  const key = JSON.stringify(params)
+  return assistantListRequests.run(key, () =>
+    collectPaginatedResults(async (page) => {
+      const response = await api.get('/lens/assistants/', {
+        params: { page_size: 100, ...params, page }
+      })
+      return unwrapResponse(response)
     })
-    return unwrapResponse(response)
-  })
+  )
 }
 
 export async function getPublicAssistant(slug) {

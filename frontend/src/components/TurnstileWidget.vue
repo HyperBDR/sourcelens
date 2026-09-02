@@ -4,13 +4,16 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { getTurnstileConfig } from '@/config/runtime'
 
 const SCRIPT_SRC =
   'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
 const emit = defineEmits(['verified', 'expired', 'error'])
 
-const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || ''
+const { enabled, siteKey } = getTurnstileConfig(
+  import.meta.env.VITE_TURNSTILE_SITE_KEY
+)
 const container = ref(null)
 let widgetId = null
 
@@ -37,8 +40,8 @@ function loadScript() {
 }
 
 onMounted(async () => {
-  // No site key configured: bypass (development) so the flow is usable.
-  if (!siteKey) {
+  // Bypass when Turnstile is disabled or no site key is configured.
+  if (!enabled || !siteKey) {
     emit('verified', '')
     return
   }
@@ -60,9 +63,9 @@ onMounted(async () => {
  * Reset the widget so the user can solve the challenge again.
  */
 function reset() {
-  if (siteKey && widgetId !== null && window.turnstile) {
+  if (enabled && siteKey && widgetId !== null && window.turnstile) {
     window.turnstile.reset(widgetId)
-  } else if (!siteKey) {
+  } else if (!enabled || !siteKey) {
     // Bypass mode: verification always passes, so re-emit a fresh token
     // to restore the consumer's state after a failed submit.
     emit('verified', '')
@@ -70,12 +73,12 @@ function reset() {
 }
 
 onBeforeUnmount(() => {
-  if (siteKey && widgetId !== null && window.turnstile) {
+  if (enabled && siteKey && widgetId !== null && window.turnstile) {
     window.turnstile.remove(widgetId)
   }
 })
 
-defineExpose({ reset, hasSiteKey: !!siteKey })
+defineExpose({ reset, hasSiteKey: enabled && !!siteKey })
 </script>
 
 <style scoped>

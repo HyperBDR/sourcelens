@@ -1134,6 +1134,12 @@
       "codeAnalysis": "代码分析",
       "generalChat": "通用对话"
     },
+    "routingModes": {
+      "direct": "普通模式",
+      "smart": "智能协作",
+      "directHint": "由单个助手按所选能力直接执行。",
+      "smartHint": "由多个已配置成员协作完成任务。"
+    },
     "columns": {
       "assistant": "Assistant",
       "lensnode": "节点",
@@ -1397,7 +1403,8 @@
       "maxDepth": "最大递归深度",
       "feishuAppId": "飞书 App ID",
       "feishuAppSecret": "飞书 App Secret",
-      "visibility": "可见性"
+      "visibility": "可见性",
+      "routingMode": "助手模式"
     },
     "placeholders": {
       "assistantDescription": "说明该助手可以帮助用户完成什么。",
@@ -1491,7 +1498,9 @@
       "archiveTitle": "归档助手",
       "archiveMessage": "归档「{name}」？恢复前链接将无法使用。",
       "skillCount": "{count} 个 Skill",
-      "mcpCount": "{count} 个 MCP Server"
+      "mcpCount": "{count} 个 MCP Server",
+      "collaborationMembers": "协作成员",
+      "noCollaborationMembers": "尚未配置协作成员"
     },
     "datasourceWizard": {
       "createTitle": "新建数据源",
@@ -1717,20 +1726,28 @@
       "step1Title": "基础与模型",
       "step1Desc": "设置名称、Slug 与 Agent 模型（必填），以及可选的多模态模型",
       "agentModelHint": "必填 — LensNode 使用该模型运行深度分析 Agent。",
+      "smartAgentModelHint": "必填 — 智能协作协调器使用该模型进行任务分派与汇总。",
       "multimodalModelHint": "可选 — 用于视觉或图像相关任务。",
       "noVisionModel": "当前没有配置支持图片输入的模型。",
       "configureVisionModel": "配置视觉模型",
       "maxConcurrencyHint": "该 Assistant 同时运行的最大任务数，超出后自动排队。",
       "step2Title": "执行配置",
       "step2Desc": "先选择类型，再完成对应的执行节点、目录与检索配置",
+      "step2SmartDesc": "选择该智能助手可协作的直接助手。",
+      "collaborationMembers": "协作成员",
+      "collaborationMembersHint": "选择处于启用状态的直接助手，新 Session 会复用这组成员。",
+      "noCollaborationMembers": "请先创建一个启用的直接助手。",
+      "smartResourcesHint": "智能助手使用所选成员。Skill、MCP、LensNode 和执行工作区由成员助手管理；下方可补充智能协作指引。",
       "generalChatExecutionHint": "通用对话使用绑定的 Skill、包内脚本和包内二进制运行，不启用工作区目录检索。",
       "noAssistantDescription": "未填写助手说明",
       "step3Title": "技能与工作区",
       "step3Desc": "绑定 Skills 与 MCP，并补充工作区背景，均为可选",
+      "step3SmartDesc": "补充智能协作的工作区指引",
       "step4Title": "授权",
       "step4Desc": "设置可见性，并指定可访问该助手的组或用户",
       "contextLabel": "工作区指引（可选）",
       "contextHint": "用于告诉 Assistant 工作区目录结构、业务背景、团队约定、检索优先级和需要避开的目录。保存后会作为该 Assistant 的专属上下文注入。",
+      "smartContextHint": "用于补充智能协作的项目背景、分工原则和检索优先级。",
       "contextPlaceholder": "# 模型不读代码就不知道的信息，写在这里能让它更快、更准。\n\n## 项目说明\n# SourceLens 是一个私有部署的 AI 代码问答平台。\n# backend/ 是 Django REST API 主服务；lensnode/ 是独立部署的执行节点，\n# 负责运行 Deep Agent 并通过 WebSocket 把结果推回主服务。\n# frontend/ 是 Vue 3 管理台，只和 backend/ 的 REST API 通信。\n\n## 检索优先级\n# 业务逻辑找 backend/lens/；backend/agentcore/ 是 git 子模块，不要在那里找业务代码。\n# 前端页面在 frontend/src/pages/lens/，管理台组件在 frontend/src/admin/。\n# lensnode 的 agent 行为看 lensnode/lensnode/agent_runtime.py。\n\n## 避免误判\n# references/ 是参考文档，不是源码，不要当作代码分析对象。\n# backend/lens/migrations/ 只看最新迁移文件，不要从历史迁移推断当前字段结构。",
       "back": "上一步",
       "next": "下一步",

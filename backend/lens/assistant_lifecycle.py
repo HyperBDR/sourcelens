@@ -72,6 +72,21 @@ def create_assistant_session(assistant_uuid, user, title=""):
     assistant = Assistant.objects.get(uuid=assistant_uuid)
     assistant = lock_assistant_for_new_work(assistant, user)
     normalized_title = " ".join(str(title or "").split())
+    if assistant.mode_handler.supports_members and not assistant.is_system:
+        members = fixed_collaboration_assistants(assistant, user)
+        return Session.objects.create(
+            assistant=assistant,
+            user=user,
+            title=normalized_title,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(item.uuid) for item in members],
+            title_manually_edited=bool(normalized_title),
+            title_generation_status=(
+                Session.TitleGenerationStatus.SKIPPED
+                if normalized_title
+                else Session.TitleGenerationStatus.PENDING
+            ),
+        )
     if not normalized_title:
         existing = _find_reusable_empty_session(assistant, user)
         if existing is not None:
@@ -89,6 +104,30 @@ def create_assistant_session(assistant_uuid, user, title=""):
     )
 
 
+def fixed_collaboration_assistants(assistant, user):
+    """Return active accessible members for a Smart Assistant."""
+
+    if not assistant.mode_handler.supports_members or assistant.is_system:
+        raise AssistantNotRunnableError
+    members = list(
+        assistant.collaboration_members.filter(
+            status=Assistant.Status.ACTIVE,
+            is_system=False,
+            routing_mode=Assistant.RoutingMode.DIRECT,
+        ).order_by("name", "uuid")
+    )
+    configured_ids = {
+        str(value) for value in assistant.collaboration_members.values_list(
+            "uuid", flat=True
+        )
+    }
+    if not members or {str(item.uuid) for item in members} != configured_ids:
+        raise AssistantNotRunnableError
+    if not all(item.is_accessible_by(user) for item in members):
+        raise AssistantNotRunnableError
+    return members
+
+
 def smart_collaboration_assistants(
     user,
     assistant_uuids=None,
@@ -99,6 +138,7 @@ def smart_collaboration_assistants(
     assistants = Assistant.objects.visible_to(user).filter(
         status=Assistant.Status.ACTIVE,
         is_system=False,
+        routing_mode=Assistant.RoutingMode.DIRECT,
         capability__in=[
             Assistant.Capability.GENERAL_CHAT,
             Assistant.Capability.CODE_ANALYSIS,

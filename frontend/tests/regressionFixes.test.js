@@ -221,6 +221,10 @@ test('assistant exposes one execution strategy without a token budget picker', a
 
   assert.equal(english.lensAdmin.fields.agentRounds, 'Execution strategy')
   assert.equal(chinese.lensAdmin.fields.agentRounds, '执行策略')
+  assert.equal(chinese.lensAdmin.routingModes.direct, '普通模式')
+  assert.equal(chinese.lensAdmin.routingModes.smart, '智能协作')
+  assert.equal(english.lensAdmin.routingModes.direct, 'Standard Mode')
+  assert.equal(english.lensAdmin.routingModes.smart, 'Smart Collaboration')
   assert.doesNotMatch(drawer, /tokenBudgetProfiles/)
   assert.doesNotMatch(drawer, /v-model="form\.token_budget_profile"/)
   assert.doesNotMatch(drawer, /token_budget_profile:/)
@@ -235,7 +239,9 @@ test('assistant node selection is available for every capability', async () => {
   assert.match(drawer, /!!props\.form\.capability/)
   assert.doesNotMatch(drawer, /isOrchestratorTask/)
   assert.match(drawer, /v-if="requiresNodeSelection"/)
+  assert.match(drawer, /v-if="form\.mode === 'direct'"/)
   assert.match(drawer, /v-else-if="isGeneralChatTask"/)
+  assert.doesNotMatch(drawer, /isDirectGeneralChat/)
   const retrievalStart = drawer.indexOf("t('lensAdmin.fields.retrievalPolicy')")
   assert.notEqual(retrievalStart, -1)
   assert.equal(
@@ -281,6 +287,39 @@ test('assistant form does not configure fixed Smart Collaboration delegates', as
   assert.doesNotMatch(drawer, /delegatedAssistantCount/)
   assert.doesNotMatch(drawer, /subagent_assistants/)
   assert.equal(chinese.lensAdmin.wizard.delegatedAssistantsSelected, undefined)
+})
+
+test('Smart assistant setup retains a workspace guide for its coordinator', async () => {
+  const [drawer, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  const thirdStep = drawer.slice(
+    drawer.indexOf('<!-- Wizard Step 3'),
+    drawer.indexOf('<!-- Wizard Step 4')
+  )
+
+  assert.match(thirdStep, /v-model="form\.workspace_guide_overview"/)
+  assert.match(thirdStep, /smartContextHint/)
+  assert.match(thirdStep, /smartResourcesHint/)
+  assert.equal(
+    chinese.lensAdmin.wizard.smartContextHint,
+    '用于补充智能协作的项目背景、分工原则和检索优先级。'
+  )
+})
+
+test('switching an assistant to Smart clears direct-only model settings', async () => {
+  const drawer = await source(
+    'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
+  )
+
+  const modeWatcher = drawer.slice(
+    drawer.lastIndexOf('watch(\n  () => props.form.mode'),
+    drawer.indexOf('const compatibleLensnodes')
+  )
+
+  assert.match(modeWatcher, /props\.form\.multimodal_model_ref = ''/)
 })
 
 test('assistant Skill picker supports search and environment configuration', async () => {

@@ -1110,7 +1110,7 @@ def test_mcp_environment_preserves_legacy_placeholder_literals(tmp_path):
         cleanup_runtime_resources(resources)
 
 
-def test_system_prompt_includes_context_skill_guidance():
+def test_system_prompt_keeps_internal_locators_out_of_context_skill_prompt():
     prompt = _system_prompt(
         {
             "prompt": "Analyze code.",
@@ -1123,7 +1123,25 @@ def test_system_prompt_includes_context_skill_guidance():
 
     assert "Workspace Guidance from bound context skills" in prompt
     assert "Inspect service-api first" in prompt
-    assert "/workspace/product" in prompt
+    assert "/workspace/product" not in prompt
+    assert "Platform safety and disclosure boundary" in prompt
+    assert prompt.index("Platform safety") < prompt.index(
+        "Workspace Guidance from bound context skills"
+    )
+
+
+@pytest.mark.parametrize("task", ["knowledge_qa", "general_chat"])
+def test_user_facing_answers_redact_runtime_details_for_every_mode(task):
+    answer = _normalize_code_analysis_paths(
+        "I used read_workspace_file on /subject-documents/"
+        "internal.pdf.sourcelens/content.md and /mcp/config.json.",
+        {"task": task, "target_dirs": []},
+    )
+
+    assert "/subject-documents" not in answer
+    assert ".sourcelens" not in answer
+    assert "/mcp/config.json" not in answer
+    assert "read_workspace_file" not in answer
 
 
 def test_system_prompt_includes_assistant_workspace_guide():
@@ -1243,6 +1261,33 @@ def test_workspace_paths_are_relative_for_non_code_analysis_tasks():
         "The workspace is . and the file is "
         "lensnode/lensnode/runtime.py."
     )
+
+
+def test_knowledge_answers_hide_runtime_document_paths_and_tool_names():
+    answer = _normalize_code_analysis_paths(
+        "I ran ls /subject-documents and read_file on "
+        "/subject-documents/65177f78-bc9f-4c85-bd3b-0e93d637503e-"
+        "products.pdf.sourcelens/content.md.",
+        {"task": "knowledge_qa", "target_dirs": []},
+    )
+
+    assert "products.pdf" in answer
+    assert "/subject-documents" not in answer
+    assert ".sourcelens" not in answer
+    assert "read_file" not in answer
+    assert " ls " not in answer
+
+
+def test_general_chat_answers_hide_runtime_document_paths_and_tool_names():
+    answer = _normalize_code_analysis_paths(
+        "I ran read_file on /subject-documents/internal.pdf.sourcelens/"
+        "content.md before answering.",
+        {"task": "general_chat", "target_dirs": []},
+    )
+
+    assert "/subject-documents" not in answer
+    assert ".sourcelens" not in answer
+    assert "read_file" not in answer
 
 
 def test_code_analysis_has_bounded_default_agent_turns():

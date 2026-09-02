@@ -223,7 +223,6 @@
       "participatingAssistants": "参与助手 · {count}",
       "participatingAssistantsTitle": "选择协作助手",
       "participatingAssistantsHint": "仅在当前对话后续消息中从已勾选助手里自动选择。",
-      "participatingAssistantsRecommended": "推荐组合",
       "participatingAssistantsCount": "已选 {count} 个 · 建议不超过 {max} 个以保证路由准确",
       "participatingAssistantsNone": "请至少选择一个助手后再开始协作。",
       "participatingAssistantsRequired": "请至少选择一个可参与助手。",

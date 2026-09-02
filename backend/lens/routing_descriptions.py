@@ -115,6 +115,19 @@ def build_routing_description(assistant, answer_language="en-US"):
 
     language = _language_key(answer_language)
     text = _ROUTING_TEXT[language]
+    if getattr(assistant, "is_smart", False):
+        smart_text = {
+            "en": "Smart collaboration team",
+            "es": "equipo de colaboración inteligente",
+            "zh": "智能协作团队",
+        }[language]
+        parts = [_field_sentence(text["capability"], smart_text, language)]
+        description = _compact(assistant.description)
+        if description:
+            parts.append(
+                _field_sentence(text["overview"], description, language)
+            )
+        return "".join(parts)[:1000]
     capability = _CAPABILITY_DESCRIPTIONS.get(
         assistant.capability,
         {},

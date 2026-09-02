@@ -697,6 +697,23 @@ class LensDeepAgentRuntime:
             if budget_gates_enabled
             else None
         )
+
+        raw_emit_output = state.emit_output
+
+        def emit_user_output(content, reset=False):
+            """Apply the user-facing disclosure backstop to live output."""
+
+            if raw_emit_output is None:
+                return
+            if reset or not content:
+                raw_emit_output(content, reset=reset)
+                return
+            raw_emit_output(
+                _sanitize_user_facing_answer(content),
+                reset=reset,
+            )
+
+        state.emit_output = emit_user_output if raw_emit_output else None
         state.model = LensGatewayChatModel(
             model_ref=str(state.model_ref),
             ai_gateway_url=self.config.ai_gateway_url,
@@ -950,6 +967,8 @@ class LensDeepAgentRuntime:
                 "start",
                 1,
             )
+            original_emit_output = getattr(state.model, "emit_output", None)
+            state.model.emit_output = None
             try:
                 answer = _answer_general_chat_directly(
                     state.model,
@@ -968,7 +987,7 @@ class LensDeepAgentRuntime:
                         else None
                     ),
                     emit_event=state.emit_agent_event,
-                    emit_output=state.emit_output,
+                    emit_output=None,
                 )
             except Exception:
                 state.runtime_mode.emit_model_round(
@@ -977,6 +996,8 @@ class LensDeepAgentRuntime:
                     1,
                 )
                 raise
+            finally:
+                state.model.emit_output = original_emit_output
             state.runtime_mode.emit_model_round(
                 state.emit_agent_event,
                 "done",
@@ -990,6 +1011,9 @@ class LensDeepAgentRuntime:
                 "phase.changed",
                 {"phase": "completed"},
             )
+            answer = _normalize_code_analysis_paths(answer, state.command)
+            if state.emit_output is not None:
+                state.emit_output(answer)
             return {
                 "answer": answer,
                 "samples": [],
@@ -1383,36 +1407,77 @@ def _scenario_for_task(task):
 def _normalize_code_analysis_paths(answer, command):
     """Present code paths relative to the selected resource directories."""
 
-    if command.get("task") == "general_chat":
-        return answer
-
     normalized = str(answer or "")
-    roots = sorted(
-        {
-            Path(item.get("path", "")).resolve().as_posix().rstrip("/")
-            for item in command.get("target_dirs") or []
-            if item.get("path")
-        },
-        key=len,
-        reverse=True,
-    )
-    workspace_path = command.get("workspace_path")
-    if workspace_path:
-        roots.append(Path(workspace_path).resolve().as_posix().rstrip("/"))
-    roots = sorted(set(roots or ["/workspace"]), key=len, reverse=True)
-    for root in roots:
-        normalized = re.sub(
-            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}/",
+    if command.get("task") != "general_chat":
+        roots = sorted(
+            {
+                Path(item.get("path", "")).resolve().as_posix().rstrip("/")
+                for item in command.get("target_dirs") or []
+                if item.get("path")
+            },
+            key=len,
+            reverse=True,
+        )
+        workspace_path = command.get("workspace_path")
+        if workspace_path:
+            roots.append(
+                Path(workspace_path).resolve().as_posix().rstrip("/")
+            )
+        roots = sorted(set(roots or ["/workspace"]), key=len, reverse=True)
+        for root in roots:
+            normalized = re.sub(
+                rf"(?<![A-Za-z0-9_.-]){re.escape(root)}/",
+                "",
+                normalized,
+            )
+            normalized = re.sub(
+                rf"(?<![A-Za-z0-9_.-]){re.escape(root)}"
+                r"(?=$|[\s\"'`.,:;!?])",
+                ".",
+                normalized,
+            )
+    return _sanitize_user_facing_answer(normalized)
+
+
+def _sanitize_user_facing_answer(answer):
+    """Remove runtime implementation details from every user-facing answer."""
+
+    def replace_subject_path(match):
+        filename = match.group("filename").removesuffix(".sourcelens")
+        return re.sub(
+            r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}-",
             "",
-            normalized,
+            filename,
+            flags=re.IGNORECASE,
         )
-        normalized = re.sub(
-            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}"
-            r"(?=$|[\s\"'`.,:;!?])",
-            ".",
-            normalized,
-        )
-    return normalized
+
+    sanitized = re.sub(
+        r"/subject-documents/(?P<filename>[^/\s`]+?)"
+        r"\.sourcelens/content\.md",
+        replace_subject_path,
+        answer,
+    )
+    sanitized = re.sub(
+        r"/subject-documents/(?P<filename>[^/\s`]+)",
+        replace_subject_path,
+        sanitized,
+    )
+    sanitized = sanitized.replace(
+        "/subject-documents",
+        "the uploaded documents",
+    )
+    sanitized = re.sub(
+        r"/(?:mcp|skills|large_tool_results|conversation-artifacts)"
+        r"(?:/[^\s`'\")\]}>,;:]*)?",
+        "internal runtime material",
+        sanitized,
+    )
+    return re.sub(
+        r"\b(?:ls|read_file|write_file|search_workspace|"
+        r"find_files|read_workspace_file)\b",
+        "document tools",
+        sanitized,
+    )
 
 
 def _planned_reasoning_pulse(

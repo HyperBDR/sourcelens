@@ -96,7 +96,10 @@ def _session_assistant_is_runnable(session, user):
     if assistant.status != Assistant.Status.ACTIVE:
         return False
     if session.routing_mode == Session.RoutingMode.SMART:
-        return assistant.is_system
+        return assistant.is_system or (
+            assistant.mode_handler.supports_members
+            and assistant.is_accessible_by(user)
+        )
     return assistant.is_accessible_by(user)
 
 

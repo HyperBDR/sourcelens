@@ -223,7 +223,6 @@
       "participatingAssistants": "Asistentes participantes · {count}",
       "participatingAssistantsTitle": "Elegir asistentes colaboradores",
       "participatingAssistantsHint": "Solo se consideran los asistentes seleccionados para futuros mensajes de esta conversación.",
-      "participatingAssistantsRecommended": "Combinación recomendada",
       "participatingAssistantsCount": "{count} seleccionados · Recomendamos no superar {max} para un enrutamiento preciso.",
       "participatingAssistantsNone": "Selecciona al menos un asistente para activar la colaboración.",
       "participatingAssistantsRequired": "Selecciona al menos un asistente participante.",

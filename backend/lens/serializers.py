@@ -14,6 +14,7 @@ from .assistant_lifecycle import (
     AssistantNotRunnableError,
     create_assistant_session,
     create_smart_collaboration_session,
+    fixed_collaboration_assistants,
     smart_collaboration_assistants,
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
@@ -36,6 +37,7 @@ from .environment_variables import (
 from .model_checks import check_assistant_model_refs
 from .models import (
     Assistant,
+    assistant_mode_for,
     AssistantAccess,
     AssistantMCP,
     AssistantSkill,
@@ -538,11 +540,131 @@ class AccessGrantsField(serializers.Field):
         return validated
 
 
+class AssistantListSerializer(serializers.ModelSerializer):
+    """Compact assistant representation for collection responses."""
+
+    lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    lensnode_name = serializers.CharField(source="lensnode.name", read_only=True)
+    mode = serializers.CharField(read_only=True)
+    collaboration_members = serializers.SerializerMethodField()
+    skill_summary = serializers.SerializerMethodField()
+    mcp_summary = serializers.SerializerMethodField()
+    supports_document_attachments = serializers.SerializerMethodField()
+    vision_model_capability = serializers.SerializerMethodField()
+    can_process_images = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Assistant
+        fields = [
+            "uuid",
+            "name",
+            "capability",
+            "slug",
+            "lensnode",
+            "lensnode_name",
+            "mode",
+            "routing_mode",
+            "collaboration_members",
+            "status",
+            "visibility",
+            "skill_summary",
+            "mcp_summary",
+            "supports_document_attachments",
+            "vision_model_capability",
+            "can_process_images",
+        ]
+
+    def get_collaboration_members(self, assistant):
+        """Return prefetched Smart Assistant members for list views."""
+
+        if not assistant.mode_handler.supports_members:
+            return []
+        return [
+            {
+                "uuid": str(member.uuid),
+                "name": member.name,
+                "capability": member.capability,
+                "status": member.status,
+            }
+            for member in sorted(
+                assistant.collaboration_members.all(),
+                key=lambda item: (item.name, str(item.uuid)),
+            )
+        ]
+
+    def get_skill_summary(self, assistant):
+        """Summarize prefetched Skill bindings without per-row queries."""
+
+        bindings = list(assistant.skill_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_mcp_summary(self, assistant):
+        """Summarize prefetched MCP bindings without per-row queries."""
+
+        bindings = list(assistant.mcp_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_supports_document_attachments(self, assistant):
+        """Return whether an Assistant can execute with Run documents."""
+
+        if assistant.lensnode_id:
+            return assistant_supports_document_attachments(assistant)
+        cache = getattr(self, "_document_capability_cache", None)
+        if cache is None:
+            cache = {}
+            self._document_capability_cache = cache
+        if assistant.capability not in cache:
+            cache[assistant.capability] = assistant_supports_document_attachments(
+                assistant
+            )
+        return cache[assistant.capability]
+
+    def _vision_capability(self, assistant):
+        """Cache model capability resolution for the current response."""
+
+        cache = getattr(self, "_vision_capability_cache", None)
+        if cache is None:
+            cache = {}
+            self._vision_capability_cache = cache
+        key = str(assistant.multimodal_model_ref or "")
+        if key not in cache:
+            cache[key] = resolve_model_capability(assistant.multimodal_model_ref)
+        return cache[key]
+
+    def get_vision_model_capability(self, assistant):
+        """Return the configured vision-model capability."""
+
+        return self._vision_capability(assistant)
+
+    def get_can_process_images(self, assistant):
+        """Return whether the Assistant accepts image input."""
+
+        capability = self._vision_capability(assistant)
+        return bool(
+            assistant.status == Assistant.Status.ACTIVE
+            and capability.get("enabled")
+            and capability.get("supports_vision")
+        )
+
+
 class AssistantSerializer(serializers.ModelSerializer):
     """Assistant serializer with LensNode and capability validation."""
 
     lensnode_uuid = serializers.UUIDField(write_only=True, required=False)
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    lensnode_name = serializers.CharField(source="lensnode.name", read_only=True)
+    collaboration_member_uuids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+    )
+    collaboration_members = serializers.SerializerMethodField()
     skill_bindings = SkillBindingsField(required=False)
     mcp_bindings = McpBindingsField(required=False)
     access_grants = AccessGrantsField(required=False)
@@ -552,6 +674,11 @@ class AssistantSerializer(serializers.ModelSerializer):
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
+    mode = serializers.ChoiceField(
+        choices=Assistant.Mode.choices,
+        required=False,
+        write_only=True,
+    )
     kind = serializers.CharField(required=False, write_only=True)
     selected_task = serializers.CharField(required=False, write_only=True)
 
@@ -561,10 +688,15 @@ class AssistantSerializer(serializers.ModelSerializer):
             "uuid",
             "name",
             "description",
+            "mode",
             "capability",
             "slug",
             "lensnode",
+            "lensnode_name",
             "lensnode_uuid",
+            "routing_mode",
+            "collaboration_member_uuids",
+            "collaboration_members",
             "selected_dirs",
             "multimodal_model_ref",
             "agent_model_ref",
@@ -591,6 +723,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "uuid",
             "lensnode",
+            "collaboration_members",
             "skill_summary",
             "mcp_summary",
             "supports_document_attachments",
@@ -607,6 +740,24 @@ class AssistantSerializer(serializers.ModelSerializer):
             "total": assistant.skill_bindings.count(),
             "enabled": enabled,
         }
+
+    def get_collaboration_members(self, assistant):
+        """Return Smart Assistant members for Assistant list views."""
+
+        if not assistant.mode_handler.supports_members:
+            return []
+        return [
+            {
+                "uuid": str(member.uuid),
+                "name": member.name,
+                "capability": member.capability,
+                "status": member.status,
+            }
+            for member in sorted(
+                assistant.collaboration_members.all(),
+                key=lambda item: (item.name, str(item.uuid)),
+            )
+        ]
 
     def get_supports_document_attachments(self, assistant):
         """Return whether the Assistant can execute with Run documents."""
@@ -678,6 +829,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         """Return assistant data including generated Workspace Guide state."""
 
         data = super().to_representation(instance)
+        data["mode"] = instance.mode
         data["workspace_guide"] = get_workspace_guide_payload(instance)
         return data
 
@@ -686,6 +838,7 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         attrs.pop("kind", None)
         attrs.pop("selected_task", None)
+        mode = attrs.pop("mode", None)
         lensnode_uuid = attrs.pop("lensnode_uuid", None)
         if lensnode_uuid is not None:
             attrs["lensnode"] = LensNode.objects.get(uuid=lensnode_uuid)
@@ -701,10 +854,73 @@ class AssistantSerializer(serializers.ModelSerializer):
                 Assistant.Capability.GENERAL_CHAT,
             ),
         )
-        requires_workspace = capability in {
-            Assistant.Capability.CODE_ANALYSIS,
-            Assistant.Capability.KNOWLEDGE_QA,
-        }
+        routing_mode = attrs.get(
+            "routing_mode",
+            getattr(
+                self.instance,
+                "routing_mode",
+                Assistant.RoutingMode.DIRECT,
+            ),
+        )
+        if mode is not None:
+            if "routing_mode" in attrs and attrs["routing_mode"] != mode:
+                raise serializers.ValidationError(
+                    {"mode": "mode and routing_mode must match."}
+                )
+            routing_mode = mode
+            attrs["routing_mode"] = mode
+        mode_behavior = assistant_mode_for(routing_mode)
+        member_uuids = attrs.get("collaboration_member_uuids")
+        if mode_behavior.supports_members:
+            normalized_capability = mode_behavior.normalize_capability(capability)
+            if capability != normalized_capability and mode is None:
+                raise serializers.ValidationError(
+                    {
+                        "capability": (
+                            "Smart mode does not expose a direct capability."
+                        )
+                    }
+                )
+            if self.instance is not None and self.instance.is_system:
+                raise serializers.ValidationError(
+                    {"routing_mode": "System Assistants cannot be Smart teams."}
+                )
+            if member_uuids is None and (
+                self.instance is None
+                or not self.instance.collaboration_members.exists()
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "collaboration_member_uuids": (
+                            "At least one collaboration member is required."
+                        )
+                    }
+                )
+            self._validate_collaboration_members(member_uuids)
+            attrs["capability"] = normalized_capability
+            capability = normalized_capability
+            attrs["lensnode"] = None
+            attrs["selected_dirs"] = []
+            attrs["multimodal_model_ref"] = None
+            attrs["skill_bindings"] = []
+            attrs["mcp_bindings"] = []
+            lensnode = None
+        elif member_uuids is not None:
+            raise serializers.ValidationError(
+                {
+                    "collaboration_member_uuids": (
+                        "Only smart Assistants may have collaboration members."
+                    )
+                }
+            )
+        requires_workspace = (
+            mode_behavior.configures_execution_resources
+            and capability
+            in {
+                Assistant.Capability.CODE_ANALYSIS,
+                Assistant.Capability.KNOWLEDGE_QA,
+            }
+        )
         if requires_workspace and lensnode is None:
             raise serializers.ValidationError(
                 {"lensnode_uuid": "A LensNode is required."}
@@ -720,30 +936,31 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         if not requires_workspace:
             attrs["selected_dirs"] = []
-            skill_bindings = attrs.get("skill_bindings")
-            if skill_bindings is None and self.instance is not None:
-                has_enabled_skill = self.instance.skill_bindings.filter(
-                    enabled=True,
-                    skill__enabled=True,
-                ).exists()
-            else:
-                enabled_skill_uuids = [
-                    binding.get("skill_uuid")
-                    for binding in (skill_bindings or [])
-                    if binding.get("enabled", True)
-                ]
-                has_enabled_skill = Skill.objects.filter(
-                    uuid__in=enabled_skill_uuids,
-                    enabled=True,
-                ).exists()
-            if not has_enabled_skill:
-                raise serializers.ValidationError(
-                    {
-                        "skill_bindings": (
-                            "general_chat requires at least one enabled skill"
-                        )
-                    }
-                )
+            if mode_behavior.requires_skill:
+                skill_bindings = attrs.get("skill_bindings")
+                if skill_bindings is None and self.instance is not None:
+                    has_enabled_skill = self.instance.skill_bindings.filter(
+                        enabled=True,
+                        skill__enabled=True,
+                    ).exists()
+                else:
+                    enabled_skill_uuids = [
+                        binding.get("skill_uuid")
+                        for binding in (skill_bindings or [])
+                        if binding.get("enabled", True)
+                    ]
+                    has_enabled_skill = Skill.objects.filter(
+                        uuid__in=enabled_skill_uuids,
+                        enabled=True,
+                    ).exists()
+                if not has_enabled_skill:
+                    raise serializers.ValidationError(
+                        {
+                            "skill_bindings": (
+                                "general_chat requires at least one enabled skill"
+                            )
+                        }
+                    )
         elif lensnode is not None:
             validate_selected_dirs(selected_dirs, lensnode)
         elif selected_dirs:
@@ -773,6 +990,48 @@ class AssistantSerializer(serializers.ModelSerializer):
                     }
                 )
         return attrs
+
+    def _validate_collaboration_members(self, member_uuids):
+        """Validate Smart Assistant members at the API boundary."""
+
+        if member_uuids is None:
+            return
+        if not member_uuids:
+            raise serializers.ValidationError(
+                {
+                    "collaboration_member_uuids": (
+                        "At least one collaboration member is required."
+                    )
+                }
+            )
+        if len(set(member_uuids)) != len(member_uuids):
+            raise serializers.ValidationError(
+                {"collaboration_member_uuids": "Member UUIDs must be unique."}
+            )
+        members = list(Assistant.objects.filter(uuid__in=member_uuids))
+        if len(members) != len(member_uuids):
+            raise serializers.ValidationError(
+                {"collaboration_member_uuids": "Assistant member not found."}
+            )
+        instance_uuid = str(getattr(self.instance, "uuid", ""))
+        invalid = [
+            member
+            for member in members
+            if (
+                member.is_system
+                or member.status != Assistant.Status.ACTIVE
+                or member.routing_mode != Assistant.RoutingMode.DIRECT
+                or str(member.uuid) == instance_uuid
+            )
+        ]
+        if invalid:
+            raise serializers.ValidationError(
+                {
+                    "collaboration_member_uuids": (
+                        "Members must be active direct Assistants."
+                    )
+                }
+            )
 
     def _sync_bindings(self, assistant, validated_data):
         skill_bindings = validated_data.pop("skill_bindings", None)
@@ -920,10 +1179,19 @@ class AssistantSerializer(serializers.ModelSerializer):
                     granted_by=granted_by,
                 )
 
+    def _set_collaboration_members(self, assistant, member_uuids):
+        """Persist collaboration members resolved by their public UUIDs."""
+
+        members = Assistant.objects.filter(uuid__in=member_uuids)
+        assistant.collaboration_members.set(members)
+
     @transaction.atomic
     def create(self, validated_data):
         """Create assistant and optional bindings."""
 
+        collaboration_member_uuids = validated_data.pop(
+            "collaboration_member_uuids", None
+        )
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
         access_grants = validated_data.pop("access_grants", None)
@@ -938,6 +1206,11 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
+        if assistant.mode_handler.supports_members:
+            self._set_collaboration_members(
+                assistant,
+                collaboration_member_uuids or [],
+            )
         check_assistant_model_refs(assistant)
         refresh_routing_description(assistant)
         return assistant
@@ -946,12 +1219,24 @@ class AssistantSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update assistant and optional bindings."""
 
+        was_smart = instance.mode_handler.supports_members
+        collaboration_member_uuids = validated_data.pop(
+            "collaboration_member_uuids", None
+        )
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
         self._sync_bindings(instance, validated_data)
         assistant = super().update(instance, validated_data)
         self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
+        if assistant.mode_handler.supports_members:
+            if collaboration_member_uuids is not None:
+                self._set_collaboration_members(
+                    assistant,
+                    collaboration_member_uuids,
+                )
+        elif collaboration_member_uuids is not None or was_smart:
+            assistant.collaboration_members.clear()
         check_assistant_model_refs(assistant)
         refresh_routing_description(assistant)
         return assistant
@@ -2836,6 +3121,10 @@ class SessionSerializer(serializers.ModelSerializer):
         source="assistant.slug",
         read_only=True,
     )
+    assistant_mode = serializers.CharField(
+        source="assistant.mode",
+        read_only=True,
+    )
     has_shareable_answer = serializers.SerializerMethodField()
     routing_assistants = serializers.SerializerMethodField()
 
@@ -2846,6 +3135,7 @@ class SessionSerializer(serializers.ModelSerializer):
             "assistant",
             "assistant_name",
             "assistant_slug",
+            "assistant_mode",
             "routing_mode",
             "allowed_assistant_uuids",
             "routing_assistants",
@@ -2903,6 +3193,16 @@ class SessionSerializer(serializers.ModelSerializer):
             return value
         if self.instance.routing_mode != Session.RoutingMode.SMART:
             raise serializers.ValidationError("Only smart sessions support this.")
+        if (
+            not self.instance.assistant.is_system
+            and self.instance.assistant.routing_mode
+            == Assistant.RoutingMode.SMART
+            and set(str(item) for item in value)
+            != set(self.instance.allowed_assistant_uuids or [])
+        ):
+            raise serializers.ValidationError(
+                "Smart Assistant session members cannot be changed."
+            )
         try:
             assistants = smart_collaboration_assistants(
                 self.context["request"].user,
@@ -2978,6 +3278,15 @@ class SessionCreateSerializer(serializers.Serializer):
                     {"assistant_uuid": "This field is required."}
                 )
         else:
+            if attrs.get("assistant_uuid"):
+                raise serializers.ValidationError(
+                    {
+                        "assistant_uuid": (
+                            "Use an Assistant URL or the ad-hoc Smart "
+                            "Collaboration entry, not both."
+                        )
+                    }
+                )
             attrs.pop("assistant_uuid", None)
         return attrs
 
