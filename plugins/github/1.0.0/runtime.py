@@ -640,6 +640,7 @@ def build_datasource_command(snapshot, material, trigger):
             "directory": datasource.get("directory") or "",
             "auth_scheme": "token",
             "access_token": material["value"],
+            "allow_submodules": False,
         },
     }
 

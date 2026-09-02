@@ -3829,6 +3829,36 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(record.last_status, "failed")
         self.assertEqual(task.status, "FAILURE")
 
+    def test_complete_datasource_sync_task_marks_cancellation(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            source_sync_task(str(self.datasource.uuid))
+
+        task = TaskExecution.objects.get(module="lens_datasource")
+        complete_datasource_sync_task(
+            task.task_id,
+            {
+                "status": "cancelled",
+                "error": "DATASOURCE_SYNC_CANCELLED",
+                "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+            },
+        )
+
+        self.datasource.refresh_from_db()
+        record = ScheduledTask.objects.get(
+            task_type="source_sync",
+            target_type="datasource",
+            target_id=self.datasource.uuid,
+        )
+        task.refresh_from_db()
+        self.assertEqual(self.datasource.last_error, "")
+        self.assertEqual(record.last_status, "failed")
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(
+            task.metadata["completion_reason"],
+            "DATASOURCE_SYNC_CANCELLED",
+        )
+
     def test_source_sync_task_rejects_concurrent_sync(self):
         # Simulate a real in-flight sync: a running task owns the lock. The
         # orphan-reclaim must keep its hands off an owned lock, so a second

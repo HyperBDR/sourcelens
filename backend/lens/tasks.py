@@ -891,7 +891,12 @@ def complete_datasource_sync_task(task_id, result):
 
     status_value = str(result.get("status") or "failed").lower()
     success = status_value == "success"
-    error = result.get("error") or "LENS_SOURCE_SYNC_FAILED"
+    cancelled = status_value == "cancelled"
+    error = result.get("error") or (
+        "DATASOURCE_SYNC_CANCELLED"
+        if cancelled
+        else "LENS_SOURCE_SYNC_FAILED"
+    )
     changed = result.get("changed")
     if changed is None:
         changed = result.get("synced")
@@ -962,15 +967,17 @@ def complete_datasource_sync_task(task_id, result):
                     "updated_at",
                 ]
             )
-        else:
+        elif not cancelled:
             datasource.last_error = error
             datasource.save(update_fields=["last_error", "updated_at"])
 
     if record is not None:
         record.last_status = (
-            ScheduledTask.Status.SUCCESS if success else ScheduledTask.Status.FAILED
+            ScheduledTask.Status.SUCCESS
+            if success
+            else ScheduledTask.Status.FAILED
         )
-        record.last_error = "" if success else error
+        record.last_error = "" if success or cancelled else error
         record.last_run_at = timezone.now()
         record.last_metrics = result_metrics if success else {}
         record.save(
@@ -1007,6 +1014,28 @@ def complete_datasource_sync_task(task_id, result):
             TaskStatus.SUCCESS,
             result=result_metrics,
             metadata=completion_metadata,
+        )
+
+    if cancelled:
+        return TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.REVOKED,
+            error=error,
+            metadata={
+                **_datasource_step_metadata(
+                    task_id,
+                    "cancelled",
+                    "failed",
+                    error,
+                ),
+                "completion_reason": str(
+                    result.get("completion_reason") or error
+                ),
+                "stop_confirmation_source": str(
+                    result.get("stop_confirmation_source")
+                    or "lensnode_callback"
+                ),
+            },
         )
 
     return TaskTracker.update_task_status(

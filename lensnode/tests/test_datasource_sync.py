@@ -3,6 +3,7 @@ import io
 import json
 import zipfile
 from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
+from threading import Event
 
 import pytest
 
@@ -23,6 +24,8 @@ from lensnode.datasource_sync import (
     _git_remote_branches,
     _git_auth_environment,
     _git_error_detail,
+    _run_git,
+    _validate_git_tree_size,
     _http_json,
     _manifest_item_to_sync_item,
     _poll_feishu_export_task,
@@ -239,6 +242,31 @@ def test_git_error_detail_redacts_url_credentials():
 
     assert "secret" not in _git_error_detail(Failure())
     assert "https://***@github.com/repo" in _git_error_detail(Failure())
+
+
+def test_run_git_honors_cancellation_before_start():
+    """Cancelled datasource work must not start a Git subprocess."""
+
+    cancel_event = Event()
+    cancel_event.set()
+
+    with pytest.raises(DataSourceSyncError, match="LENS_SOURCE_SYNC_CANCELLED"):
+        _run_git(["--version"], cancel_event=cancel_event)
+
+
+def test_validate_git_tree_size_enforces_file_ceiling(tmp_path, monkeypatch):
+    """Git repositories must stay within the LensNode resource budget."""
+
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / "one.txt").write_text("content", encoding="utf-8")
+    monkeypatch.setattr("lensnode.datasource_sync.GIT_MAX_FILES", 0)
+
+    with pytest.raises(
+        DataSourceSyncError,
+        match="LENS_SOURCE_RESOURCE_LIMIT_EXCEEDED",
+    ):
+        _validate_git_tree_size(target)
 
 
 def test_git_remote_branches_parses_heads():

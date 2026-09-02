@@ -105,6 +105,7 @@ class LensNodeClient:
             )
         )
         self.datasource_conversion_cancels = {}
+        self.datasource_sync_cancels = {}
         self.running_commands = {}
         self._checkpoint_resume_ready = None
         # Durable outbound buffer, persistent across reconnects. A run started
@@ -509,10 +510,9 @@ class LensNodeClient:
             )
         elif message_type == "datasource_cancel":
             task_id = str(message.get("task_id") or "")
-            task_key = f"datasource:{task_id}"
-            task = self.running_tasks.get(task_key)
-            if task is not None:
-                task.cancel()
+            cancel_event = self.datasource_sync_cancels.get(task_id)
+            if cancel_event is not None:
+                cancel_event.set()
             LOGGER.info(
                 task_log(
                     (
@@ -787,6 +787,9 @@ class LensNodeClient:
             return
 
         task_key = f"datasource:{task_id}"
+        cancel_event = threading.Event()
+        self.datasource_sync_cancels[task_id] = cancel_event
+        message = {**message, "cancel_event": cancel_event}
         task = asyncio.create_task(
             self._execute_datasource_sync(message, plugin)
         )
@@ -831,6 +834,7 @@ class LensNodeClient:
 
                 await self._acquire_execution(
                     ExecutionClass.EXCLUSIVE,
+                    cancel_event=message.get("cancel_event"),
                     on_queued=report_plugin_queued,
                 )
                 slot_acquired = True
@@ -855,15 +859,16 @@ class LensNodeClient:
                         await self.execution_queue.release(
                             ExecutionClass.EXCLUSIVE
                         )
-                if result.get("status") == "failed":
+                if result.get("status") in {"failed", "cancelled"}:
                     self._enqueue(
                         {
                             "type": "datasource_sync_event",
                             "request_id": request_id,
                             "task_id": task_id,
-                            "step": "failed",
-                            "status": "failed",
-                            "message": result.get("error") or "Plugin failed.",
+                            "step": result.get("status"),
+                            "status": result.get("status"),
+                            "message": result.get("error")
+                            or "Plugin datasource synchronization ended.",
                         }
                     )
                 self._enqueue(
@@ -905,6 +910,7 @@ class LensNodeClient:
 
             await self._acquire_execution(
                 ExecutionClass.EXCLUSIVE,
+                cancel_event=message.get("cancel_event"),
                 on_queued=report_queued,
             )
             slot_acquired = True
@@ -939,7 +945,53 @@ class LensNodeClient:
                     **result,
                 }
             )
-        except Exception as exc:
+        except RunCancelledError:
+            self._enqueue(
+                {
+                    "type": "datasource_sync_event",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "step": "cancelled",
+                    "status": "cancelled",
+                    "message": "Datasource synchronization cancelled.",
+                }
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "cancelled",
+                    "error": "DATASOURCE_SYNC_CANCELLED",
+                    "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                    "stop_confirmation_source": "lensnode_callback",
+                }
+            )
+        except DataSourceSyncError as exc:
+            error_code = str(exc) or "DATASOURCE_SYNC_FAILED"
+            if error_code == "LENS_SOURCE_SYNC_CANCELLED":
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_event",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "step": "cancelled",
+                        "status": "cancelled",
+                        "message": "Datasource synchronization cancelled.",
+                    }
+                )
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_done",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "status": "cancelled",
+                        "error": "DATASOURCE_SYNC_CANCELLED",
+                        "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                        "stop_confirmation_source": "lensnode_callback",
+                    }
+                )
+                return
             self._enqueue(
                 {
                     "type": "datasource_sync_event",
@@ -947,7 +999,7 @@ class LensNodeClient:
                     "task_id": task_id,
                     "step": "failed",
                     "status": "failed",
-                    "message": str(exc),
+                    "message": error_code,
                 }
             )
             self._enqueue(
@@ -956,10 +1008,35 @@ class LensNodeClient:
                     "request_id": request_id,
                     "task_id": task_id,
                     "status": "failed",
-                    "error": str(exc),
+                    "error": error_code,
+                }
+            )
+        except Exception:
+            LOGGER.exception(
+                "Datasource synchronization failed task_id=%s",
+                task_id,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_event",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "step": "failed",
+                    "status": "failed",
+                    "message": "DATASOURCE_SYNC_FAILED",
+                }
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": "DATASOURCE_SYNC_FAILED",
                 }
             )
         finally:
+            self.datasource_sync_cancels.pop(task_id, None)
             self.running_tasks.pop(task_key, None)
 
     def _execute_plugin_datasource_sync(self, message, emit=None):
@@ -985,8 +1062,10 @@ class LensNodeClient:
                 self.config.token,
                 lease["lease_uuid"],
             )
-        except (PluginRuntimeError, httpx.HTTPError) as exc:
+        except PluginRuntimeError as exc:
             return {"status": "failed", "error": str(exc)}
+        except httpx.HTTPError:
+            return {"status": "failed", "error": "PLUGIN_RUNTIME_UNAVAILABLE"}
         try:
             plugin_key = str(snapshot.get("plugin_key") or "")
             plugin_version = str(snapshot.get("plugin_version") or "")
@@ -997,6 +1076,8 @@ class LensNodeClient:
                     material,
                     message.get("trigger") or "plugin",
                 )
+                if message.get("cancel_event") is not None:
+                    command["cancel_event"] = message["cancel_event"]
             except PluginPackageLoadError:
                 return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
             return sync_datasource(
@@ -1006,8 +1087,17 @@ class LensNodeClient:
             )
         except PluginRuntimeError as exc:
             return {"status": "failed", "error": str(exc)}
-        except DataSourceSyncError:
+        except DataSourceSyncError as exc:
+            if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                return {
+                    "status": "cancelled",
+                    "error": "DATASOURCE_SYNC_CANCELLED",
+                    "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                }
             return {"status": "failed", "error": "PLUGIN_SYNC_FAILED"}
+        except Exception:
+            LOGGER.exception("Plugin datasource runtime failed")
+            return {"status": "failed", "error": "PLUGIN_EXECUTION_FAILED"}
         finally:
             if material is not None:
                 material["value"] = ""

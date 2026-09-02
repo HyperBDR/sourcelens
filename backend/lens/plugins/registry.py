@@ -35,6 +35,8 @@ SCHEMA_FORMATS = frozenset(
         "uri",
     }
 )
+PLUGIN_ICON_SUFFIXES = frozenset({".png", ".svg", ".webp"})
+PLUGIN_ICON_MAX_BYTES = 256 * 1024
 
 
 class PluginRegistryError(ValueError):
@@ -54,6 +56,7 @@ class InstalledPlugin:
     protocol_version: int
     display_name: str
     description: str
+    icon: str
     datasource_source_type: str
     datasource: dict
     connection_schema: dict
@@ -82,8 +85,12 @@ def discover_plugins():
     plugins = []
     identities = set()
     roots = getattr(settings, "LENS_PLUGIN_ROOTS", ["/opt/sourcelens/plugins"])
+    visited_roots = set()
     for root_value in roots:
         root = Path(root_value).resolve()
+        if root in visited_roots:
+            continue
+        visited_roots.add(root)
         if not root.exists():
             continue
         if not root.is_dir():
@@ -194,6 +201,7 @@ def _load_plugin(root, key_dir, version_dir):
         1000,
         required=False,
     )
+    icon = _validate_plugin_icon(version_dir, manifest.get("icon"))
     datasource_source_type = manifest.get("datasource_source_type", "git")
     if datasource_source_type not in DATASOURCE_SOURCE_TYPES:
         raise PluginRegistryError("plugin datasource source type is invalid")
@@ -216,6 +224,7 @@ def _load_plugin(root, key_dir, version_dir):
         protocol_version=protocol_version,
         display_name=display_name,
         description=description,
+        icon=icon,
         datasource_source_type=datasource_source_type,
         datasource=datasource,
         connection_schema=connection_schema,
@@ -226,6 +235,26 @@ def _load_plugin(root, key_dir, version_dir):
         tools=tools,
         path=version_dir.resolve(),
     )
+
+
+def _validate_plugin_icon(version_dir, value):
+    """Return one package-relative icon path after boundary validation."""
+
+    if value in (None, ""):
+        return ""
+    if not isinstance(value, str) or len(value) > 240:
+        raise PluginRegistryError("plugin icon is invalid")
+    package_root = version_dir.resolve()
+    icon_path = (version_dir / value).resolve()
+    if package_root not in icon_path.parents:
+        raise PluginRegistryError("plugin icon is outside its package")
+    if icon_path.is_symlink() or not icon_path.is_file():
+        raise PluginRegistryError("plugin icon file is required")
+    if icon_path.suffix.lower() not in PLUGIN_ICON_SUFFIXES:
+        raise PluginRegistryError("plugin icon type is unsupported")
+    if icon_path.stat().st_size > PLUGIN_ICON_MAX_BYTES:
+        raise PluginRegistryError("plugin icon is too large")
+    return icon_path.relative_to(package_root).as_posix()
 
 
 def _validate_datasource_definition(value, source_type, schema):
@@ -274,6 +303,35 @@ def _validate_datasource_definition(value, source_type, schema):
             ),
             "depends_on": resource.get("depends_on") or "",
         })
+    resource_keys = {item["key"] for item in normalized_resources}
+    for item in normalized_resources:
+        dependency = item["depends_on"]
+        if dependency and dependency not in resource_keys:
+            raise PluginRegistryError(
+                "plugin datasource resource dependency is invalid"
+            )
+    for field in schema.get("properties", {}).values():
+        resource_key = field.get("resource")
+        if resource_key is None:
+            continue
+        if resource_key not in resource_keys:
+            raise PluginRegistryError(
+                "plugin datasource schema resource is not declared"
+            )
+        if field.get("format") != "provider-resource-option":
+            continue
+        dependency_field = schema["properties"].get(field.get("depends_on"))
+        resource = next(
+            item for item in normalized_resources
+            if item["key"] == resource_key
+        )
+        if (
+            not isinstance(dependency_field, dict)
+            or dependency_field.get("resource") != resource.get("depends_on")
+        ):
+            raise PluginRegistryError(
+                "plugin datasource schema dependency is invalid"
+            )
     runtime = value.get("runtime") or {}
     if (
         not isinstance(runtime, dict)

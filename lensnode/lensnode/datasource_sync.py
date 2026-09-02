@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tarfile
 import time
@@ -33,6 +34,8 @@ GIT_SHALLOW_DEPTH = "1"
 DETAIL_ITEMS_LIMIT = 200
 DEFAULT_CONVERSION_BATCH_SIZE = 16
 DEFAULT_CONVERSION_MAX_FILES = 100000
+GIT_MAX_FILES = 100000
+GIT_MAX_BYTES = 1024 * 1024 * 1024
 UPLOAD_MAX_EXTRACTED_BYTES = 250 * 1024 * 1024
 UPLOAD_MAX_EXTRACTED_FILES = 10000
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
@@ -1489,6 +1492,9 @@ def _sync_git(command, workspace_path, emit):
 
     target = normalize_target_path(command.get("target_path"), workspace_path)
     git_options = _git_run_options(config)
+    cancel_event = command.get("cancel_event")
+    if cancel_event is not None:
+        git_options["cancel_event"] = cancel_event
     branch = config.get("branch") or _git_default_branch_from_remote(
         repo_url,
         git_options,
@@ -1538,6 +1544,7 @@ def _sync_git(command, workspace_path, emit):
                 ],
                 cwd=target,
                 detail_prefix="LENS_SOURCE_GIT_REMOTE_UPDATE_FAILED",
+                **git_options,
             )
         _run_git(
             [
@@ -1556,14 +1563,19 @@ def _sync_git(command, workspace_path, emit):
             ["checkout", branch],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_CHECKOUT_FAILED",
+            **git_options,
         )
         _run_git(
             ["reset", "--hard", f"origin/{branch}"],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_RESET_FAILED",
+            **git_options,
         )
 
-    _sync_git_submodules(target)
+    if config.get("allow_submodules", True):
+        _sync_git_submodules(target, git_options=git_options)
+
+    _validate_git_tree_size(target)
 
     items = _git_manifest_items(
         target,
@@ -1665,7 +1677,7 @@ def _sync_git_organization(command, workspace_path, emit):
             "config": {
                 **config,
                 "repo_url": repository.get("repo_url") or "",
-                "branch": repository.get("branch") or config.get("branch") or "main",
+                "branch": repository.get("branch") or config.get("branch") or "",
             },
         }
         repo_command["config"].pop("repositories", None)
@@ -1707,6 +1719,8 @@ def _sync_git_organization(command, workspace_path, emit):
                 _repository_summary(name, repository, "success", result)
             )
         except Exception as exc:
+            if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                raise
             totals["failed"] += 1
             repository_event_status = "failed"
             repository_event_error = str(exc)
@@ -1840,7 +1854,7 @@ def _repository_summary(name, repository, status, result):
     }
 
 
-def _sync_git_submodules(target):
+def _sync_git_submodules(target, git_options=None):
     """Synchronize Git submodules when the repository declares them."""
 
     if not (target / ".gitmodules").exists():
@@ -1849,6 +1863,7 @@ def _sync_git_submodules(target):
         ["submodule", "sync", "--recursive"],
         cwd=target,
         detail_prefix="LENS_SOURCE_GIT_SUBMODULE_SYNC_FAILED",
+        **(git_options or {}),
     )
     _run_git(
         [
@@ -1861,6 +1876,7 @@ def _sync_git_submodules(target):
         ],
         cwd=target,
         detail_prefix="LENS_SOURCE_GIT_SUBMODULE_UPDATE_FAILED",
+        **(git_options or {}),
     )
 
 
@@ -1906,6 +1922,25 @@ def _git_manifest_items(target, repo_url, branch, directory=""):
             )
         )
     return items
+
+
+def _validate_git_tree_size(target):
+    """Reject repositories that exceed the LensNode resource ceiling."""
+
+    files = 0
+    total_bytes = 0
+    for path in target.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        files += 1
+        try:
+            total_bytes += path.stat().st_size
+        except OSError as exc:
+            raise DataSourceSyncError(
+                "LENS_SOURCE_RESOURCE_STAT_FAILED"
+            ) from exc
+        if files > GIT_MAX_FILES or total_bytes > GIT_MAX_BYTES:
+            raise DataSourceSyncError("LENS_SOURCE_RESOURCE_LIMIT_EXCEEDED")
 
 
 def _git_manifest_delta(items, previous_items):
@@ -2755,8 +2790,74 @@ def _run_git(
     timeout=600,
     detail_prefix="LENS_SOURCE_SYNC_FAILED",
     env=None,
+    cancel_event=None,
 ):
     """Run a Git command and raise a datasource error on failure."""
+
+    if cancel_event is None:
+        return _run_git_without_cancellation(
+            args,
+            cwd=cwd,
+            timeout=timeout,
+            detail_prefix=detail_prefix,
+            env=env,
+        )
+    if cancel_event.is_set():
+        raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
+    try:
+        process = subprocess.Popen(
+            ["git", *args],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+            env=env,
+        )
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+    try:
+        started = time.monotonic()
+        while True:
+            if cancel_event.is_set():
+                _terminate_git_process(process)
+                raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
+            try:
+                stdout, stderr = process.communicate(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() - started >= timeout:
+                    _terminate_git_process(process)
+                    raise DataSourceSyncError(
+                        f"{detail_prefix}: git command timed out"
+                    )
+        if process.returncode:
+            error = subprocess.CalledProcessError(
+                process.returncode,
+                ["git", *args],
+                output=stdout,
+                stderr=stderr,
+            )
+            detail = _git_error_detail(error)
+            raise DataSourceSyncError(f"{detail_prefix}: {detail}") from error
+        return subprocess.CompletedProcess(
+            ["git", *args],
+            process.returncode,
+            stdout,
+            stderr,
+        )
+    except DataSourceSyncError:
+        raise
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+
+
+def _run_git_without_cancellation(args, cwd, timeout, detail_prefix, env):
+    """Run Git with the legacy path when cancellation is unused."""
 
     try:
         return subprocess.run(
@@ -2775,6 +2876,27 @@ def _run_git(
         raise DataSourceSyncError(
             f"{detail_prefix}: git command timed out"
         ) from exc
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+
+
+def _terminate_git_process(process):
+    """Terminate a cancellable Git process and its children."""
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        process.terminate()
+    try:
+        process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            process.kill()
+        process.communicate()
 
 
 def _git_error_detail(exc):

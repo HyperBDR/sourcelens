@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from lensnode.datasource_sync import DataSourceSyncError
 from lensnode.main import LensNodeClient
 from lensnode.plugin_runtime import (
     PluginRuntimeError,
@@ -10,6 +11,7 @@ from lensnode.plugin_runtime import (
     create_plugin_tool_snapshot,
     fetch_plugin_snapshot,
     lease_url,
+    retrieve_plugin_material,
     tool_snapshot_url,
 )
 
@@ -131,8 +133,6 @@ def test_retrieve_plugin_material_uses_snapshot_lease_path():
             assert "json" not in kwargs
             return httpx.Response(200, json={"value": "secret"})
 
-    from lensnode.plugin_runtime import retrieve_plugin_material
-
     result = retrieve_plugin_material(
         Client(),
         "http://gateway/api/lens/lensnode/ai-gateway/",
@@ -162,6 +162,71 @@ def test_fetch_plugin_snapshot_returns_non_sensitive_config():
         "snapshot-1",
     )
     assert result["resolved_config"]["target_path"] == "/workspace/repo"
+
+
+def test_plugin_runtime_unwraps_control_plane_response_envelope():
+    class Client:
+        def post(self, url, **kwargs):
+            if url.endswith("/plugin-runtime/leases/"):
+                return httpx.Response(
+                    201,
+                    json={
+                        "code": 0,
+                        "message": "success",
+                        "data": {
+                            "lease_uuid": "lease-1",
+                            "snapshot_uuid": "snapshot-1",
+                        },
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "value": "secret",
+                        "plugin_key": "github",
+                        "endpoint": "https://github.com",
+                    },
+                },
+            )
+
+        def get(self, _url, **_kwargs):
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "message": "success",
+                    "data": {
+                        "resolved_config": {"target_path": "/workspace/repo"}
+                    },
+                },
+            )
+
+    client = Client()
+    lease = acquire_plugin_lease(
+        client,
+        "http://gateway/api/lens/lensnode/ai-gateway/",
+        "node-token",
+        "snapshot-1",
+    )
+    material = retrieve_plugin_material(
+        client,
+        "http://gateway/api/lens/lensnode/ai-gateway/",
+        "node-token",
+        lease["lease_uuid"],
+    )
+    snapshot = fetch_plugin_snapshot(
+        client,
+        "http://gateway/api/lens/lensnode/ai-gateway/",
+        "node-token",
+        "snapshot-1",
+    )
+
+    assert lease["lease_uuid"] == "lease-1"
+    assert material["value"] == "secret"
+    assert snapshot["resolved_config"]["target_path"] == "/workspace/repo"
 
 
 def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
@@ -206,6 +271,9 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     def fake_sync(command, workspace, emit):
         seen["token"] = command["config"].get("access_token")
         seen["directory"] = command["config"].get("directory")
+        seen["allow_submodules"] = command["config"].get(
+            "allow_submodules"
+        )
         return {"status": "success"}
 
     monkeypatch.setattr("lensnode.main.sync_datasource", fake_sync)
@@ -216,6 +284,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     assert result["status"] == "success"
     assert seen["token"] == "secret"
     assert seen["directory"] == "docs"
+    assert seen["allow_submodules"] is False
 
 
 def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
@@ -294,6 +363,56 @@ def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
     )
 
     assert result["error"] == "PLUGIN_CONFIG_INVALID"
+    assert material["value"] == ""
+
+
+def test_plugin_sync_reports_cancellation(monkeypatch):
+    """Plugin datasource cancellation is exposed as a stable terminal state."""
+
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+        workspace_path="/workspace",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {
+            "plugin_key": "github",
+            "plugin_version": "1.0.0",
+            "resolved_config": {
+                "endpoint": "https://github.com",
+                "datasource_config": {"repository": "owner/repo"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {
+        "plugin_key": "github",
+        "endpoint": "https://github.com",
+        "value": "secret",
+    }
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+    monkeypatch.setattr(
+        "lensnode.main.sync_datasource",
+        lambda *args: (_ for _ in ()).throw(
+            DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
+        ),
+    )
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["status"] == "cancelled"
+    assert result["error"] == "DATASOURCE_SYNC_CANCELLED"
     assert material["value"] == ""
 
 
