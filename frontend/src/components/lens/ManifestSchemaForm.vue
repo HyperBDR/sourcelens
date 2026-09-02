@@ -17,7 +17,7 @@
       </label>
 
       <div
-        v-if="isTreeField(field)"
+        v-if="isTreeField(field) && shouldRenderTree(field)"
         class="max-h-64 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
       >
         <div
@@ -53,15 +53,9 @@
             </label>
           </div>
         </div>
-        <p
-          v-if="treeGroups(field).length === 0"
-          class="px-2 py-3 text-xs text-ink-500"
-        >
-          {{ t('lensAdmin.connections.resourceTreeEmpty') }}
-        </p>
       </div>
       <textarea
-        v-else-if="isArrayField(field)"
+        v-else-if="isArrayField(field) && !isTreeField(field)"
         :id="fieldId(field)"
         :value="arrayValue(field).join('\n')"
         class="form-input min-h-24 font-mono"
@@ -108,7 +102,10 @@
         :placeholder="field.description || ''"
         @input="setField(field, normalizeInput(field, $event.target.value))"
       />
-      <p v-if="field.description" class="text-xs leading-5 text-ink-500">
+      <p
+        v-if="field.description && (!isTreeField(field) || shouldRenderTree(field))"
+        class="text-xs leading-5 text-ink-500"
+      >
         {{ field.description }}
       </p>
     </div>
@@ -117,7 +114,6 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
 
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
@@ -128,7 +124,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
-const { t } = useI18n()
 
 const fields = computed(() => {
   const properties = props.schema?.properties
@@ -167,6 +162,10 @@ function isArrayField(field) {
 
 function isTreeField(field) {
   return isArrayField(field) && field.format === 'provider-resource'
+}
+
+function shouldRenderTree(field) {
+  return optionsFor(field).length > 0
 }
 
 function treeGroups(field) {

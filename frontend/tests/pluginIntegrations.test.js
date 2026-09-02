@@ -94,6 +94,13 @@ test('manifest schema renderer supports safe scalar, secret, array and resource 
   assert.match(renderer, /properties/)
 })
 
+test('connection resource trees stay hidden until scope values exist', async () => {
+  const renderer = await source('components/lens/ManifestSchemaForm.vue')
+
+  assert.match(renderer, /shouldRenderTree\(field\)/)
+  assert.match(renderer, /optionsFor\(field\)\.length > 0/)
+})
+
 test('Connection management renders manifest connection fields instead of GitHub-only inputs', async () => {
   const page = await source('pages/lens/Connections.vue')
 
