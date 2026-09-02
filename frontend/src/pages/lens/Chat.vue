@@ -1853,7 +1853,10 @@ import {
   prependAssistantMentions,
   removeAssistantMentionToken
 } from '@/pages/lens/assistantMentions'
-import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
+import {
+  prepareRunSubmission,
+  updateSessionSubmissionSet
+} from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
 import { createStreamTextBuffer } from '@/pages/lens/streamBuffer'
@@ -1957,7 +1960,8 @@ const currentRun = ref(null)
 const pendingRunSubmission = ref(null)
 const retryDraft = ref(null)
 const runStatusResolvingSessionUuid = ref('')
-const loading = ref({ run: false })
+const submittingSessionUuids = ref(new Set())
+const sessionCreationInProgress = ref(false)
 const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
@@ -2164,7 +2168,10 @@ const canSubmit = computed(() => {
   if (!canCompose.value) {
     return false
   }
-  if (loading.value.run) {
+  if (
+    sessionCreationInProgress.value ||
+    submittingSessionUuids.value.has(selectedSessionUuid.value)
+  ) {
     return false
   }
   if (hasUploadingAttachment.value) {
@@ -2175,6 +2182,14 @@ const canSubmit = computed(() => {
   )
   return !!question.value.trim() || hasReadyAttachment
 })
+
+function setSessionSubmitting(sessionUuid, submitting) {
+  submittingSessionUuids.value = updateSessionSubmissionSet(
+    submittingSessionUuids.value,
+    sessionUuid,
+    submitting
+  )
+}
 
 const hasAssistant = computed(() =>
   isAnonymous.value
@@ -3942,7 +3957,7 @@ async function submitClarification(message) {
     runUuid
   ])
   const sessionAtSubmit = selectedSessionUuid.value
-  loading.value.run = true
+  setSessionSubmitting(sessionAtSubmit, true)
   try {
     const continuation = await answerRunClarification(
       runUuid,
@@ -3976,9 +3991,7 @@ async function submitClarification(message) {
     const submitting = new Set(clarificationSubmitting.value)
     submitting.delete(runUuid)
     clarificationSubmitting.value = submitting
-    if (selectedSessionUuid.value === sessionAtSubmit) {
-      loading.value.run = false
-    }
+    setSessionSubmitting(sessionAtSubmit, false)
   }
 }
 
@@ -3988,7 +4001,10 @@ async function submit() {
     requireLogin()
     return
   }
-  if (loading.value.run) {
+  if (
+    sessionCreationInProgress.value ||
+    submittingSessionUuids.value.has(selectedSessionUuid.value)
+  ) {
     return
   }
   if (!canSubmit.value) {
@@ -4018,16 +4034,19 @@ async function submit() {
     showError(t('lens.chat.attachmentTooMany', { max: MAX_ATTACHMENTS }))
     return
   }
-  loading.value.run = true
   if (!selectedSessionUuid.value) {
-    const session = await createNewSession(
-      false,
-      routingScopeAssistantUuids.value
-    )
-    if (!session) {
-      question.value = draftTextAtSubmit
-      loading.value.run = false
-      return
+    sessionCreationInProgress.value = true
+    try {
+      const session = await createNewSession(
+        false,
+        routingScopeAssistantUuids.value
+      )
+      if (!session) {
+        question.value = draftTextAtSubmit
+        return
+      }
+    } finally {
+      sessionCreationInProgress.value = false
     }
     question.value = draftTextAtSubmit
   }
@@ -4036,9 +4055,10 @@ async function submit() {
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
+  setSessionSubmitting(sessionAtSubmit, true)
   if (isSmartCollaborationConversation.value && mentionToken.value) {
     showWarning(t('lens.chat.mentionAssistantRequired'))
-    loading.value.run = false
+    setSessionSubmitting(sessionAtSubmit, false)
     return
   }
   let submissionText = trimmedDraft
@@ -4046,7 +4066,7 @@ async function submit() {
   if (oversizedFile) {
     const uploaded = await addAttachment(oversizedFile)
     if (!uploaded || selectedSessionUuid.value !== sessionAtSubmit) {
-      loading.value.run = false
+      setSessionSubmitting(sessionAtSubmit, false)
       return
     }
     oversizedAttachment = uploaded
@@ -4205,9 +4225,7 @@ async function submit() {
         (item) => item.localUrl && URL.revokeObjectURL(item.localUrl)
       )
     }
-    if (selectedSessionUuid.value === sessionAtSubmit) {
-      loading.value.run = false
-    }
+    setSessionSubmitting(sessionAtSubmit, false)
   }
 }
 
