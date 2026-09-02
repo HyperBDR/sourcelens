@@ -1240,6 +1240,13 @@
     },
     "connections": {
       "name": "Connection name",
+      "pluginLabel": "Plugin",
+      "basicSection": "Basic information",
+      "basicSectionHint": "Give this connection a recognizable name and confirm its plugin.",
+      "accessSection": "Connection and access",
+      "accessSectionHint": "Enter the endpoint and secret, then choose resources available to data sources and assistants.",
+      "lifecycleSection": "Lifecycle",
+      "lifecycleSectionHint": "Disabled connections cannot be used by bound data sources or assistants.",
       "total": "Total connections",
       "activeCount": "Active",
       "pluginCount": "Plugins in use",

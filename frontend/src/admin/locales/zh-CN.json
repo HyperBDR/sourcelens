@@ -1234,6 +1234,13 @@
     },
     "connections": {
       "name": "连接名称",
+      "pluginLabel": "插件",
+      "basicSection": "基本信息",
+      "basicSectionHint": "为连接设置一个便于识别的名称，并确认使用的插件。",
+      "accessSection": "连接与授权",
+      "accessSectionHint": "填写服务地址和密钥，并选择需要开放给数据源与助手的资源。",
+      "lifecycleSection": "生命周期",
+      "lifecycleSectionHint": "停用连接后，绑定的数据源和助手将无法继续访问外部服务。",
       "total": "连接总数",
       "activeCount": "启用中",
       "pluginCount": "已接入插件",

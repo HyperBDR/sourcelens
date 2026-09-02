@@ -1240,6 +1240,13 @@
     },
     "connections": {
       "name": "Nombre de conexión",
+      "pluginLabel": "Plugin",
+      "basicSection": "Información básica",
+      "basicSectionHint": "Asigne un nombre reconocible y confirme el plugin de esta conexión.",
+      "accessSection": "Conexión y acceso",
+      "accessSectionHint": "Introduzca el endpoint y el secreto, y elija los recursos disponibles para fuentes y asistentes.",
+      "lifecycleSection": "Ciclo de vida",
+      "lifecycleSectionHint": "Las conexiones desactivadas no pueden ser usadas por fuentes ni asistentes vinculados.",
       "total": "Conexiones totales",
       "activeCount": "Activas",
       "pluginCount": "Plugins en uso",

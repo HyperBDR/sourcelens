@@ -172,6 +172,7 @@
 
     <BaseDrawer
       :show="drawerOpen"
+      width="3xl"
       :title="
         mode === 'create'
           ? t('lensAdmin.connections.createTitle')
@@ -182,64 +183,119 @@
       <div class="space-y-5">
         <div
           v-if="manifest"
-          class="rounded-md border border-brand-200 bg-brand-50 p-3 text-sm text-brand-800"
+          class="flex items-start gap-4 rounded-xl border border-brand-200 bg-brand-50/70 p-4"
         >
-          <div class="font-medium">{{ manifest.display_name }}</div>
-          <p class="mt-1 text-xs leading-5">{{ manifest.description }}</p>
-        </div>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium text-ink-700">
-            {{ t('lensAdmin.connections.name') }}
-          </span>
-          <input v-model="form.name" class="form-input" required />
-        </label>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium text-ink-700">Plugin</span>
-          <BaseSelect
-            :model-value="form.plugin_key"
-            :disabled="mode === 'edit'"
-            @update:model-value="handlePluginChange"
+          <span
+            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-sm font-semibold uppercase text-white shadow-sm"
+            aria-hidden="true"
           >
-            <option
-              v-for="plugin in plugins"
-              :key="plugin.key"
-              :value="plugin.key"
-            >
-              {{ plugin.display_name }}
-            </option>
-          </BaseSelect>
-        </label>
-        <ManifestSchemaForm
-          v-if="manifest?.connection_schema"
-          v-model="form"
-          :schema="manifest.connection_schema"
-          :resources="connectionResourceOptions"
-        >
-          <template #field-actions="{ field }">
-            <BaseButton
-              v-if="field.key === connectionResourceField?.[0]"
-              size="sm"
-              variant="outline"
-              :loading="discoveringResources"
-              :disabled="!hasFieldValue(form.secret_value)"
-              @click.prevent="discoverConnectionResources"
-            >
-              {{ t('lensAdmin.connections.discoverResourcesAction') }}
-            </BaseButton>
-          </template>
-        </ManifestSchemaForm>
-        <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
-          {{ t('lensAdmin.connections.tokenEditHint') }}
-        </p>
-        <label class="block">
-          <span class="mb-1 block text-sm font-medium text-ink-700">
-            {{ t('lensAdmin.connections.status') }}
+            {{ form.plugin_key.slice(0, 2) }}
           </span>
-          <BaseSelect v-model="form.status">
-            <option value="active">{{ t('common.status.active') }}</option>
-            <option value="disabled">{{ t('common.status.disabled') }}</option>
-          </BaseSelect>
-        </label>
+          <div class="min-w-0">
+            <p class="text-xs font-medium uppercase tracking-wide text-brand-700">
+              {{ t('lensAdmin.connections.pluginLabel') }}
+            </p>
+            <h3 class="mt-0.5 truncate text-base font-semibold text-ink-900">
+              {{ manifest.display_name }}
+            </h3>
+            <p class="mt-1 text-sm leading-5 text-ink-600">
+              {{ manifest.description }}
+            </p>
+          </div>
+        </div>
+
+        <section class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-4">
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.connections.basicSection') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.connections.basicSectionHint') }}
+            </p>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block">
+              <span class="mb-1.5 block text-sm font-medium text-ink-700">
+                {{ t('lensAdmin.connections.name') }}
+              </span>
+              <input v-model="form.name" class="form-input" required />
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-sm font-medium text-ink-700">
+                {{ t('lensAdmin.connections.pluginLabel') }}
+              </span>
+              <BaseSelect
+                :model-value="form.plugin_key"
+                :disabled="mode === 'edit'"
+                @update:model-value="handlePluginChange"
+              >
+                <option
+                  v-for="plugin in plugins"
+                  :key="plugin.key"
+                  :value="plugin.key"
+                >
+                  {{ plugin.display_name }}
+                </option>
+              </BaseSelect>
+            </label>
+          </div>
+        </section>
+
+        <section class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-4">
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.connections.accessSection') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.connections.accessSectionHint') }}
+            </p>
+          </div>
+          <ManifestSchemaForm
+            v-if="manifest?.connection_schema"
+            v-model="form"
+            :schema="manifest.connection_schema"
+            :resources="connectionResourceOptions"
+          >
+            <template #field-actions="{ field }">
+              <BaseButton
+                v-if="field.key === connectionResourceField?.[0]"
+                size="sm"
+                variant="outline"
+                :loading="discoveringResources"
+                :disabled="!hasFieldValue(form.secret_value)"
+                @click.prevent="discoverConnectionResources"
+              >
+                {{ t('lensAdmin.connections.discoverResourcesAction') }}
+              </BaseButton>
+            </template>
+          </ManifestSchemaForm>
+          <p
+            v-if="mode === 'edit'"
+            class="mt-3 rounded-lg bg-surface-sunken px-3 py-2 text-xs leading-5 text-ink-600"
+          >
+            {{ t('lensAdmin.connections.tokenEditHint') }}
+          </p>
+        </section>
+
+        <section class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-4">
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.connections.lifecycleSection') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.connections.lifecycleSectionHint') }}
+            </p>
+          </div>
+          <label class="block max-w-sm">
+            <span class="mb-1.5 block text-sm font-medium text-ink-700">
+              {{ t('lensAdmin.connections.status') }}
+            </span>
+            <BaseSelect v-model="form.status">
+              <option value="active">{{ t('common.status.active') }}</option>
+              <option value="disabled">{{ t('common.status.disabled') }}</option>
+            </BaseSelect>
+          </label>
+        </section>
         <p v-if="formError" class="text-sm text-danger-700">{{ formError }}</p>
       </div>
       <template #footer>
