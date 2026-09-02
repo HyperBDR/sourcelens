@@ -58,7 +58,7 @@
         v-else-if="isArrayField(field) && !isTreeField(field)"
         :id="fieldId(field)"
         :value="arrayValue(field).join('\n')"
-        class="form-input min-h-24 font-mono"
+        :class="[controlClass, 'min-h-24 font-mono']"
         :placeholder="field.description || ''"
         :required="isRequired(field)"
         @input="updateArray(field, $event.target.value)"
@@ -90,7 +90,7 @@
       <input
         v-else
         :id="fieldId(field)"
-        class="form-input"
+        :class="controlClass"
         :type="inputType(field)"
         :value="fieldValue(field)"
         :min="field.minimum"
@@ -120,7 +120,8 @@ import BaseSelect from '@/components/ui/BaseSelect.vue'
 const props = defineProps({
   schema: { type: Object, default: () => ({}) },
   modelValue: { type: Object, default: () => ({}) },
-  resources: { type: Object, default: () => ({}) }
+  resources: { type: Object, default: () => ({}) },
+  controlClass: { type: String, default: 'form-input' }
 })
 
 const emit = defineEmits(['update:modelValue'])

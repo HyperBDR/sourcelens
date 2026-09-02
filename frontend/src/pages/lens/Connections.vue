@@ -218,7 +218,11 @@
               <span class="mb-1.5 block text-sm font-medium text-ink-700">
                 {{ t('lensAdmin.connections.name') }}
               </span>
-              <input v-model="form.name" class="form-input" required />
+              <input
+                v-model="form.name"
+                class="connection-form-input"
+                required
+              />
             </label>
             <label class="block">
               <span class="mb-1.5 block text-sm font-medium text-ink-700">
@@ -255,6 +259,7 @@
             v-model="form"
             :schema="manifest.connection_schema"
             :resources="connectionResourceOptions"
+            control-class="connection-form-input"
           >
             <template #field-actions="{ field }">
               <BaseButton
@@ -643,3 +648,13 @@ async function removeRow(row) {
 
 onMounted(load)
 </script>
+
+<style>
+.connection-form-input {
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm
+    text-ink-900 shadow-sm transition-colors placeholder:text-ink-400
+    hover:border-ink-300 focus:border-brand-500 focus:outline-none
+    focus:ring-2 focus:ring-brand-500/20 disabled:cursor-not-allowed
+    disabled:bg-surface-sunken disabled:text-ink-500;
+}
+</style>
