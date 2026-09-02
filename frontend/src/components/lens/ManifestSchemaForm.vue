@@ -47,6 +47,12 @@
             </label>
           </div>
         </div>
+        <p
+          v-if="treeGroups(field).length === 0"
+          class="px-2 py-3 text-xs text-ink-500"
+        >
+          {{ t('lensAdmin.connections.resourceTreeEmpty') }}
+        </p>
       </div>
       <textarea
         v-else-if="isArrayField(field)"
@@ -105,6 +111,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
@@ -115,6 +122,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+const { t } = useI18n()
 
 const fields = computed(() => {
   const properties = props.schema?.properties
@@ -152,8 +160,7 @@ function isArrayField(field) {
 }
 
 function isTreeField(field) {
-  return isArrayField(field) && field.format === 'provider-resource' &&
-    optionsFor(field).length > 0
+  return isArrayField(field) && field.format === 'provider-resource'
 }
 
 function treeGroups(field) {
@@ -212,12 +219,14 @@ function optionsFor(field) {
       : props.resources?.[field.resource]?.items
   const normalized = Array.isArray(options) ? [...options] : []
   const currentValue = fieldValue(field)
-  if (
-    currentValue !== '' &&
-    !normalized.some((option) => optionValue(option) === currentValue)
-  ) {
-    normalized.push({ value: currentValue, label: currentValue })
-  }
+  const currentValues = Array.isArray(currentValue)
+    ? currentValue
+    : [currentValue]
+  currentValues.filter((value) => value !== '').forEach((value) => {
+    if (!normalized.some((option) => optionValue(option) === value)) {
+      normalized.push({ value, label: value })
+    }
+  })
   return normalized
 }
 

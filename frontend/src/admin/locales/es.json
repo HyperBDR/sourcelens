@@ -837,6 +837,7 @@
       "discoverResourcesAction": "Obtener recursos accesibles",
       "discoveryFailed": "No se pudieron descubrir los recursos",
       "privateResource": "Privado",
+      "resourceTreeEmpty": "Obtén primero los recursos accesibles y selecciona los autorizados en el árbol.",
       "validateSuccess": "Validación pasada",
       "validateFailed": "Validación fallida",
       "validateUrlRequired": "Se requiere la URL de Webhook",
