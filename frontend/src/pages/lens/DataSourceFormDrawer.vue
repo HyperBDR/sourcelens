@@ -2079,7 +2079,17 @@ function shouldConfirmCredentialChange(nextUuid, previousUuid) {
 }
 
 function testConnectionIfVisible() {
-  if (props.show && wizardStep.value === 3 && canTestConnection.value) {
+  const pluginConnectionStep =
+    isPluginSourceType(props.form.source_type) &&
+    activeStepKey.value === 'connection'
+  const legacyConnectionStep =
+    !isPluginSourceType(props.form.source_type) &&
+    activeStepKey.value === 'sync'
+  if (
+    props.show &&
+    (pluginConnectionStep || legacyConnectionStep) &&
+    canTestConnection.value
+  ) {
     emit('test-connection')
   }
 }

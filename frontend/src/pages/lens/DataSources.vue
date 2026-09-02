@@ -1586,7 +1586,6 @@ function resetDatasourceConnectionResult() {
 }
 
 async function testDatasourceConnection() {
-  if (!form.value.lensnode_uuid) return
   testingDatasourceConnection.value = true
   datasourceConnectionResult.value = null
   try {
@@ -1605,6 +1604,7 @@ async function testDatasourceConnection() {
         datasourceConnectionSignature(true)
       return
     }
+    if (!form.value.lensnode_uuid) return
     const result = await testLensNodeDataSourceConnection(
       form.value.lensnode_uuid,
       {

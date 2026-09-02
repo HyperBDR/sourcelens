@@ -130,6 +130,23 @@ test('datasource wizard groups creation into three steps', async () => {
   assert.doesNotMatch(drawer, /key: 'conversion'/)
 })
 
+test('plugin datasource resource discovery does not require a LensNode', async () => {
+  const page = await source('pages/lens/DataSources.vue')
+  const pluginBranch = page.indexOf('if (isPluginSourceType(form.value.source_type))')
+  const nodeGuard = page.indexOf('if (!form.value.lensnode_uuid) return')
+
+  assert.ok(pluginBranch >= 0)
+  assert.ok(nodeGuard >= 0)
+  assert.ok(pluginBranch < nodeGuard)
+})
+
+test('plugin datasource resources load on the connection step', async () => {
+  const drawer = await source('pages/lens/DataSourceFormDrawer.vue')
+
+  assert.match(drawer, /activeStepKey\.value === 'connection'/)
+  assert.match(drawer, /activeStepKey\.value === 'sync'/)
+})
+
 test('Connection management renders manifest connection fields instead of GitHub-only inputs', async () => {
   const page = await source('pages/lens/Connections.vue')
 
