@@ -3,6 +3,7 @@
 import uuid
 from datetime import timedelta
 
+from django.http import FileResponse
 from django.db.models import Count
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
@@ -80,6 +81,31 @@ def _active_connection_secret(connection):
     return secret
 
 
+def _resource_option_selection(connection, resource, request):
+    """Return the manifest-approved dependency selection for one resource."""
+
+    if not resource:
+        return None
+    try:
+        schema = latest_plugin(connection.plugin_key).datasource_schema
+    except PluginNotFoundError as exc:
+        raise DatasourceProviderError("PLUGIN_NOT_FOUND") from exc
+    fields = schema.get("properties", {})
+    matches = [
+        field
+        for field in fields.values()
+        if field.get("format") == "provider-resource-option"
+        and field.get("resource") == resource
+    ]
+    if len(matches) != 1:
+        raise DatasourceProviderError("resource options are unsupported")
+    dependency = matches[0]["depends_on"]
+    value = request.query_params.get(dependency)
+    if not value:
+        raise DatasourceProviderError("resource dependency is required")
+    return {dependency: value}
+
+
 class PluginRuntimeNoStoreMixin:
     """Prevent caching of Plugin Runtime responses in every outcome."""
 
@@ -102,18 +128,28 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
     http_method_names = ["get", "head", "options"]
     lookup_field = "key"
 
+    @staticmethod
+    def _icon_url(plugin):
+        """Return the stable admin asset URL for one optional Plugin icon."""
+
+        if not plugin.icon:
+            return None
+        return f"/api/lens/admin/plugins/{plugin.key}/icon/"
+
     def list(self, request):
         """List installed Plugin versions visible to administrators."""
 
-        del request
         return Response(
             [
                 {
                     "key": plugin.key,
                     "version": plugin.version,
                     "protocol_version": plugin.protocol_version,
+                    "capability_family": plugin.capability_family,
                     "display_name": plugin.display_name,
                     "description": plugin.description,
+                    "assistant_guidance": plugin.assistant_guidance,
+                    "icon_url": self._icon_url(plugin),
                     "datasource_source_type": (
                         plugin.datasource_source_type
                     ),
@@ -138,6 +174,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                     "key": tool.key,
                     "description": tool.description,
                     "capability": tool.capability,
+                    "capability_family": tool.capability_family,
                     "side_effect": tool.side_effect,
                     "input_schema": tool.input_schema,
                 }
@@ -159,8 +196,11 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                 "key": plugin.key,
                 "version": plugin.version,
                 "protocol_version": plugin.protocol_version,
+                "capability_family": plugin.capability_family,
                 "display_name": plugin.display_name,
                 "description": plugin.description,
+                "assistant_guidance": plugin.assistant_guidance,
+                "icon_url": self._icon_url(plugin),
                 "datasource_source_type": plugin.datasource_source_type,
                 "datasource": plugin.datasource,
                 "connection_schema": plugin.connection_schema,
@@ -170,6 +210,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                         "key": tool.key,
                         "description": tool.description,
                         "capability": tool.capability,
+                        "capability_family": tool.capability_family,
                         "side_effect": tool.side_effect,
                         "input_schema": tool.input_schema,
                     }
@@ -177,6 +218,31 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                 ],
             }
         )
+
+    @action(detail=True, methods=["get"], url_path="icon")
+    def icon(self, request, key=None):
+        """Serve one validated icon stored inside the trusted Plugin package."""
+
+        del request
+        try:
+            plugin = latest_plugin(key)
+        except PluginNotFoundError:
+            return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
+        if not plugin.icon:
+            return Response({"detail": "PLUGIN_ICON_NOT_FOUND"}, status=404)
+        icon_path = plugin.path / plugin.icon
+        content_types = {
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".webp": "image/webp",
+        }
+        response = FileResponse(
+            icon_path.open("rb"),
+            content_type=content_types[icon_path.suffix.lower()],
+        )
+        response["Cache-Control"] = "private, max-age=86400"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class PluginInvocationViewSet(BaseAdminViewSet):
@@ -254,6 +320,36 @@ class ConnectionViewSet(BaseAdminViewSet):
         response["Cache-Control"] = "no-store"
         return response
 
+    @action(detail=True, methods=["get"], url_path="resource-candidates")
+    def resource_candidates(self, request, *args, **kwargs):
+        """Discover selectable resources using the stored Connection secret."""
+
+        del args, kwargs
+        connection = self.get_object()
+        secret_or_response = _active_connection_secret(connection)
+        if isinstance(secret_or_response, Response):
+            return secret_or_response
+        try:
+            limit = int(request.query_params.get("limit", 50))
+        except (TypeError, ValueError):
+            return Response({"detail": "RESOURCE_LIMIT_INVALID"}, status=400)
+        try:
+            resources = get_datasource_provider(
+                connection.plugin_key
+            ).discover_connection_resources(
+                secret_or_response,
+                endpoint=connection.endpoint,
+                connection_config=connection.config,
+                query=request.query_params.get("query", ""),
+                cursor=request.query_params.get("cursor", ""),
+                limit=limit,
+            )
+        except DatasourceProviderError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        response = Response(resources)
+        response["Cache-Control"] = "no-store"
+        return response
+
     def get_queryset(self):
         """Filter connections by Plugin or lifecycle status."""
 
@@ -315,20 +411,35 @@ class ConnectionViewSet(BaseAdminViewSet):
     def resources(self, request, *args, **kwargs):
         """Discover resources only inside the Connection allowlist."""
 
-        del request, args, kwargs
+        del args, kwargs
         connection = self.get_object()
         secret_or_response = _active_connection_secret(connection)
         if isinstance(secret_or_response, Response):
             return secret_or_response
         try:
-            resources = get_datasource_provider(
-                connection.plugin_key
-            ).discover_resources(
-                connection.allowed_scope,
-                secret_or_response,
-                endpoint=connection.endpoint,
-                connection_config=connection.config,
+            provider = get_datasource_provider(connection.plugin_key)
+            resource = request.query_params.get("resource", "")
+            selection = _resource_option_selection(
+                connection,
+                resource,
+                request,
             )
+            if selection is None:
+                resources = provider.discover_resources(
+                    connection.allowed_scope,
+                    secret_or_response,
+                    endpoint=connection.endpoint,
+                    connection_config=connection.config,
+                )
+            else:
+                resources = provider.discover_resource_options(
+                    connection.allowed_scope,
+                    secret_or_response,
+                    resource,
+                    selection,
+                    endpoint=connection.endpoint,
+                    connection_config=connection.config,
+                )
         except DatasourceProviderError as exc:
             return Response(
                 {"detail": str(exc)},

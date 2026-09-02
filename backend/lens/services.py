@@ -1721,14 +1721,14 @@ def build_loaded_plugins(assistant):
         "mcp__connection__uuid",
     )
     bindings = [
-        (binding.connection, binding.tools)
+        (binding.connection, None, True)
         for binding in direct_bindings
     ]
     bindings.extend(
-        (binding.mcp.connection, binding.mcp.tools)
+        (binding.mcp.connection, binding.mcp.tools, False)
         for binding in adapter_bindings
     )
-    for connection, selected_tool_keys in bindings:
+    for connection, selected_tool_keys, use_all_tools in bindings:
         secret_version = connection.secret_version
         if secret_version is None or secret_version.status != "active":
             continue
@@ -1742,8 +1742,13 @@ def build_loaded_plugins(assistant):
             tool.key: tool
             for tool in plugin.tools
         }
+        tool_keys = (
+            [tool.key for tool in plugin.tools]
+            if use_all_tools
+            else (selected_tool_keys or [])
+        )
         tools = []
-        for key in selected_tool_keys or []:
+        for key in tool_keys:
             tool = definitions.get(key)
             if tool is None:
                 continue
@@ -1752,6 +1757,7 @@ def build_loaded_plugins(assistant):
                     "key": tool.key,
                     "description": tool.description,
                     "capability": tool.capability,
+                    "capability_family": tool.capability_family,
                     "side_effect": tool.side_effect,
                     "input_schema": tool.input_schema,
                 }
@@ -1761,8 +1767,10 @@ def build_loaded_plugins(assistant):
                 {
                     "connection_uuid": str(connection.uuid),
                     "plugin_key": plugin.key,
+                    "plugin_display_name": plugin.display_name,
                     "plugin_version": plugin.version,
                     "protocol_version": plugin.protocol_version,
+                    "assistant_guidance": plugin.assistant_guidance,
                     "tools": tools,
                 }
             )

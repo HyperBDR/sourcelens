@@ -2,8 +2,25 @@
   "key": "gitlab",
   "version": "1.0.0",
   "protocol_version": 1,
+  "capability_family": "plugin",
   "display_name": "GitLab",
+  "icon": "assets/icon.svg",
   "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
+  "assistant_guidance": {
+    "summary": "Use GitLab tools to inspect approved projects and search or read their repository files.",
+    "when_to_use": [
+      "The user asks for current information from an approved GitLab project.",
+      "The user asks to inspect or search code in an approved project."
+    ],
+    "topics": [
+      {
+        "key": "project_files",
+        "summary": "Read a file or search code inside an approved GitLab project.",
+        "details": "Use the namespace/project value selected by the Connection. Do not invent a project outside the Connection allowlist. Use a branch, tag, or commit ref when the user specifies one.",
+        "tool_keys": ["gitlab_read_file", "gitlab_search_code"]
+      }
+    ]
+  },
   "datasource_source_type": "git",
   "handlers": {
     "control": "python_v1",

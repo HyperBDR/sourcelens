@@ -13,9 +13,13 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 from lensnode.plugin_runtime import PluginRuntimeError
 from lensnode.plugin_package_loader import load_runtime_contract
-from lensnode.plugin_tools import build_plugin_tools
-from lensnode.plugin_tools import _execute_plugin_tool
-from lensnode.plugin_tools import _json
+from lensnode.plugin_tools import (
+    PluginToolError,
+    _execute_plugin_tool,
+    _json,
+    build_plugin_guidance_tool,
+    build_plugin_tools,
+)
 
 
 AI_GATEWAY_URL = "http://gateway/api/lens/lensnode/ai-gateway/"
@@ -242,6 +246,56 @@ def test_build_plugin_tools_hides_runtime_and_connection_inputs():
     assert set(tools[0].args) == {"repository", "path", "ref"}
     assert "connection_uuid" not in tools[0].args
     assert "runtime" not in tools[0].args
+    assert tools[0].metadata["capability_family"] == "plugin"
+    assert tools[0].metadata["plugin_key"] == "github"
+    assert tools[0].metadata["capability"] == "repository.read"
+
+
+def test_build_plugin_tools_rejects_unsupported_capability_family():
+    command = _command("github_read_file")
+    command["loaded_plugins"][0]["tools"][0]["capability_family"] = "mcp"
+
+    with pytest.raises(PluginToolError) as exc_info:
+        build_plugin_tools(command, _config(), GitHubRuntimeClient())
+
+    assert str(exc_info.value) == "PLUGIN_TOOL_INVALID"
+
+
+def test_plugin_guidance_tool_returns_topic_details_for_bound_plugin():
+    command = _command("github_read_file")
+    command["loaded_plugins"][0]["plugin_display_name"] = "GitHub"
+    command["loaded_plugins"][0]["assistant_guidance"] = {
+        "summary": "Inspect approved repositories.",
+        "when_to_use": ["Current repository questions."],
+        "topics": [
+            {
+                "key": "repository",
+                "summary": "Read repository files.",
+                "details": "Use an approved owner/repository value.",
+                "tool_keys": ["github_read_file"],
+            }
+        ],
+    }
+
+    tool = build_plugin_guidance_tool(command)
+
+    assert tool is not None
+    assert tool.name == "plugin_help"
+    assert tool.metadata["capability_family"] == "plugin"
+    result = json.loads(
+        tool.invoke({"plugin": "github", "topic": "repository"})
+    )
+    assert result["ok"] is True
+    assert result["plugins"][0]["topics"][0]["details"].startswith(
+        "Use an approved"
+    )
+    assert "tool_keys" not in result["plugins"][0]["topics"][0]
+
+
+def test_plugin_guidance_tool_does_not_expose_unbound_plugin():
+    tool = build_plugin_guidance_tool(_command("github_read_file"))
+
+    assert tool is None
 
 
 def test_github_read_file_uses_snapshot_lease_and_bounded_result():

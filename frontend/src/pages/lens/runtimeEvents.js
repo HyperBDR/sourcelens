@@ -279,10 +279,7 @@ function trackDelegation(state, event) {
   if (exists) return state
   return {
     ...state,
-    delegations: [
-      ...state.delegations,
-      { assistantName, delegatedTask }
-    ]
+    delegations: [...state.delegations, { assistantName, delegatedTask }]
   }
 }
 
@@ -368,12 +365,7 @@ function activeNodeId(state) {
   return state.stages.find((item) => item.status === 'in_progress')?.id || ''
 }
 
-function appendActivity(
-  state,
-  kind,
-  assistantName = '',
-  delegatedTask = ''
-) {
+function appendActivity(state, kind, assistantName = '', delegatedTask = '') {
   const nodeId = activeNodeId(state) || 'legacy-runtime'
   const last = state.activities[state.activities.length - 1]
   if (
@@ -446,8 +438,7 @@ function appendStructuredActivity(state, payload) {
       item.id === id &&
       (item.assistantName || '') ===
         String(payload.assistant_name || '').trim() &&
-      (item.delegatedTask || '') ===
-        String(payload.delegated_task || '').trim()
+      (item.delegatedTask || '') === String(payload.delegated_task || '').trim()
   )
   const startDate = normalizeActivityDate(payload.start_date)
   const endDate = normalizeActivityDate(payload.end_date)
@@ -499,18 +490,14 @@ function appendStructuredActivity(state, payload) {
       : {}),
     planRevision: existing?.planRevision ?? state.planRevision,
     structured: true,
-    ...(String(
-      existing?.assistantName || payload.assistant_name || ''
-    ).trim()
+    ...(String(existing?.assistantName || payload.assistant_name || '').trim()
       ? {
           assistantName: String(
             existing?.assistantName || payload.assistant_name
           ).trim()
         }
       : {}),
-    ...(String(
-      existing?.delegatedTask || payload.delegated_task || ''
-    ).trim()
+    ...(String(existing?.delegatedTask || payload.delegated_task || '').trim()
       ? {
           delegatedTask: String(
             existing?.delegatedTask || payload.delegated_task
@@ -1033,7 +1020,9 @@ export function applyRuntimeEvent(state, event) {
       current,
       activityKind,
       event.assistant_name,
-      String(event.delegated_task || '').trim().slice(0, 2000)
+      String(event.delegated_task || '')
+        .trim()
+        .slice(0, 2000)
     )
   }
   if (event?.visibility !== 'user') return current

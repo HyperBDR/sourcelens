@@ -23,45 +23,83 @@
         </span>
       </div>
       <div class="flex items-center">
-      <template v-for="(step, i) in wizardStepsMeta" :key="step.key">
-        <button
-          type="button"
-          class="flex min-w-0 flex-col items-center rounded-md px-1 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
-          :aria-current="i + 1 === wizardStep ? 'step' : undefined"
-          :disabled="i + 1 > wizardStep"
-          @click="goToWizardStep(i + 1)"
-        >
+        <template v-for="(step, i) in wizardStepsMeta" :key="step.key">
+          <button
+            type="button"
+            class="flex min-w-0 flex-col items-center rounded-md px-1 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+            :aria-current="i + 1 === wizardStep ? 'step' : undefined"
+            :disabled="i + 1 > wizardStep"
+            @click="goToWizardStep(i + 1)"
+          >
+            <div
+              class="flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors"
+              :class="
+                i + 1 < wizardStep
+                  ? 'border-brand-600 bg-brand-600 text-white'
+                  : i + 1 === wizardStep
+                    ? 'border-brand-600 text-brand-600'
+                    : 'border-line text-ink-400'
+              "
+            >
+              <span v-if="i + 1 < wizardStep">✓</span>
+              <span v-else>{{ i + 1 }}</span>
+            </div>
+            <span
+              class="mt-1 text-xs"
+              :class="
+                i + 1 === wizardStep
+                  ? 'font-medium text-brand-600'
+                  : 'text-ink-400'
+              "
+            >
+              {{ step.title }}
+            </span>
+          </button>
           <div
-            class="flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors"
-            :class="
-              i + 1 < wizardStep
-                ? 'border-brand-600 bg-brand-600 text-white'
-                : i + 1 === wizardStep
-                  ? 'border-brand-600 text-brand-600'
-                  : 'border-line text-ink-400'
-            "
-          >
-            <span v-if="i + 1 < wizardStep">✓</span>
-            <span v-else>{{ i + 1 }}</span>
-          </div>
-          <span
-            class="mt-1 text-xs"
-            :class="
-              i + 1 === wizardStep
-                ? 'font-medium text-brand-600'
-                : 'text-ink-400'
-            "
-          >
-            {{ step.title }}
-          </span>
-        </button>
-        <div
-          v-if="i < wizardStepsMeta.length - 1"
-          class="mx-1 h-px flex-1 bg-line"
-        />
-      </template>
+            v-if="i < wizardStepsMeta.length - 1"
+            class="mx-1 h-px flex-1 bg-line"
+          />
+        </template>
       </div>
     </div>
+
+    <section class="datasource-wizard-summary mb-6 rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3">
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div class="min-w-0">
+          <p class="text-xs font-medium uppercase tracking-wide text-brand-700">
+            {{ t('lensAdmin.datasourceWizard.summarySource') }}
+          </p>
+          <p class="mt-1 truncate text-sm font-medium text-ink-900">
+            {{ form.name || t('lensAdmin.datasourceWizard.summaryPending') }}
+          </p>
+          <p class="mt-0.5 truncate text-xs text-ink-500">
+            {{ selectedSourceTypeLabel }}
+          </p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium uppercase tracking-wide text-brand-700">
+            {{ t('lensAdmin.datasourceWizard.summaryResource') }}
+          </p>
+          <p class="mt-1 truncate text-sm font-medium text-ink-900">
+            {{ selectedConnection?.name || t('lensAdmin.datasourceWizard.summaryPending') }}
+          </p>
+          <p class="mt-0.5 truncate text-xs text-ink-500">
+            {{ selectedConnectionScopeSummary || t('lensAdmin.datasourceWizard.summaryNotSelected') }}
+          </p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium uppercase tracking-wide text-brand-700">
+            {{ t('lensAdmin.datasourceWizard.summaryTarget') }}
+          </p>
+          <p class="mt-1 truncate text-sm font-medium text-ink-900">
+            {{ selectedLensNode?.name || t('lensAdmin.datasourceWizard.summaryPending') }}
+          </p>
+          <p class="mt-0.5 truncate font-mono text-xs text-ink-500">
+            {{ form.workspace_relative_path || t('lensAdmin.datasourceWizard.summaryNotSelected') }}
+          </p>
+        </div>
+      </div>
+    </section>
 
     <div v-if="activeStepKey === 'basic'" class="space-y-5">
       <p class="text-sm text-ink-500">
@@ -126,8 +164,8 @@
           <div class="font-medium text-ink-900">
             {{ selectedConnection.name }} · {{ selectedConnection.plugin_key }}
           </div>
-          <div class="mt-1 break-all font-mono">
-            {{ selectedConnectionScope }}
+          <div class="mt-1 text-xs text-ink-500">
+            {{ selectedConnectionScopeSummary }}
           </div>
         </div>
         <div
@@ -141,7 +179,9 @@
           v-else-if="datasourceSchema"
           :model-value="config"
           :resources="pluginResources"
+          :loading-resource="loadingResourceOptions"
           :schema="datasourceSchema"
+          @resource-options-request="$emit('request-resource-options', $event)"
           @update:model-value="updatePluginConfig"
         />
       </template>
@@ -907,12 +947,6 @@
           </label>
         </div>
       </section>
-      <FormRow :label="t('lensAdmin.fields.status')" required>
-        <BaseSelect v-model="form.status">
-          <option value="active">{{ t('common.status.active') }}</option>
-          <option value="disabled">{{ t('common.status.disabled') }}</option>
-        </BaseSelect>
-      </FormRow>
     </div>
 
     <section
@@ -938,294 +972,296 @@
         />
       </button>
       <div v-if="conversionOpen" class="space-y-5 border-t border-line p-4">
-      <section class="space-y-4 rounded-md border border-line p-3">
-        <div>
-          <h3 class="text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.documentContentTitle') }}
-          </h3>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.documentContentHint') }}
-          </p>
-        </div>
-        <label class="flex items-start gap-3 text-sm text-ink-700">
-          <input
-            v-model="form.conversion_document"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-          />
-          <span>
-            <span class="font-medium">
-              {{ t('lensAdmin.datasourceWizard.convertDocuments') }}
-            </span>
-            <span class="block text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.convertDocumentsHint') }}
-            </span>
-          </span>
-        </label>
-        <FormRow
-          v-if="form.conversion_document"
-          :label="t('lensAdmin.fields.documentModel')"
-          :hint="t('lensAdmin.datasourceWizard.documentModelTooltip')"
-        >
-          <BaseSelect v-model="form.conversion_document_model_ref">
-            <option value="">
-              {{ t('lensAdmin.placeholders.noModel') }}
-            </option>
-            <option
-              v-for="config in llmConfigOptions"
-              :key="config.uuid || config.id"
-              :value="config.uuid || config.id"
-            >
-              {{ formatLLMConfigLabel(config) }}
-            </option>
-          </BaseSelect>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.documentModelHint') }}
-          </p>
-        </FormRow>
-        <label
-          class="flex items-start gap-3 text-sm"
-          :class="form.conversion_document ? 'text-ink-700' : 'text-ink-400'"
-        >
-          <input
-            v-model="form.conversion_embedded_image"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500 disabled:opacity-50"
-            :disabled="!form.conversion_document"
-          />
-          <span>
-            <span class="font-medium">
-              {{ t('lensAdmin.datasourceWizard.convertEmbeddedImages') }}
-            </span>
-            <span class="block text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.convertEmbeddedImagesHint') }}
-            </span>
-          </span>
-        </label>
-        <section
-          v-if="form.conversion_document && form.conversion_embedded_image"
-          class="rounded-md border border-line bg-ink-50/50"
-        >
-          <button
-            type="button"
-            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium text-ink-800"
-            @click="pdfAdvancedOpen = !pdfAdvancedOpen"
-          >
-            <span>
-              {{ t('lensAdmin.datasourceWizard.pdfAdvancedTitle') }}
-            </span>
-            <component
-              :is="pdfAdvancedOpen ? ChevronDownIcon : ChevronRightIcon"
-              class="h-4 w-4 text-ink-500"
-            />
-          </button>
-          <div
-            v-if="pdfAdvancedOpen"
-            class="space-y-4 border-t border-line p-3"
-          >
-            <p class="text-xs leading-5 text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.pdfAdvancedHint') }}
+        <section class="space-y-4 rounded-md border border-line p-3">
+          <div>
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceWizard.documentContentTitle') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.documentContentHint') }}
             </p>
-            <label class="flex items-start gap-3 text-sm text-ink-700">
-              <input
-                v-model="form.conversion_pdf_extract_images"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-              />
-              <span>
-                <span class="font-medium">
-                  {{ t('lensAdmin.datasourceWizard.pdfExtractImages') }}
-                </span>
-                <span class="block text-xs text-ink-500">
-                  {{ t('lensAdmin.datasourceWizard.pdfExtractImagesHint') }}
-                </span>
+          </div>
+          <label class="flex items-start gap-3 text-sm text-ink-700">
+            <input
+              v-model="form.conversion_document"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span class="font-medium">
+                {{ t('lensAdmin.datasourceWizard.convertDocuments') }}
               </span>
-            </label>
-            <label class="flex items-start gap-3 text-sm text-ink-700">
-              <input
-                v-model="form.conversion_pdf_render_scanned_pages"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-              />
-              <span>
-                <span class="font-medium">
-                  {{ t('lensAdmin.datasourceWizard.pdfRenderScannedPages') }}
-                </span>
-                <span class="block text-xs text-amber-700">
-                  {{
-                    t('lensAdmin.datasourceWizard.pdfRenderScannedPagesHint')
-                  }}
-                </span>
+              <span class="block text-xs text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.convertDocumentsHint') }}
               </span>
-            </label>
-            <label class="flex items-start gap-3 text-sm text-ink-700">
-              <input
-                v-model="form.conversion_pdf_extract_images_on_text_pages"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-              />
-              <span>
-                <span class="font-medium">
-                  {{
-                    t('lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages')
-                  }}
-                </span>
-                <span class="block text-xs text-amber-700">
-                  {{
-                    t(
-                      'lensAdmin.datasourceWizard.pdfExtractImagesOnTextPagesHint'
-                    )
-                  }}
-                </span>
+            </span>
+          </label>
+          <FormRow
+            v-if="form.conversion_document"
+            :label="t('lensAdmin.fields.documentModel')"
+            :hint="t('lensAdmin.datasourceWizard.documentModelTooltip')"
+          >
+            <BaseSelect v-model="form.conversion_document_model_ref">
+              <option value="">
+                {{ t('lensAdmin.placeholders.noModel') }}
+              </option>
+              <option
+                v-for="config in llmConfigOptions"
+                :key="config.uuid || config.id"
+                :value="config.uuid || config.id"
+              >
+                {{ formatLLMConfigLabel(config) }}
+              </option>
+            </BaseSelect>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.documentModelHint') }}
+            </p>
+          </FormRow>
+          <label
+            class="flex items-start gap-3 text-sm"
+            :class="form.conversion_document ? 'text-ink-700' : 'text-ink-400'"
+          >
+            <input
+              v-model="form.conversion_embedded_image"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500 disabled:opacity-50"
+              :disabled="!form.conversion_document"
+            />
+            <span>
+              <span class="font-medium">
+                {{ t('lensAdmin.datasourceWizard.convertEmbeddedImages') }}
               </span>
-            </label>
-            <div class="grid gap-4 md:grid-cols-2">
-              <FormRow
-                :label="t('lensAdmin.fields.pdfMaxPages')"
-                :hint="t('lensAdmin.datasourceWizard.pdfMaxPagesTooltip')"
-              >
+              <span class="block text-xs text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.convertEmbeddedImagesHint') }}
+              </span>
+            </span>
+          </label>
+          <section
+            v-if="form.conversion_document && form.conversion_embedded_image"
+            class="rounded-md border border-line bg-ink-50/50"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium text-ink-800"
+              @click="pdfAdvancedOpen = !pdfAdvancedOpen"
+            >
+              <span>
+                {{ t('lensAdmin.datasourceWizard.pdfAdvancedTitle') }}
+              </span>
+              <component
+                :is="pdfAdvancedOpen ? ChevronDownIcon : ChevronRightIcon"
+                class="h-4 w-4 text-ink-500"
+              />
+            </button>
+            <div
+              v-if="pdfAdvancedOpen"
+              class="space-y-4 border-t border-line p-3"
+            >
+              <p class="text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.pdfAdvancedHint') }}
+              </p>
+              <label class="flex items-start gap-3 text-sm text-ink-700">
                 <input
-                  v-model.number="form.conversion_pdf_max_pages"
-                  class="form-input"
-                  min="1"
-                  type="number"
+                  v-model="form.conversion_pdf_extract_images"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                 />
-              </FormRow>
-              <FormRow
-                :label="t('lensAdmin.fields.pdfMaxImagesPerPage')"
-                :hint="
-                  t('lensAdmin.datasourceWizard.pdfMaxImagesPerPageTooltip')
-                "
-              >
+                <span>
+                  <span class="font-medium">
+                    {{ t('lensAdmin.datasourceWizard.pdfExtractImages') }}
+                  </span>
+                  <span class="block text-xs text-ink-500">
+                    {{ t('lensAdmin.datasourceWizard.pdfExtractImagesHint') }}
+                  </span>
+                </span>
+              </label>
+              <label class="flex items-start gap-3 text-sm text-ink-700">
                 <input
-                  v-model.number="form.conversion_pdf_max_images_per_page"
-                  class="form-input"
-                  min="1"
-                  type="number"
+                  v-model="form.conversion_pdf_render_scanned_pages"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                 />
-              </FormRow>
-              <FormRow
-                :label="t('lensAdmin.fields.pdfRenderDpi')"
-                :hint="t('lensAdmin.datasourceWizard.pdfRenderDpiTooltip')"
-              >
+                <span>
+                  <span class="font-medium">
+                    {{ t('lensAdmin.datasourceWizard.pdfRenderScannedPages') }}
+                  </span>
+                  <span class="block text-xs text-amber-700">
+                    {{
+                      t('lensAdmin.datasourceWizard.pdfRenderScannedPagesHint')
+                    }}
+                  </span>
+                </span>
+              </label>
+              <label class="flex items-start gap-3 text-sm text-ink-700">
                 <input
-                  v-model.number="form.conversion_pdf_render_dpi"
-                  class="form-input"
-                  min="1"
-                  type="number"
+                  v-model="form.conversion_pdf_extract_images_on_text_pages"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                 />
-              </FormRow>
-              <FormRow
-                :label="t('lensAdmin.fields.pdfMinTextChars')"
-                :hint="t('lensAdmin.datasourceWizard.pdfMinTextCharsTooltip')"
-              >
-                <input
-                  v-model.number="form.conversion_pdf_min_text_chars"
-                  class="form-input"
-                  min="1"
-                  type="number"
-                />
-              </FormRow>
-              <FormRow
-                :label="t('lensAdmin.fields.pdfMinImageAreaRatio')"
-                :hint="
-                  t('lensAdmin.datasourceWizard.pdfMinImageAreaRatioTooltip')
-                "
-              >
-                <input
-                  v-model.number="form.conversion_pdf_min_image_area_ratio"
-                  class="form-input"
-                  max="1"
-                  min="0.01"
-                  step="0.01"
-                  type="number"
-                />
-              </FormRow>
+                <span>
+                  <span class="font-medium">
+                    {{
+                      t(
+                        'lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages'
+                      )
+                    }}
+                  </span>
+                  <span class="block text-xs text-amber-700">
+                    {{
+                      t(
+                        'lensAdmin.datasourceWizard.pdfExtractImagesOnTextPagesHint'
+                      )
+                    }}
+                  </span>
+                </span>
+              </label>
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow
+                  :label="t('lensAdmin.fields.pdfMaxPages')"
+                  :hint="t('lensAdmin.datasourceWizard.pdfMaxPagesTooltip')"
+                >
+                  <input
+                    v-model.number="form.conversion_pdf_max_pages"
+                    class="form-input"
+                    min="1"
+                    type="number"
+                  />
+                </FormRow>
+                <FormRow
+                  :label="t('lensAdmin.fields.pdfMaxImagesPerPage')"
+                  :hint="
+                    t('lensAdmin.datasourceWizard.pdfMaxImagesPerPageTooltip')
+                  "
+                >
+                  <input
+                    v-model.number="form.conversion_pdf_max_images_per_page"
+                    class="form-input"
+                    min="1"
+                    type="number"
+                  />
+                </FormRow>
+                <FormRow
+                  :label="t('lensAdmin.fields.pdfRenderDpi')"
+                  :hint="t('lensAdmin.datasourceWizard.pdfRenderDpiTooltip')"
+                >
+                  <input
+                    v-model.number="form.conversion_pdf_render_dpi"
+                    class="form-input"
+                    min="1"
+                    type="number"
+                  />
+                </FormRow>
+                <FormRow
+                  :label="t('lensAdmin.fields.pdfMinTextChars')"
+                  :hint="t('lensAdmin.datasourceWizard.pdfMinTextCharsTooltip')"
+                >
+                  <input
+                    v-model.number="form.conversion_pdf_min_text_chars"
+                    class="form-input"
+                    min="1"
+                    type="number"
+                  />
+                </FormRow>
+                <FormRow
+                  :label="t('lensAdmin.fields.pdfMinImageAreaRatio')"
+                  :hint="
+                    t('lensAdmin.datasourceWizard.pdfMinImageAreaRatioTooltip')
+                  "
+                >
+                  <input
+                    v-model.number="form.conversion_pdf_min_image_area_ratio"
+                    class="form-input"
+                    max="1"
+                    min="0.01"
+                    step="0.01"
+                    type="number"
+                  />
+                </FormRow>
+              </div>
             </div>
+          </section>
+        </section>
+        <section class="space-y-4 rounded-md border border-line p-3">
+          <div>
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceWizard.standaloneImagesTitle') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.standaloneImagesHint') }}
+            </p>
+          </div>
+          <label class="flex items-start gap-3 text-sm text-ink-700">
+            <input
+              v-model="form.conversion_image"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span class="font-medium">
+                {{ t('lensAdmin.datasourceWizard.convertImages') }}
+              </span>
+              <span class="block text-xs text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.convertImagesHint') }}
+              </span>
+            </span>
+          </label>
+          <FormRow
+            v-if="form.conversion_image"
+            :label="t('lensAdmin.fields.visionModel')"
+            :hint="t('lensAdmin.datasourceWizard.visionModelTooltip')"
+          >
+            <BaseSelect v-model="form.conversion_vision_model_ref">
+              <option value="">
+                {{ t('lensAdmin.placeholders.noModel') }}
+              </option>
+              <option
+                v-for="config in llmConfigOptions"
+                :key="config.uuid || config.id"
+                :value="config.uuid || config.id"
+              >
+                {{ formatLLMConfigLabel(config) }}
+              </option>
+            </BaseSelect>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
+            </p>
+          </FormRow>
+        </section>
+        <section class="space-y-4 rounded-md border border-line p-3">
+          <div>
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceWizard.globalConversionLimitsTitle') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.globalConversionLimitsHint') }}
+            </p>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <FormRow
+              :label="t('lensAdmin.fields.maxFileSizeMb')"
+              :hint="t('lensAdmin.datasourceWizard.maxFileSizeTooltip')"
+            >
+              <input
+                v-model.number="form.conversion_max_file_size_mb"
+                class="form-input"
+                min="1"
+                type="number"
+              />
+            </FormRow>
+            <FormRow
+              :label="t('lensAdmin.fields.maxImages')"
+              :hint="t('lensAdmin.datasourceWizard.maxImagesTooltip')"
+            >
+              <input
+                v-model.number="form.conversion_max_images"
+                class="form-input"
+                min="1"
+                type="number"
+              />
+            </FormRow>
           </div>
         </section>
-      </section>
-      <section class="space-y-4 rounded-md border border-line p-3">
-        <div>
-          <h3 class="text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.standaloneImagesTitle') }}
-          </h3>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.standaloneImagesHint') }}
-          </p>
-        </div>
-        <label class="flex items-start gap-3 text-sm text-ink-700">
-          <input
-            v-model="form.conversion_image"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-          />
-          <span>
-            <span class="font-medium">
-              {{ t('lensAdmin.datasourceWizard.convertImages') }}
-            </span>
-            <span class="block text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.convertImagesHint') }}
-            </span>
-          </span>
-        </label>
-        <FormRow
-          v-if="form.conversion_image"
-          :label="t('lensAdmin.fields.visionModel')"
-          :hint="t('lensAdmin.datasourceWizard.visionModelTooltip')"
-        >
-          <BaseSelect v-model="form.conversion_vision_model_ref">
-            <option value="">
-              {{ t('lensAdmin.placeholders.noModel') }}
-            </option>
-            <option
-              v-for="config in llmConfigOptions"
-              :key="config.uuid || config.id"
-              :value="config.uuid || config.id"
-            >
-              {{ formatLLMConfigLabel(config) }}
-            </option>
-          </BaseSelect>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
-          </p>
-        </FormRow>
-      </section>
-      <section class="space-y-4 rounded-md border border-line p-3">
-        <div>
-          <h3 class="text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.globalConversionLimitsTitle') }}
-          </h3>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.globalConversionLimitsHint') }}
-          </p>
-        </div>
-        <div class="grid gap-4 md:grid-cols-2">
-          <FormRow
-            :label="t('lensAdmin.fields.maxFileSizeMb')"
-            :hint="t('lensAdmin.datasourceWizard.maxFileSizeTooltip')"
-          >
-            <input
-              v-model.number="form.conversion_max_file_size_mb"
-              class="form-input"
-              min="1"
-              type="number"
-            />
-          </FormRow>
-          <FormRow
-            :label="t('lensAdmin.fields.maxImages')"
-            :hint="t('lensAdmin.datasourceWizard.maxImagesTooltip')"
-          >
-            <input
-              v-model.number="form.conversion_max_images"
-              class="form-input"
-              min="1"
-              type="number"
-            />
-          </FormRow>
-        </div>
-      </section>
-    </div>
+      </div>
     </section>
 
     <p v-if="formError" class="mt-4 text-sm text-danger-700">
@@ -1321,6 +1357,7 @@ const props = defineProps({
   syncTimezone: { type: String, default: 'Asia/Shanghai' },
   pathResult: { type: Object, default: null },
   connectionResult: { type: Object, default: null },
+  loadingResourceOptions: { type: String, default: '' },
   checkingPath: Boolean,
   testingConnection: Boolean,
   refreshingCredentials: Boolean,
@@ -1338,6 +1375,7 @@ const emit = defineEmits([
   'connection-change',
   'refresh-credentials',
   'refresh-dirs',
+  'request-resource-options',
   'update:syncIntervalSeconds',
   'update:syncPolicyMode',
   'update:syncCron',
@@ -1526,6 +1564,13 @@ const selectedSourceTypeDescription = computed(() => {
   return selected?.description || ''
 })
 
+const selectedSourceTypeLabel = computed(() => {
+  const selected = sourceTypes.value.find(
+    (type) => type.value === props.form.source_type
+  )
+  return selected?.label || t('lensAdmin.datasourceWizard.summaryNotSelected')
+})
+
 const datasourceSchema = computed(
   () => props.pluginManifest?.datasource_schema || null
 )
@@ -1670,10 +1715,7 @@ const canProceedWizard = computed(() => {
       if (isPluginSourceType(props.form.source_type)) {
         return Boolean(
           props.form.connection_uuid &&
-            schemaRequiredFieldsHaveValues(
-              datasourceSchema.value,
-              props.config
-            )
+            schemaRequiredFieldsHaveValues(datasourceSchema.value, props.config)
         )
       }
       if (isGitOrganizationMode.value) {
@@ -1727,9 +1769,20 @@ const selectedConnection = computed(() =>
   )
 )
 
-const selectedConnectionScope = computed(() =>
-  JSON.stringify(selectedConnection.value?.allowed_scope || {})
-)
+const selectedConnectionScopeSummary = computed(() => {
+  const scope = selectedConnection.value?.allowed_scope || {}
+  const values = Array.isArray(scope.repositories)
+    ? scope.repositories
+    : Object.entries(scope).flatMap(([key, value]) => {
+        if (Array.isArray(value)) return value
+        if (value === undefined || value === null || value === '') return []
+        return [`${key}: ${value}`]
+      })
+  if (!values.length) return ''
+  const visible = values.slice(0, 2)
+  const suffix = values.length > visible.length ? ` +${values.length - visible.length}` : ''
+  return `${visible.join(' · ')}${suffix}`
+})
 
 const isGitOrganizationMode = computed(
   () =>
@@ -2008,7 +2061,7 @@ function cancelCreateTargetDirectory() {
 }
 
 function checkCurrentPathIfNeeded() {
-  if (!props.show || wizardStep.value !== 4) {
+  if (!props.show || activeStepKey.value !== 'sync') {
     return
   }
   if (

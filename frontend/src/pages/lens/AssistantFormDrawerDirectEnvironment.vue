@@ -153,7 +153,10 @@
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
         </p>
       </FormRow>
-      <FormRow :label="t('lensAdmin.fields.maxConcurrency')">
+      <FormRow
+        v-if="mode === 'edit'"
+        :label="t('lensAdmin.fields.maxConcurrency')"
+      >
         <input
           v-model.number="form.max_concurrency"
           type="number"
@@ -422,11 +425,7 @@
       <template v-if="!isSmartMode">
         <div>
           <div class="mb-2 text-sm font-medium text-ink-700">
-            {{
-              isGeneralChatTask
-                ? t('lensAdmin.wizard.skillsSectionRequired')
-                : t('lensAdmin.wizard.skillsSection')
-            }}
+            {{ t('lensAdmin.wizard.skillsSection') }}
           </div>
           <p v-if="isGeneralChatTask" class="mb-2 text-xs text-ink-500">
             {{ t('lensAdmin.wizard.generalChatSkillsHint') }}
@@ -819,56 +818,55 @@
             <div
               v-for="connection in activePluginConnections"
               :key="connection.uuid"
-              class="space-y-3 rounded-md border border-line bg-surface p-3"
+              class="rounded-md border border-line bg-surface p-3"
             >
               <label class="flex cursor-pointer items-start gap-3">
                 <input
                   type="checkbox"
                   class="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
                   :checked="Boolean(pluginBinding(connection.uuid))"
-                  @change="togglePluginConnection(connection, $event.target.checked)"
+                  @change="
+                    togglePluginConnection(connection, $event.target.checked)
+                  "
                 />
                 <span class="min-w-0">
                   <span class="block text-sm font-medium text-ink-900">
                     {{ connection.name }} ·
                     {{ pluginDisplayName(connection.plugin_key) }}
                   </span>
-                  <span class="mt-1 block break-all font-mono text-xs text-ink-500">
+                  <span
+                    class="mt-1 block break-all font-mono text-xs text-ink-500"
+                  >
                     {{ connectionScope(connection) }}
                   </span>
                 </span>
               </label>
-              <div v-if="pluginBinding(connection.uuid)" class="space-y-2 pl-7">
-                <label
-                  v-for="tool in pluginTools(connection)"
-                  :key="tool.key"
-                  class="flex cursor-pointer items-start gap-3 rounded-md border border-line bg-surface-sunken p-3"
+              <div
+                v-if="pluginBinding(connection.uuid)"
+                class="mt-3 ml-7 flex items-center gap-2 text-xs text-success-700"
+                role="status"
+              >
+                <svg
+                  class="h-4 w-4 flex-shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
                 >
-                  <input
-                    type="checkbox"
-                    class="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
-                    :checked="pluginBinding(connection.uuid).tools.includes(tool.key)"
-                    :disabled="toolUsedByOtherConnection(tool.key, connection.uuid)"
-                    @change="togglePluginTool(connection.uuid, tool.key, $event.target.checked)"
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 13l4 4L19 7"
                   />
-                  <span class="min-w-0">
-                    <span class="block font-mono text-sm font-medium text-ink-900">
-                      {{ tool.key }}
-                    </span>
-                    <span class="mt-1 block text-xs leading-5 text-ink-500">
-                      {{ tool.description }}
-                    </span>
-                  </span>
-                </label>
-                <p
-                  v-if="!pluginBinding(connection.uuid).tools.length"
-                  class="text-xs text-warning-700"
-                >
-                  {{ t('lensAdmin.wizard.pluginToolRequired') }}
-                </p>
+                </svg>
+                {{ t('lensAdmin.wizard.pluginAllTools') }}
               </div>
             </div>
-            <p v-if="!activePluginConnections.length" class="text-xs text-ink-500">
+            <p
+              v-if="!activePluginConnections.length"
+              class="text-xs text-ink-500"
+            >
               {{ t('lensAdmin.wizard.pluginConnectionOptional') }}
             </p>
           </div>
@@ -1237,15 +1235,11 @@ const collaborationMemberOptions = computed(() =>
 )
 
 const activePluginConnections = computed(() =>
-  props.pluginConnections.filter(
-    (connection) => connection.status === 'active'
-  )
+  props.pluginConnections.filter((connection) => connection.status === 'active')
 )
 
 const selectedPluginBindings = computed(() =>
-  Array.isArray(props.form.plugin_bindings)
-    ? props.form.plugin_bindings
-    : []
+  Array.isArray(props.form.plugin_bindings) ? props.form.plugin_bindings : []
 )
 
 const missingSkillPluginRequirements = computed(() => {
@@ -1262,9 +1256,7 @@ const missingSkillPluginRequirements = computed(() => {
         (capability) => !granted.has(capability)
       )
       if (missingCapabilities.length) {
-        missing.push(
-          `${requirement.plugin}: ${missingCapabilities.join(', ')}`
-        )
+        missing.push(`${requirement.plugin}: ${missingCapabilities.join(', ')}`)
       }
     })
   })
@@ -1493,16 +1485,13 @@ const canProceedWizard = computed(() => {
       !isGeneralChatTask.value ||
       (props.form.skill_uuids || []).length > 0 ||
       selectedPluginBindings.value.some(
-        (binding) => binding.enabled !== false && binding.tools?.length > 0
+        (binding) => binding.enabled !== false
       )
     return (
       hasGeneralChatExecutionTool &&
       selectedSkillEnvironmentsConfigured() &&
       selectedMcpEnvironmentsConfigured() &&
-      missingSkillPluginRequirements.value.length === 0 &&
-      selectedPluginBindings.value.every(
-        (binding) => binding.enabled === false || binding.tools?.length > 0
-      )
+      missingSkillPluginRequirements.value.length === 0
     )
   }
   return true
@@ -1556,26 +1545,12 @@ function pluginBinding(connectionUuid) {
   )
 }
 
-function pluginTools(connection) {
-  const tools = props.pluginManifests?.[connection.plugin_key]?.tools
-  return Array.isArray(tools) ? tools : []
-}
-
 function pluginDisplayName(pluginKey) {
   return props.pluginManifests?.[pluginKey]?.display_name || pluginKey
 }
 
 function connectionScope(connection) {
   return JSON.stringify(connection.allowed_scope || {})
-}
-
-function toolUsedByOtherConnection(toolKey, connectionUuid) {
-  return selectedPluginBindings.value.some(
-    (binding) =>
-      binding.connection_uuid !== connectionUuid &&
-      binding.enabled !== false &&
-      binding.tools?.includes(toolKey)
-  )
 }
 
 function selectedPluginCapabilities(pluginKey) {
@@ -1587,9 +1562,7 @@ function selectedPluginCapabilities(pluginKey) {
     )
     if (connection?.plugin_key !== pluginKey) return
     const tools = props.pluginManifests?.[pluginKey]?.tools || []
-    tools.forEach((tool) => {
-      if (binding.tools?.includes(tool.key)) capabilities.add(tool.capability)
-    })
+    tools.forEach((tool) => capabilities.add(tool.capability))
   })
   return capabilities
 }
@@ -1603,23 +1576,10 @@ function togglePluginConnection(connection, checked) {
     return
   }
   if (pluginBinding(connection.uuid)) return
-  const tools = pluginTools(connection)
-    .map((tool) => tool.key)
-    .filter((toolKey) => !toolUsedByOtherConnection(toolKey, connection.uuid))
   props.form.plugin_bindings = [
     ...bindings,
-    { connection_uuid: connection.uuid, tools, enabled: true }
+    { connection_uuid: connection.uuid, enabled: true }
   ]
-}
-
-function togglePluginTool(connectionUuid, toolKey, checked) {
-  props.form.plugin_bindings = selectedPluginBindings.value.map((binding) => {
-    if (binding.connection_uuid !== connectionUuid) return binding
-    const tools = checked
-      ? [...new Set([...(binding.tools || []), toolKey])]
-      : (binding.tools || []).filter((key) => key !== toolKey)
-    return { ...binding, tools }
-  })
 }
 
 const selectedLensNodeDirs = computed(() => {

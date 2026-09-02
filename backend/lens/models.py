@@ -1066,7 +1066,11 @@ class AssistantMCP(models.Model):
 
 
 class AssistantPluginBinding(models.Model):
-    """Assistant access to one reusable Plugin connection."""
+    """Assistant access to one reusable Plugin connection.
+
+    ``tools`` is retained as a legacy compatibility field. Direct Assistant
+    runtime loading always uses the complete read-only Plugin manifest.
+    """
 
     assistant = models.ForeignKey(
         Assistant,

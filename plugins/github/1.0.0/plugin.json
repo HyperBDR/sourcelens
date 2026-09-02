@@ -2,8 +2,61 @@
   "key": "github",
   "version": "1.0.0",
   "protocol_version": 1,
+  "capability_family": "plugin",
   "display_name": "GitHub",
+  "icon": "assets/icon.svg",
   "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
+  "assistant_guidance": {
+    "summary": "Use GitHub tools to inspect approved repositories, code, issues, pull requests, releases, and Actions metadata.",
+    "when_to_use": [
+      "The user asks for current information from an approved GitHub repository.",
+      "The user asks to inspect repository code, issues, pull requests, releases, or workflow runs."
+    ],
+    "topics": [
+      {
+        "key": "repository",
+        "summary": "Start with repository metadata, branches, commits, or a bounded file read.",
+        "details": "Use repository in owner/name form. Read only approved repositories. Use a branch, tag, or commit SHA when the user identifies a revision. Keep file reads bounded and prefer repository metadata before deeper inspection.",
+        "tool_keys": [
+          "github_repository_get",
+          "github_branch_list",
+          "github_commit_list",
+          "github_commit_get",
+          "github_read_file"
+        ]
+      },
+      {
+        "key": "code_search",
+        "summary": "Search code inside one approved repository and then read relevant files.",
+        "details": "Search terms must not include repo:, org:, or user: qualifiers. The repository argument is the only scope selector. Use the returned paths with github_read_file when source context is needed.",
+        "tool_keys": ["github_search_code", "github_read_file"]
+      },
+      {
+        "key": "issues_and_pull_requests",
+        "summary": "Inspect issue and pull request metadata, comments, files, and reviews.",
+        "details": "Use list tools before requesting a specific item when the number is unknown. Pull requests are separate from issues in list results. Responses are bounded and read-only.",
+        "tool_keys": [
+          "github_issue_list",
+          "github_issue_get",
+          "github_issue_comments",
+          "github_pull_request_list",
+          "github_pull_request_get",
+          "github_pull_request_files",
+          "github_pull_request_reviews"
+        ]
+      },
+      {
+        "key": "releases_and_actions",
+        "summary": "Review releases and GitHub Actions workflow run metadata without logs or artifacts.",
+        "details": "Use releases for published version context and Actions tools for run status, branch, and conclusion. Logs, jobs, and artifacts are intentionally unavailable.",
+        "tool_keys": [
+          "github_release_list",
+          "github_workflow_run_list",
+          "github_workflow_run_get"
+        ]
+      }
+    ]
+  },
   "datasource_source_type": "git",
   "datasource": {
     "key": "github_repository",
@@ -34,14 +87,6 @@
   "connection_schema": {
     "type": "object",
     "properties": {
-      "endpoint": {
-        "type": "string",
-        "format": "uri",
-        "title": "GitHub endpoint",
-        "description": "The fixed public GitHub endpoint.",
-        "default": "https://github.com",
-        "write_to": "endpoint"
-      },
       "secret_value": {
         "type": "string",
         "format": "password",
@@ -61,7 +106,7 @@
         }
       }
     },
-    "required": ["endpoint", "secret_value", "repositories"],
+    "required": ["secret_value", "repositories"],
     "additionalProperties": false
   },
   "datasource_schema": {
@@ -142,6 +187,414 @@
           }
         },
         "required": ["repository", "query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_repository_get",
+      "description": "Get bounded metadata for an approved GitHub repository, including its default branch, visibility, language, activity, and counts. Use this before repository-specific work when basic repository context is needed.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_branch_list",
+      "description": "List branches in an approved GitHub repository with their head commit SHA and protection state. Results are paginated and bounded.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_commit_list",
+      "description": "List commits in an approved GitHub repository. Optionally filter by branch, tag, or commit ref and by repository-relative path. Results are paginated and omit patches.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Optional branch, tag, or commit SHA."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional repository-relative path filter."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_commit_get",
+      "description": "Get one commit from an approved GitHub repository by branch, tag, or SHA. Returns bounded commit metadata, statistics, and changed-file summaries without patches.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Branch, tag, or commit SHA identifying the commit."
+          }
+        },
+        "required": ["repository", "ref"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_issue_list",
+      "description": "List issues, excluding pull requests, in an approved GitHub repository. Optionally filter by state and comma-separated labels. Results are paginated and contain bounded summaries.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "state": {
+            "type": "string",
+            "description": "Issue state: open, closed, or all. Defaults to open."
+          },
+          "labels": {
+            "type": "string",
+            "description": "Optional comma-separated label names."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_issue_get",
+      "description": "Get one issue from an approved GitHub repository by number. Returns bounded issue metadata and body text; use github_issue_comments when comments are needed.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Positive issue number.",
+            "minimum": 1
+          }
+        },
+        "required": ["repository", "number"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_issue_comments",
+      "description": "List comments for one issue in an approved GitHub repository. Results are paginated and each comment body is bounded.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Positive issue number.",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository", "number"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_pull_request_list",
+      "description": "List pull requests in an approved GitHub repository. Optionally filter by state. Results are paginated and include branch and commit identities.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "state": {
+            "type": "string",
+            "description": "Pull request state: open, closed, or all. Defaults to open."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_pull_request_get",
+      "description": "Get one pull request from an approved GitHub repository by number. Returns bounded metadata, body, branch identities, merge state, and change counts.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Positive pull request number.",
+            "minimum": 1
+          }
+        },
+        "required": ["repository", "number"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_pull_request_files",
+      "description": "List changed files for one pull request in an approved GitHub repository. Returns bounded file statistics without patch content.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Positive pull request number.",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository", "number"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_pull_request_reviews",
+      "description": "List reviews for one pull request in an approved GitHub repository. Results are paginated and each review body is bounded.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "number": {
+            "type": "integer",
+            "description": "Positive pull request number.",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository", "number"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_release_list",
+      "description": "List releases in an approved GitHub repository. Results are paginated and include bounded release metadata without downloading assets.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_workflow_run_list",
+      "description": "List GitHub Actions workflow runs in an approved repository. Optionally filter by status and branch. Results are paginated and do not include logs or artifacts.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "status": {
+            "type": "string",
+            "description": "Optional workflow run status or conclusion supported by GitHub."
+          },
+          "branch": {
+            "type": "string",
+            "description": "Optional branch name."
+          },
+          "page": {
+            "type": "integer",
+            "description": "One-based page number, from 1 through 1000.",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Maximum items to return, from 1 through 50.",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_workflow_run_get",
+      "description": "Get one GitHub Actions workflow run in an approved repository by run ID. Returns bounded run metadata without logs, jobs, or artifacts.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "run_id": {
+            "type": "integer",
+            "description": "Positive workflow run ID.",
+            "minimum": 1
+          }
+        },
+        "required": ["repository", "run_id"],
         "additionalProperties": false
       }
     }

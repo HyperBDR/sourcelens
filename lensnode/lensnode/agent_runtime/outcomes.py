@@ -1,5 +1,6 @@
 """Terminal outcome policy for LensNode agent runs."""
 
+from .capability_protocol import CAPABILITY_FAMILIES
 from .prompts import (
     detect_answer_language as _detect_answer_language,
     pick_text as _pick_text,
@@ -92,14 +93,7 @@ def _finalize_runtime_outcome(
     required = {
         capability
         for capability in required_capabilities or []
-        if capability
-        in {
-            "artifact_delivery",
-            "mcp",
-            "skill",
-            "tool",
-            "workspace",
-        }
+        if capability in CAPABILITY_FAMILIES or capability == "tool"
     }
     relevant_successes = successful & required
     failed = set(

@@ -1,5 +1,3 @@
-from threading import Barrier
-
 import httpx
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -116,28 +114,9 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
         )
         self.assertEqual(result["account"]["username"], "plugin-admin")
 
-    def test_discovers_allowed_projects_in_parallel(self):
-        barrier = Barrier(2, timeout=2)
-
+    def test_discovers_allowed_projects_without_remote_requests(self):
         def handler(request):
-            if request.url.path.endswith("/repository/branches"):
-                return httpx.Response(
-                    200,
-                    json=[{"name": "main"}],
-                    request=request,
-                )
-            barrier.wait()
-            project = request.url.path.split("/projects/", 1)[1]
-            project = project.replace("%2F", "/")
-            return httpx.Response(
-                200,
-                json={
-                    "path_with_namespace": project,
-                    "default_branch": "main",
-                    "visibility": "private",
-                },
-                request=request,
-            )
+            raise AssertionError(request.url)
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
             resources = self.provider.discover_resources(
@@ -147,11 +126,43 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
                 client=client,
             )
 
-        items = resources["resources"]["projects"]["items"]
-        self.assertEqual([item["value"] for item in items], [
-            "group/one",
-            "group/two",
-        ])
+        self.assertEqual(
+            resources["resources"]["projects"]["items"],
+            [
+                {"value": "group/one", "label": "group/one"},
+                {"value": "group/two", "label": "group/two"},
+            ],
+        )
+
+    def test_discovers_branches_for_one_allowed_project(self):
+        def handler(request):
+            self.assertEqual(
+                request.url.path,
+                "/api/v4/projects/group/one/repository/branches",
+            )
+            return httpx.Response(
+                200,
+                json=[{"name": "main"}, {"name": "release"}],
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_resource_options(
+                {"projects": ["group/one"]},
+                "secret",
+                "branches",
+                {"project": "group/one"},
+                endpoint="https://gitlab.example",
+                client=client,
+            )
+
+        self.assertEqual(
+            resources["resources"]["branches"]["items"],
+            [
+                {"value": "main", "label": "main"},
+                {"value": "release", "label": "release"},
+            ],
+        )
 
 
 class GitLabToolProviderTests(SimpleTestCase):

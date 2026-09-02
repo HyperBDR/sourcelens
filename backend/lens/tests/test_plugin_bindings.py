@@ -123,6 +123,8 @@ class AssistantPluginBindingTests(TestCase):
             path = Path(root) / "github" / "1.0.0"
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
+            (path / "control.py").write_text("PLUGIN_API_VERSION = 1\n")
+            (path / "runtime.py").write_text("PLUGIN_API_VERSION = 1\n")
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 yield
 
@@ -151,8 +153,37 @@ class AssistantPluginBindingTests(TestCase):
         binding = assistant.plugin_bindings.get()
         self.assertEqual(binding.connection, self.connection)
         self.assertEqual(binding.tools, ["github_read_file"])
+        self.assertTrue(response.data["plugin_bindings"][0]["all_tools"])
         self.assertNotIn("ghp-runtime-secret", str(response.data))
         self.assertNotIn("encrypted_value", str(response.data))
+
+    def test_direct_binding_uses_all_manifest_tools_when_tools_are_omitted(self):
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/assistants/",
+                {
+                    "name": "All GitHub Tools Assistant",
+                    "slug": "all-github-tools-assistant",
+                    "lensnode_uuid": str(self.lensnode.uuid),
+                    "selected_task": "general_chat",
+                    "selected_dirs": [],
+                    "plugin_bindings": [
+                        {"connection_uuid": str(self.connection.uuid)}
+                    ],
+                },
+                format="json",
+            )
+
+            self.assertEqual(response.status_code, 201, response.data)
+            assistant = Assistant.objects.get(
+                slug="all-github-tools-assistant"
+            )
+            loaded = build_loaded_plugins(assistant)
+
+        self.assertEqual(
+            [tool["key"] for tool in loaded[0]["tools"]],
+            ["github_read_file", "github_search_code"],
+        )
 
     def test_skill_plugin_requirement_rejects_missing_capability_binding(self):
         skill = Skill.objects.create(
@@ -574,6 +605,10 @@ class AssistantPluginBindingTests(TestCase):
             str(self.connection.uuid),
         )
         self.assertEqual(loaded[0]["tools"][0]["side_effect"], "none")
+        self.assertEqual(
+            loaded[0]["tools"][0]["capability_family"],
+            "plugin",
+        )
         self.assertNotIn("ghp-runtime-secret", json.dumps(loaded))
         payload = mock_async_to_sync.return_value.call_args.args[1]["payload"]
         self.assertEqual(payload["loaded_plugins"], loaded)
@@ -628,6 +663,6 @@ class AssistantPluginBindingTests(TestCase):
 
         run.execution.refresh_from_db()
         self.assertEqual(
-            run.execution.loaded_plugins[0]["tools"][0]["key"],
-            "github_search_code",
+            [tool["key"] for tool in run.execution.loaded_plugins[0]["tools"]],
+            ["github_read_file", "github_search_code"],
         )

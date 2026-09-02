@@ -1365,6 +1365,68 @@ def test_route_selection_does_not_derive_an_unbound_skill_capability():
     assert decision["required_capabilities"] == []
 
 
+def test_route_selection_recognizes_explicit_plugin_tool_capability():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational",'
+                    '"complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["plugin"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    plugin_tool = SimpleNamespace(
+        name="github_commit_list",
+        metadata={"capability_family": "plugin"},
+    )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询 oneprolabs/sourcelens 的提交记录",
+        available_tools=[plugin_tool],
+        has_bound_skills=False,
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["required_capabilities"] == ["plugin"]
+
+
+def test_route_selection_repairs_legacy_mcp_to_plugin_capability():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational",'
+                    '"complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["mcp"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    plugin_tool = SimpleNamespace(
+        name="github_commit_list",
+        metadata={"capability_family": "plugin"},
+    )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询 oneprolabs/sourcelens 的提交记录",
+        available_tools=[plugin_tool],
+        has_bound_skills=False,
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["required_capabilities"] == ["plugin"]
+    assert decision["capability_repair"] == {
+        "discarded": ["mcp"],
+        "derived": ["plugin"],
+    }
+
+
 def test_route_selection_requires_delivery_for_artifact_evidence():
     class Model:
         def invoke(self, _messages, **_kwargs):
@@ -2788,6 +2850,61 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
+def test_plugin_guidance_index_is_compact_and_advisory():
+    prompt = _general_chat_system_prompt(
+        {
+            "task": "general_chat",
+            "question": "查看仓库信息",
+            "loaded_plugins": [
+                {
+                    "plugin_key": "github",
+                    "plugin_display_name": "GitHub",
+                    "assistant_guidance": {
+                        "summary": "Inspect approved repositories.",
+                        "when_to_use": ["Current repository questions."],
+                        "topics": [
+                            {
+                                "key": "repository",
+                                "summary": "Read repository metadata.",
+                                "details": "Detailed instructions stay deferred.",
+                                "tool_keys": ["github_repository_get"],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "Plugin guidance index" in prompt
+    assert "Inspect approved repositories." in prompt
+    assert "Detailed instructions stay deferred." not in prompt
+    assert "plugin_help" in prompt
+
+
+def test_plugin_guidance_is_available_in_knowledge_prompt():
+    prompt = _knowledge_system_prompt(
+        {"prompt": "Answer from workspace evidence."},
+        {
+            "task": "knowledge_qa",
+            "question": "查看仓库信息",
+            "loaded_plugins": [
+                {
+                    "plugin_key": "github",
+                    "plugin_display_name": "GitHub",
+                    "assistant_guidance": {
+                        "summary": "Inspect approved repositories.",
+                        "topics": [],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert "Plugin guidance index" in prompt
+    assert prompt.endswith("tool boundary.\n")
+
+
 def test_business_prompt_contract_covers_code_skills_and_collaboration():
     code_prompt = _knowledge_system_prompt(
         {"prompt": "Analyze source evidence."},
@@ -3990,6 +4107,38 @@ def test_capability_boundary_counts_raw_mcp_success_as_evidence():
     assert evidence["source"] == "mcp:mcp__orders__lookup"
     assert len(evidence["request_sha256"]) == 64
     assert "HWINSTAD2025071509" not in json.dumps(evidence)
+
+
+def test_capability_boundary_counts_plugin_success_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["plugin"],
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(
+            name="github_commit_list",
+            metadata={"capability_family": "plugin"},
+        ),
+        tool_call={
+            "name": "github_commit_list",
+            "id": "call-1",
+            "args": {"repository": "oneprolabs/sourcelens"},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"items":[]}',
+            name="github_commit_list",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert middleware.success_count == 1
+    assert middleware.successful_capabilities == {"plugin"}
+    assert middleware.successful_evidence[0]["source"] == (
+        "plugin:github_commit_list"
+    )
 
 
 def test_finalization_ignores_success_without_invocation_provenance():

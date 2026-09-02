@@ -2,8 +2,9 @@
 
 - 状态：GitHub、GitLab、Jira Cloud V1、通用 manifest UI、Skill capability 依赖、
   调用审计、凭证轮换/撤销、MCP Adapter 和可回滚旧凭证迁移工具已完成；现有
-  GitLab/Jira Server/DC Skill 包迁移和制品签名仍属于后续发布工作
-- 日期：2026-09-01
+  GitLab/Jira Server/DC Skill 包迁移和制品签名仍属于后续发布工作。Plugin
+  能力族协议已固化为 `docs/plugin-protocol.md`。
+- 日期：2026-09-02
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
 本设计借鉴 Dify 的 Plugin Daemon、双 Provider 和 Manifest 机制，但不采用其在
@@ -52,6 +53,7 @@ PluginDefinition
   ├─ ToolProvider
   ├─ DatasourceProvider
   ├─ credential_schema / connection_schema
+  ├─ capability_family
   ├─ capabilities
   └─ runtime_adapter
 
@@ -150,6 +152,8 @@ Manifest 是平台可读的稳定契约，不是安全边界。建议结构如�
 ```yaml
 key: github
 version: 1.0.0
+protocol_version: 1
+capability_family: plugin
 display_name: GitHub
 description: Access authorized GitHub repositories and pull requests.
 
@@ -186,6 +190,7 @@ datasource:
 
 tools:
   - key: github_read_file
+    capability_family: plugin
     capability: repository.read
     side_effect: none
   - key: github_search_code
@@ -212,6 +217,37 @@ Manifest 应包含：
 同一个 Manifest 同时声明 Tool Provider 和 Datasource Provider。Plugin 项目可以
 独立维护代码、测试、文档和发布流程，SourceLens 主仓库只维护 Registry、通用
 Connection、DataSource、Task、Lease 和 schema renderer。
+
+### Assistant Guidance：渐进式能力说明
+
+Plugin 可以在 Manifest 中提供可选的 `assistant_guidance`，让内置 Plugin 具备类似
+Skill 的渐进式说明能力，同时避免把完整文档默认塞入每次对话上下文：
+
+```yaml
+assistant_guidance:
+  summary: Inspect approved repositories and pull requests.
+  when_to_use:
+    - Current repository questions.
+  topics:
+    - key: repository
+      summary: Read repository metadata and files.
+      details: Use an owner/name value from the Connection scope.
+      tool_keys: [github_repository_get, github_read_file]
+```
+
+运行时分为两层：
+
+1. 初始 System Prompt 只注入 `summary`、`when_to_use` 和主题摘要，作为轻量能力
+   索引；没有 guidance 的 Plugin 不增加 Prompt 内容。
+2. 当模型需要更具体的用法时，调用受控的 `plugin_help` Tool，按 Plugin key、主题
+   或查询词读取当前 Run 已绑定 Plugin 的详细说明。返回内容限制为 12 KiB，且不
+   返回 Manifest 内部的 `tool_keys` 映射。
+
+`assistant_guidance` 是不可信的说明数据，不是授权或执行配置。它不能授予新的
+Connection scope、capability 或 Tool，也不能覆盖平台安全边界；真实执行仍必须经过
+ExecutionSnapshot、Lease、Secret Material 和 Plugin Runtime。Registry 需要校验
+主题数量、文本长度、主题 key 唯一性，以及 `tool_keys` 必须引用同一 Manifest 中
+已声明的 Tool。Guidance 随 Plugin 版本加载，更新 Plugin 后重新生成运行时索引。
 
 动态页面使用 Manifest schema 生成供应商字段和资源选择控件；通用 renderer 只保留
 少量受控组件，后端始终再次执行完整校验。
@@ -285,8 +321,8 @@ V1 不允许多个 Connection 暴露同名模型 Tool，避免在不向模型泄
 GitHub API 使用的 `ref` 参数。
 
 禁止提供 `github_raw_exec(command)`、任意 `gh api` 或任意 URL 工具。当前 GitHub
-只读工具统一使用 `repository.read`，管理员通过 Assistant Tool binding 选择具体可用
-操作。未来写操作必须有独立 capability、幂等键和按风险配置的用户确认或审批；它
+只读工具统一使用 `repository.read`。Direct Assistant 绑定一个 Plugin Connection
+后自动获得该 Manifest 声明的全部只读操作，管理员不再维护工具子集。未来写操作必须有独立 capability、幂等键和按风险配置的用户确认或审批；它
 不属于 V1 范围。
 
 Skill 可以保留流程说明，但只声明依赖：
@@ -544,17 +580,17 @@ Assistant 创建和更新接口通过可选的 `plugin_bindings` 管理模型工
   "plugin_bindings": [
     {
       "connection_uuid": "<connection-uuid>",
-      "tools": ["github_read_file", "github_search_code"],
       "enabled": true
     }
   ]
 }
 ```
 
-绑定时控制端校验已安装 Plugin、只读工具 allowlist、Connection 与 Secret 生命周期；
-响应只返回 Connection 身份、名称、Plugin key 和工具 key，不返回 endpoint、scope、
+绑定时控制端校验已安装 Plugin、Connection 与 Secret 生命周期；Manifest 是 Direct
+Plugin 工具集合的唯一来源，历史 `tools` 字段仅为兼容而接受，不再作为运行时 allowlist。
+响应只返回 Connection 身份、名称、Plugin key 和兼容性的工具信息，不返回 endpoint、scope、
 SecretVersion 内容或密文。Direct `general_chat` 至少需要一个启用的 Skill 或一个有效的
-Plugin Tool。Run 创建时保存非敏感 `loaded_plugins`，Worker 实际开始执行时按当前有效
+Plugin Connection。Run 创建时保存非敏感 `loaded_plugins`，Worker 实际开始执行时按当前有效
 绑定重新固化，并将工具定义下发给 LensNode。LensNode 使用模型真实 Tool Call ID
 创建 Tool ExecutionSnapshot，再通过 snapshot-bound lease 获取材料并调用固定的
 GitHub API；执行失败不会回退到旧凭证路径。
@@ -635,8 +671,8 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 ### GitHub V1 已满足
 
 - GitHub Plugin 可以同时出现在 DataSource 和 Skill 工具选择流程中；
-- 同一个 Connection 可绑定多个 DataSource 和多个 Assistant Plugin Tool；
-- 模型只能看到已授权 capability 对应的工具；
+- 同一个 Connection 可绑定多个 DataSource 和多个 Direct Assistant；
+- Direct Assistant 绑定 Connection 后可看到该 Manifest 的全部只读工具；
 - 原始 secret 不进入 prompt、Tool 参数、Run 快照和普通日志；
 - V1 只暴露代码圈定的只读 Tool，且不提供 raw exec 或任意 URL 请求；
 - LensNode 仅接收任务元数据，并按执行快照取得与任务绑定的短期 lease；

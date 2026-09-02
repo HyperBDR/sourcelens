@@ -2,8 +2,25 @@
   "key": "jira",
   "version": "1.0.0",
   "protocol_version": 1,
+  "capability_family": "plugin",
   "display_name": "Jira Cloud",
+  "icon": "assets/icon.svg",
   "description": "Connect approved Jira Cloud projects as Issue data sources and read-only assistant tools.",
+  "assistant_guidance": {
+    "summary": "Use Jira tools to search and inspect issues in approved Jira Cloud projects.",
+    "when_to_use": [
+      "The user asks for current issue information from an approved Jira project.",
+      "The user asks to find issues by text or inspect one issue key."
+    ],
+    "topics": [
+      {
+        "key": "issues",
+        "summary": "Search issues within an approved project, then inspect a specific issue.",
+        "details": "Use the project scope selected by the Connection. Search results are bounded. Use jira_get_issue for a known issue key and jira_search_issues when the issue key is unknown.",
+        "tool_keys": ["jira_search_issues", "jira_get_issue"]
+      }
+    ]
+  },
   "datasource_source_type": "jira",
   "handlers": {
     "control": "python_v1",

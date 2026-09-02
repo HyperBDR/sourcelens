@@ -887,7 +887,9 @@
                   >
                     <div class="overview-section-heading">
                       <div>
-                        <h3 class="overview-title">{{ t('lensRuns.smartCollaborationTitle') }}</h3>
+                        <h3 class="overview-title">
+                          {{ t('lensRuns.smartCollaborationTitle') }}
+                        </h3>
                         <p class="overview-section-description">
                           {{ t('lensRuns.smartCollaborationDescription') }}
                         </p>
@@ -900,7 +902,9 @@
                         class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
                       >
                         {{ assistant.name }}
-                        <span class="ml-1 text-indigo-500">· {{ assistant.capability }}</span>
+                        <span class="ml-1 text-indigo-500"
+                          >· {{ assistant.capability }}</span
+                        >
                       </span>
                       <span
                         v-if="!(detail.delegated_assistants || []).length"

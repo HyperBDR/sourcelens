@@ -70,10 +70,7 @@ test('guards restored run state with the current session load', async () => {
 test('shows a retryable node-offline error when run creation is unavailable', async () => {
   const source = await chatSource()
 
-  assert.match(
-    source,
-    /const errorCode = err\?\.response\?\.data\?\.detail/
-  )
+  assert.match(source, /const errorCode = err\?\.response\?\.data\?\.detail/)
   assert.match(source, /lensNodeErrorMessage\(errorCode, t\)/)
 })
 
@@ -154,18 +151,9 @@ test('loads sessions after selecting the route assistant', async () => {
 test('ignores a stale session list after switching to archived sessions', async () => {
   const source = await chatSource()
 
-  assert.match(
-    source,
-    /const loadGeneration = \+\+sessionLoadGeneration/
-  )
-  assert.match(
-    source,
-    /const loadedSessions = await listSessions\(/
-  )
-  assert.match(
-    source,
-    /if \(loadGeneration !== sessionLoadGeneration\) return/
-  )
+  assert.match(source, /const loadGeneration = \+\+sessionLoadGeneration/)
+  assert.match(source, /const loadedSessions = await listSessions\(/)
+  assert.match(source, /if \(loadGeneration !== sessionLoadGeneration\) return/)
   assert.match(
     source,
     /async function switchSessionView\(archived\) \{\s*if \(showArchivedSessions\.value === archived\) return\s*sessionLoadGeneration \+= 1/
@@ -255,10 +243,7 @@ test('keeps collapsed account actions inside the sidebar as icon controls', asyn
 test('creates the first session only when the user submits a prompt', async () => {
   const source = await chatSource()
   const submit = source.indexOf('async function submit()')
-  const createFirstSession = source.indexOf(
-    'await createNewSession(',
-    submit
-  )
+  const createFirstSession = source.indexOf('await createNewSession(', submit)
   const bindSession = source.indexOf(
     'const sessionAtSubmit = selectedSessionUuid.value',
     submit
@@ -455,10 +440,7 @@ test('keeps completed agent activity visible until the user collapses it', async
   const completedProgress = source.indexOf(
     'structuredProgress(message._runtimeState).items.length ||'
   )
-  const completedDetails = source.lastIndexOf(
-    '<details',
-    completedProgress
-  )
+  const completedDetails = source.lastIndexOf('<details', completedProgress)
 
   assert.notEqual(completedProgress, -1)
   assert.notEqual(completedDetails, -1)

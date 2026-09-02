@@ -203,9 +203,7 @@ test('filters and sorts credentials from the list toolbar', async ({
 
   await page.getByLabel('Provider').click()
   await page.getByRole('option', { name: 'All' }).click()
-  await page
-    .getByRole('combobox', { name: 'Validation status' })
-    .click()
+  await page.getByRole('combobox', { name: 'Validation status' }).click()
   await page.getByRole('option', { name: /Invalid|无效/ }).click()
   await expect(page.getByText('Unused GitLab credential')).toBeVisible()
   await expect(page.getByText('Bound GitHub credential')).toBeHidden()

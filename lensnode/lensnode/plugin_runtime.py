@@ -150,4 +150,9 @@ def _json_object(response, error_code):
         raise PluginRuntimeError(error_code) from exc
     if not isinstance(payload, dict):
         raise PluginRuntimeError(error_code)
+    data = payload.get("data")
+    if isinstance(data, dict) and (
+        "code" in payload or "message" in payload
+    ):
+        payload = data
     return payload

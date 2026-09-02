@@ -31,7 +31,6 @@ class PluginConnectionApiTests(TestCase):
             {
                 "name": "GitHub readonly",
                 "plugin_key": "github",
-                "endpoint": "https://github.com/",
                 "allowed_scope": {"repositories": ["owner/repo"]},
                 "secret_value": "ghp-example",
             },
@@ -41,6 +40,7 @@ class PluginConnectionApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertNotIn("secret_value", response.data)
         self.assertTrue(response.data["has_secret"])
+        self.assertEqual(response.data["secret_hint"], "••••••••mple")
         connection = Connection.objects.get(uuid=response.data["uuid"])
         self.assertEqual(connection.endpoint, "https://github.com")
         self.assertEqual(connection.secret_version.get_value(), "ghp-example")
@@ -83,6 +83,44 @@ class PluginConnectionApiTests(TestCase):
             cursor="",
             limit=50,
         )
+
+    @patch("lens.views.plugins.get_datasource_provider")
+    def test_resource_candidates_use_stored_secret(self, provider_factory):
+        connection = self._create_connection()
+        provider = provider_factory.return_value
+        provider.discover_connection_resources.return_value = {
+            "resources": {
+                "repositories": {
+                    "items": [
+                        {"value": "other/repo", "label": "other/repo"}
+                    ]
+                }
+            },
+            "next_cursor": "",
+        }
+
+        response = self.client.get(
+            f"/api/lens/admin/connections/{connection.uuid}/"
+            "resource-candidates/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        provider.discover_connection_resources.assert_called_once_with(
+            "stored-secret",
+            endpoint="https://github.com",
+            connection_config={},
+            query="",
+            cursor="",
+            limit=50,
+        )
+        self.assertEqual(
+            response.data["resources"]["repositories"]["items"][0][
+                "value"
+            ],
+            "other/repo",
+        )
+        self.assertNotIn("stored-secret", str(response.data))
 
     def test_update_secret_reuses_material_identity(self):
         material = SecretMaterial.objects.create(name="Existing")
@@ -258,6 +296,43 @@ class PluginConnectionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data["detail"], "CONNECTION_DISABLED")
+
+    @patch("lens.views.plugins.get_datasource_provider")
+    def test_resource_options_only_use_allowed_repository(self, get_provider):
+        connection = self._create_connection()
+        provider = get_provider.return_value
+        provider.discover_resource_options.return_value = {
+            "resources": {
+                "branches": {
+                    "items": [{"value": "main", "label": "main"}]
+                }
+            }
+        }
+
+        response = self.client.get(
+            f"/api/lens/admin/connections/{connection.uuid}/resources/",
+            {"resource": "branches", "repository": "owner/repo"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        provider.discover_resource_options.assert_called_once_with(
+            {"repositories": ["owner/repo"]},
+            "stored-secret",
+            "branches",
+            {"repository": "owner/repo"},
+            endpoint="https://github.com",
+            connection_config={},
+        )
+
+    def test_resource_options_reject_unknown_repository(self):
+        connection = self._create_connection()
+
+        response = self.client.get(
+            f"/api/lens/admin/connections/{connection.uuid}/resources/",
+            {"resource": "branches", "repository": "other/repo"},
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def _create_connection(self, **overrides):
         material = SecretMaterial.objects.create(name="GitHub PAT")

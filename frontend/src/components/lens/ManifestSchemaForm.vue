@@ -1,10 +1,6 @@
 <template>
   <div class="space-y-4">
-    <div
-      v-for="field in fields"
-      :key="field.key"
-      class="space-y-1"
-    >
+    <div v-for="field in fields" :key="field.key" class="space-y-1">
       <label
         :for="fieldId(field)"
         class="flex items-center justify-between gap-2 text-sm font-medium text-ink-700"
@@ -18,41 +14,151 @@
 
       <div
         v-if="isTreeField(field) && shouldRenderTree(field)"
-        class="max-h-64 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
+        class="overflow-hidden rounded-xl border border-line bg-surface"
       >
-        <div
-          v-for="group in treeGroups(field)"
-          :key="group.owner"
-          class="mb-2 overflow-hidden rounded-md border border-line bg-surface last:mb-0"
-        >
-          <label class="flex cursor-pointer items-center gap-2 bg-surface-sunken px-3 py-2 text-sm font-medium hover:bg-line-soft">
+        <div class="space-y-2.5 border-b border-line bg-surface-sunken p-3">
+          <div class="relative">
+            <svg
+              class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="9"
+                cy="9"
+                r="5.5"
+                stroke="currentColor"
+                stroke-width="1.5"
+              />
+              <path
+                d="m13 13 4 4"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-width="1.5"
+              />
+            </svg>
             <input
-              type="checkbox"
-              class="h-4 w-4 shrink-0 rounded-sm border-2 border-ink-300 accent-brand-600"
-              :checked="groupSelected(field, group)"
-              :indeterminate="groupPartial(field, group)"
-              @change="toggleGroup(field, group, $event.target.checked)"
+              :id="`${fieldId(field)}-search`"
+              :value="treeSearchQuery(field)"
+              type="search"
+              class="w-full rounded-lg border border-line bg-surface py-2 pl-9 pr-3 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+              :placeholder="treeSearchPlaceholder"
+              @input="setTreeSearch(field, $event.target.value)"
             />
-            <span class="min-w-0 flex-1 truncate text-ink-800">{{ group.owner }}</span>
-            <span class="text-xs font-normal text-ink-500">{{ group.items.length }}</span>
-          </label>
-          <div class="space-y-0.5 border-t border-line px-2 py-1.5">
-            <label
-              v-for="item in group.items"
-              :key="optionValue(item)"
-              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-ink-600">
+              {{ filteredTreeItemCount(field) }} /
+              {{ optionsFor(field).length }}
+              {{ resourceCountLabel }}
+            </span>
+            <span
+              class="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700"
+            >
+              {{ arrayValue(field).length }} {{ selectedCountLabel }}
+            </span>
+          </div>
+        </div>
+        <div class="max-h-72 space-y-2 overflow-y-auto p-2">
+          <div
+            v-for="group in filteredTreeGroups(field)"
+            :key="group.owner"
+            class="overflow-hidden rounded-lg border border-line bg-surface"
+          >
+            <div
+              class="flex items-center gap-2.5 bg-surface-sunken px-3 py-2.5 text-sm font-medium hover:bg-line-soft"
             >
               <input
                 type="checkbox"
-                class="h-4 w-4 shrink-0 rounded-sm border-2 border-ink-300 accent-brand-600"
-                :checked="arrayValue(field).includes(optionValue(item))"
-                @change="toggleArrayItem(field, optionValue(item), $event.target.checked)"
+                class="resource-checkbox"
+                :checked="groupSelected(field, group)"
+                :indeterminate="groupPartial(field, group)"
+                :aria-label="group.owner"
+                @change="toggleGroup(field, group, $event.target.checked)"
               />
-              <span class="min-w-0 truncate text-ink-700">{{ optionLabel(item) }}</span>
-              <span v-if="item.metadata?.private" class="text-xs text-ink-500">Private</span>
-            </label>
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-center gap-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                :aria-expanded="!isTreeGroupCollapsed(field, group)"
+                :aria-controls="treeGroupId(field, group)"
+                @click="toggleTreeGroup(field, group)"
+              >
+                <svg
+                  class="h-4 w-4 shrink-0 text-ink-400 transition-transform"
+                  :class="{ '-rotate-90': isTreeGroupCollapsed(field, group) }"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="m6 8 4 4 4-4"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                  />
+                </svg>
+                <span
+                  class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-[10px] font-semibold uppercase text-ink-500"
+                >
+                  {{ group.owner.slice(0, 2) }}
+                </span>
+                <span class="min-w-0 flex-1 truncate text-ink-800">{{
+                  group.owner
+                }}</span>
+                <span
+                  class="rounded-full bg-surface px-2 py-0.5 text-xs font-normal text-ink-500"
+                  >{{ group.items.length }}</span
+                >
+              </button>
+            </div>
+            <div
+              v-show="!isTreeGroupCollapsed(field, group)"
+              :id="treeGroupId(field, group)"
+              class="divide-y divide-line border-t border-line px-2"
+            >
+              <label
+                v-for="item in group.items"
+                :key="optionValue(item)"
+                class="flex cursor-pointer items-center gap-2.5 rounded px-2 py-2.5 text-sm hover:bg-surface-sunken"
+              >
+                <input
+                  type="checkbox"
+                  class="resource-checkbox"
+                  :checked="arrayValue(field).includes(optionValue(item))"
+                  @change="
+                    toggleArrayItem(
+                      field,
+                      optionValue(item),
+                      $event.target.checked
+                    )
+                  "
+                />
+                <span class="min-w-0 flex-1 truncate text-ink-700">{{
+                  repositoryName(item)
+                }}</span>
+                <span
+                  v-if="item.metadata?.private"
+                  class="rounded border border-line bg-surface-sunken px-1.5 py-0.5 text-[11px] text-ink-500"
+                  >{{ privateResourceLabel }}</span
+                >
+              </label>
+            </div>
           </div>
+          <p
+            v-if="!filteredTreeGroups(field).length"
+            class="px-3 py-6 text-center text-sm text-ink-500"
+          >
+            {{ resourceSearchEmptyText }}
+          </p>
         </div>
+      </div>
+      <div
+        v-else-if="isTreeField(field)"
+        class="rounded-xl border border-dashed border-line bg-surface-sunken px-4 py-6 text-center text-sm text-ink-500"
+      >
+        {{ emptyResourceText }}
       </div>
       <textarea
         v-else-if="isArrayField(field) && !isTreeField(field)"
@@ -68,6 +174,7 @@
         :id="fieldId(field)"
         :model-value="fieldValue(field)"
         :required="isRequired(field)"
+        :disabled="isResourceOptionDisabled(field)"
         @update:model-value="setField(field, $event)"
       >
         <option value="">{{ placeholder(field) }}</option>
@@ -99,11 +206,19 @@
         :readonly="isReadOnly(field)"
         :required="isRequired(field)"
         :autocomplete="field.format === 'password' ? 'new-password' : undefined"
-        :placeholder="field.description || ''"
+        :placeholder="inputPlaceholder(field)"
         @input="setField(field, normalizeInput(field, $event.target.value))"
       />
       <p
-        v-if="field.description && (!isTreeField(field) || shouldRenderTree(field))"
+        v-if="isResourceOptionLoading(field)"
+        class="text-xs leading-5 text-ink-500"
+      >
+        Loading options…
+      </p>
+      <p
+        v-if="
+          field.description && (!isTreeField(field) || shouldRenderTree(field))
+        "
         class="text-xs leading-5 text-ink-500"
       >
         {{ field.description }}
@@ -113,7 +228,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
@@ -121,17 +236,29 @@ const props = defineProps({
   schema: { type: Object, default: () => ({}) },
   modelValue: { type: Object, default: () => ({}) },
   resources: { type: Object, default: () => ({}) },
+  loadingResource: { type: String, default: '' },
+  emptyResourceText: { type: String, default: 'No resources loaded.' },
+  passwordPlaceholder: { type: String, default: '' },
+  treeSearchPlaceholder: { type: String, default: 'Search resources' },
+  resourceSearchEmptyText: { type: String, default: 'No matching resources.' },
+  resourceCountLabel: { type: String, default: 'resources' },
+  selectedCountLabel: { type: String, default: 'selected' },
+  privateResourceLabel: { type: String, default: 'Private' },
   controlClass: { type: String, default: 'form-input' }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['resource-options-request', 'update:modelValue'])
+const treeSearch = ref({})
+const collapsedTreeGroups = ref({})
 
 const fields = computed(() => {
   const properties = props.schema?.properties
   if (!properties || typeof properties !== 'object') return []
   return Object.entries(properties)
     .map(([key, value]) => ({ key, ...(value || {}) }))
-    .filter((field) => ['string', 'array', 'boolean', 'integer'].includes(field.type))
+    .filter((field) =>
+      ['string', 'array', 'boolean', 'integer'].includes(field.type)
+    )
 })
 
 function fieldId(field) {
@@ -139,7 +266,10 @@ function fieldId(field) {
 }
 
 function isRequired(field) {
-  return Array.isArray(props.schema?.required) && props.schema.required.includes(field.key)
+  return (
+    Array.isArray(props.schema?.required) &&
+    props.schema.required.includes(field.key)
+  )
 }
 
 function fieldValue(field) {
@@ -154,7 +284,12 @@ function defaultValue(field) {
 
 function arrayValue(field) {
   const value = fieldValue(field)
-  return Array.isArray(value) ? value : String(value || '').split(/[\n,]+/).map((item) => item.trim()).filter(Boolean)
+  return Array.isArray(value)
+    ? value
+    : String(value || '')
+        .split(/[\n,]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
 }
 
 function isArrayField(field) {
@@ -180,6 +315,54 @@ function treeGroups(field) {
   return [...groups.entries()].map(([owner, items]) => ({ owner, items }))
 }
 
+function treeSearchQuery(field) {
+  return treeSearch.value[field.key] || ''
+}
+
+function setTreeSearch(field, value) {
+  treeSearch.value = { ...treeSearch.value, [field.key]: value }
+}
+
+function filteredTreeGroups(field) {
+  const query = treeSearchQuery(field).trim().toLowerCase()
+  if (!query) return treeGroups(field)
+  return treeGroups(field).flatMap((group) => {
+    if (group.owner.toLowerCase().includes(query)) return [group]
+    const items = group.items.filter((item) =>
+      `${optionValue(item)} ${optionLabel(item)}`.toLowerCase().includes(query)
+    )
+    return items.length ? [{ ...group, items }] : []
+  })
+}
+
+function filteredTreeItemCount(field) {
+  return filteredTreeGroups(field).reduce(
+    (total, group) => total + group.items.length,
+    0
+  )
+}
+
+function treeGroupKey(field, group) {
+  return `${field.key}:${group.owner}`
+}
+
+function treeGroupId(field, group) {
+  return `${fieldId(field)}-group-${encodeURIComponent(group.owner)}`
+}
+
+function isTreeGroupCollapsed(field, group) {
+  if (treeSearchQuery(field).trim()) return false
+  return Boolean(collapsedTreeGroups.value[treeGroupKey(field, group)])
+}
+
+function toggleTreeGroup(field, group) {
+  const key = treeGroupKey(field, group)
+  collapsedTreeGroups.value = {
+    ...collapsedTreeGroups.value,
+    [key]: !collapsedTreeGroups.value[key]
+  }
+}
+
 function groupSelected(field, group) {
   const selected = arrayValue(field)
   return group.items.every((item) => selected.includes(optionValue(item)))
@@ -187,7 +370,9 @@ function groupSelected(field, group) {
 
 function groupPartial(field, group) {
   const selected = arrayValue(field)
-  const count = group.items.filter((item) => selected.includes(optionValue(item))).length
+  const count = group.items.filter((item) =>
+    selected.includes(optionValue(item))
+  ).length
   return count > 0 && count < group.items.length
 }
 
@@ -208,7 +393,23 @@ function toggleArrayItem(field, value, checked) {
 }
 
 function isResourceOptionField(field) {
-  return field.format === 'provider-resource-option' && optionsFor(field).length > 0
+  return field.format === 'provider-resource-option'
+}
+
+function isResourceOptionLoading(field) {
+  return (
+    field.format === 'provider-resource-option' &&
+    props.loadingResource === field.resource
+  )
+}
+
+function isResourceOptionDisabled(field) {
+  if (isResourceOptionLoading(field)) return true
+  if (field.format !== 'provider-resource-option') return false
+  const dependency = fields.value.find(
+    (candidate) => candidate.key === field.depends_on
+  )
+  return !dependency || !fieldValue(dependency)
 }
 
 function isResourceField(field) {
@@ -224,39 +425,39 @@ function optionsFor(field) {
       ? dependentOptions(field)
       : props.resources?.[field.resource]?.items
   const normalized = Array.isArray(options) ? [...options] : []
+  if (isTreeField(field)) return normalized
   const currentValue = fieldValue(field)
   const currentValues = Array.isArray(currentValue)
     ? currentValue
     : [currentValue]
-  currentValues.filter((value) => value !== '').forEach((value) => {
-    if (!normalized.some((option) => optionValue(option) === value)) {
-      normalized.push({ value, label: value })
-    }
-  })
+  currentValues
+    .filter((value) => value !== '')
+    .forEach((value) => {
+      if (!normalized.some((option) => optionValue(option) === value)) {
+        normalized.push({ value, label: value })
+      }
+    })
   return normalized
 }
 
+function repositoryName(option) {
+  const label = optionLabel(option)
+  const parts = String(label).split('/')
+  return parts.length > 1 ? parts.slice(1).join('/') : label
+}
+
 function dependentOptions(field) {
-  const dependency = fields.value.find(
-    (candidate) => candidate.key === field.depends_on
-  )
-  if (!dependency) return []
-  const items = props.resources?.[dependency.resource]?.items
-  if (!Array.isArray(items)) return []
-  const selectedValue = fieldValue(dependency)
-  const item = items.find(
-    (candidate) => optionValue(candidate) === selectedValue
-  )
-  const options = item?.options?.[field.resource]
-  return Array.isArray(options) ? options : []
+  return props.resources?.[field.resource]?.items || []
 }
 
 function optionValue(option) {
-  return typeof option === 'object' ? option.value ?? '' : option
+  return typeof option === 'object' ? (option.value ?? '') : option
 }
 
 function optionLabel(option) {
-  return typeof option === 'object' ? option.label ?? option.value ?? '' : option
+  return typeof option === 'object'
+    ? (option.label ?? option.value ?? '')
+    : option
 }
 
 function placeholder(field) {
@@ -268,6 +469,13 @@ function inputType(field) {
   if (field.type === 'integer') return 'number'
   if (field.format === 'uri') return 'url'
   return 'text'
+}
+
+function inputPlaceholder(field) {
+  if (field.format === 'password' && props.passwordPlaceholder) {
+    return props.passwordPlaceholder
+  }
+  return field.description || ''
 }
 
 function isReadOnly(field) {
@@ -285,7 +493,14 @@ function normalizeInput(field, value) {
 function setField(field, value) {
   const nextValue = { ...props.modelValue, [field.key]: value }
   fields.value.forEach((candidate) => {
-    if (candidate.depends_on === field.key) nextValue[candidate.key] = ''
+    if (candidate.depends_on !== field.key) return
+    nextValue[candidate.key] = ''
+    if (value) {
+      emit('resource-options-request', {
+        resource: candidate.resource,
+        selectedValues: { [field.key]: value }
+      })
+    }
   })
   emit('update:modelValue', nextValue)
 }
@@ -300,3 +515,16 @@ function updateArray(field, value) {
   )
 }
 </script>
+
+<style scoped>
+.resource-checkbox {
+  @apply h-4 w-4 shrink-0 appearance-none rounded-[3px] border-2
+    border-ink-300 bg-surface transition checked:border-brand-600
+    checked:bg-brand-600 focus:outline-none focus:ring-2
+    focus:ring-brand-500/20;
+}
+
+.resource-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m4 8 2.5 2.5L12 5'/%3E%3C/svg%3E");
+}
+</style>

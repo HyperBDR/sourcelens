@@ -137,32 +137,72 @@ class GitLabDatasourceProvider(DatasourceProvider):
         client=None,
         request_context=None,
     ):
-        """Discover bounded metadata for explicitly approved projects."""
+        """Return the explicit project allowlist without remote requests."""
 
         self.validate_connection(endpoint, connection_config)
-        base_url = _endpoint(endpoint)
         scope = self.validate_connection_scope(connection_scope)
+        del secret, client, request_context
+        return {
+            "resources": {
+                "projects": {
+                    "items": [
+                        {"value": project, "label": project}
+                        for project in scope["projects"]
+                    ]
+                }
+            }
+        }
+
+    def discover_resource_options(
+        self,
+        connection_scope,
+        secret,
+        resource,
+        selected_values,
+        endpoint="",
+        connection_config=None,
+        client=None,
+        request_context=None,
+    ):
+        """Return branches for one project in the approved allowlist."""
+
+        if resource != "branches":
+            raise DatasourceProviderError("resource options are unsupported")
+        self.validate_connection(endpoint, connection_config)
+        if not isinstance(selected_values, dict):
+            raise DatasourceProviderError("resource dependency is invalid")
+        project = _project_name(selected_values.get("project"))
+        allowed = {
+            item.casefold()
+            for item in self.validate_connection_scope(
+                connection_scope
+            )["projects"]
+        }
+        if project.casefold() not in allowed:
+            raise DatasourceProviderError("project is outside connection scope")
         token = _secret_value(secret)
         context = request_context or PluginRequestContext(
-            max_concurrency=GITLAB_DISCOVERY_WORKERS,
             timeout_seconds=GITLAB_TIMEOUT_SECONDS,
         )
+        encoded = quote(project, safe="")
         with _GitLabClient(client) as gitlab_client:
-            projects = scope["projects"]
-            resources, warnings = context.parallel_map(
-                projects,
-                lambda project: _gitlab_project_resource(
+            branches = context.run(
+                lambda: _gitlab_json(
                     gitlab_client,
-                    base_url,
-                    project,
+                    _endpoint(endpoint),
+                    f"/api/v4/projects/{encoded}/repository/branches",
                     token,
-                ),
-                "project",
+                    params={"per_page": GITLAB_MAX_BRANCHES, "page": 1},
+                )
             )
-        result = {"resources": {"projects": {"items": resources}}}
-        if warnings:
-            result["warnings"] = warnings
-        return result
+        if not isinstance(branches, list):
+            raise DatasourceProviderError("GITLAB_RESPONSE_INVALID")
+        items = []
+        for branch in branches[:GITLAB_MAX_BRANCHES]:
+            name = branch.get("name") if isinstance(branch, dict) else None
+            if isinstance(name, str) and name:
+                items.append({"value": name[:255], "label": name[:255]})
+        return {"resources": {"branches": {"items": items}}}
 
     def validate_datasource_config(
         self,
@@ -304,55 +344,6 @@ def _secret_value(value):
     if not isinstance(value, str) or not value:
         raise DatasourceProviderError("GITLAB_SECRET_UNAVAILABLE")
     return value
-
-
-def _gitlab_project_resource(client, endpoint, project, token):
-    """Return safe project and branch metadata for one allowed resource."""
-
-    encoded = quote(project, safe="")
-    metadata = _gitlab_json(
-        client,
-        endpoint,
-        f"/api/v4/projects/{encoded}",
-        token,
-    )
-    branches = _gitlab_json(
-        client,
-        endpoint,
-        f"/api/v4/projects/{encoded}/repository/branches",
-        token,
-        params={"per_page": GITLAB_MAX_BRANCHES, "page": 1},
-    )
-    if not isinstance(metadata, dict) or not isinstance(branches, list):
-        raise DatasourceProviderError("GITLAB_RESPONSE_INVALID")
-    full_name = metadata.get("path_with_namespace")
-    default_branch = metadata.get("default_branch")
-    visibility = metadata.get("visibility")
-    if (
-        not isinstance(full_name, str)
-        or full_name.casefold() != project.casefold()
-        or not isinstance(default_branch, str)
-        or not isinstance(visibility, str)
-    ):
-        raise DatasourceProviderError("GITLAB_RESPONSE_INVALID")
-    branch_names = []
-    for item in branches[:GITLAB_MAX_BRANCHES]:
-        name = item.get("name") if isinstance(item, dict) else None
-        if isinstance(name, str) and name:
-            branch_names.append(name[:255])
-    return {
-        "value": full_name[:255],
-        "label": full_name[:255],
-        "metadata": {
-            "default_branch": default_branch[:255],
-            "visibility": visibility[:32],
-        },
-        "options": {
-            "branches": [
-                {"value": name, "label": name} for name in branch_names
-            ]
-        },
-    }
 
 
 def _gitlab_json(client, endpoint, path, token, params=None):

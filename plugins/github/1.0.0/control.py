@@ -39,6 +39,67 @@ GITHUB_TIMEOUT_SECONDS = 15
 GITHUB_MAX_BRANCH_LENGTH = 255
 GITHUB_MAX_DIRECTORY_LENGTH = 1000
 SEARCH_SCOPE_PATTERN = re.compile(r"(?:repo|org|user):", re.IGNORECASE)
+GITHUB_TOOL_KEYS = frozenset(
+    {
+        "github_read_file",
+        "github_search_code",
+        "github_repository_get",
+        "github_branch_list",
+        "github_commit_list",
+        "github_commit_get",
+        "github_issue_list",
+        "github_issue_get",
+        "github_issue_comments",
+        "github_pull_request_list",
+        "github_pull_request_get",
+        "github_pull_request_files",
+        "github_pull_request_reviews",
+        "github_release_list",
+        "github_workflow_run_list",
+        "github_workflow_run_get",
+    }
+)
+PAGINATED_TOOL_KEYS = frozenset(
+    {
+        "github_branch_list",
+        "github_commit_list",
+        "github_issue_list",
+        "github_issue_comments",
+        "github_pull_request_list",
+        "github_pull_request_files",
+        "github_pull_request_reviews",
+        "github_release_list",
+        "github_workflow_run_list",
+    }
+)
+NUMBERED_TOOL_KEYS = frozenset(
+    {
+        "github_issue_get",
+        "github_issue_comments",
+        "github_pull_request_get",
+        "github_pull_request_files",
+        "github_pull_request_reviews",
+    }
+)
+WORKFLOW_STATUSES = frozenset(
+    {
+        "action_required",
+        "cancelled",
+        "completed",
+        "failure",
+        "in_progress",
+        "neutral",
+        "pending",
+        "queued",
+        "requested",
+        "skipped",
+        "stale",
+        "startup_failure",
+        "success",
+        "timed_out",
+        "waiting",
+    }
+)
 
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "github"
@@ -66,7 +127,10 @@ class GitHubDatasourceProvider(DatasourceProvider):
             raise DatasourceProviderError(
                 "GitHub connection config contains unsupported fields"
             )
-        parsed = urlsplit(str(endpoint or "").strip())
+        normalized_endpoint = str(endpoint or "").strip()
+        if not normalized_endpoint:
+            return "https://github.com"
+        parsed = urlsplit(normalized_endpoint)
         if (
             parsed.scheme != "https"
             or parsed.hostname != "github.com"
@@ -149,37 +213,67 @@ class GitHubDatasourceProvider(DatasourceProvider):
         client=None,
         request_context=None,
     ):
-        """Discover bounded metadata for explicitly approved repositories."""
+        """Return the explicit repository allowlist without remote requests."""
 
         if endpoint or connection_config:
             self.validate_connection(endpoint, connection_config)
         scope = self.validate_connection_scope(connection_scope)
-        token = _secret_value(secret)
-        context = request_context or PluginRequestContext(
-            max_concurrency=GITHUB_DISCOVERY_WORKERS,
-            timeout_seconds=GITHUB_TIMEOUT_SECONDS,
-        )
-        with _GitHubClient(client) as github_client:
-            repositories = scope["repositories"]
-            resources, warnings = context.parallel_map(
-                repositories,
-                lambda repository: _github_repository_resource(
-                    github_client,
-                    repository,
-                    token,
-                ),
-                "repository",
-            )
-        result = {
+        del secret, client, request_context
+        return {
             "resources": {
                 "repositories": {
-                    "items": resources,
+                    "items": [
+                        {"value": repository, "label": repository}
+                        for repository in scope["repositories"]
+                    ],
                 }
             }
         }
-        if warnings:
-            result["warnings"] = warnings
-        return result
+
+    def discover_resource_options(
+        self,
+        connection_scope,
+        secret,
+        resource,
+        selected_values,
+        endpoint="",
+        connection_config=None,
+        client=None,
+        request_context=None,
+    ):
+        """Return branches for one repository in the approved allowlist."""
+
+        if resource != "branches":
+            raise DatasourceProviderError("resource options are unsupported")
+        if endpoint or connection_config:
+            self.validate_connection(endpoint, connection_config)
+        if not isinstance(selected_values, dict):
+            raise DatasourceProviderError("resource dependency is invalid")
+        repository = _repository_name(selected_values.get("repository"))
+        if repository.casefold() not in _allowed_repositories(connection_scope):
+            raise DatasourceProviderError("repository is outside connection scope")
+        token = _secret_value(secret)
+        context = request_context or PluginRequestContext(
+            timeout_seconds=GITHUB_TIMEOUT_SECONDS,
+        )
+        path = quote(repository, safe="/")
+        with _GitHubClient(client) as github_client:
+            branches = context.run(
+                lambda: _github_json(
+                    github_client,
+                    f"/repos/{path}/branches",
+                    token,
+                    params={"per_page": GITHUB_MAX_BRANCHES, "page": 1},
+                )
+            )
+        if not isinstance(branches, list):
+            raise DatasourceProviderError("GITHUB_RESPONSE_INVALID")
+        items = []
+        for branch in branches[:GITHUB_MAX_BRANCHES]:
+            name = branch.get("name") if isinstance(branch, dict) else None
+            if isinstance(name, str) and name:
+                items.append({"value": name[:255], "label": name[:255]})
+        return {"resources": {"branches": {"items": items}}}
 
     def discover_connection_resources(
         self,
@@ -402,51 +496,6 @@ def _connection_resource_page(value):
     return page
 
 
-def _github_repository_resource(client, repository, token):
-    """Return safe repository and branch metadata for one allowed resource."""
-
-    path = quote(repository, safe="/")
-    metadata = _github_json(client, f"/repos/{path}", token)
-    branches = _github_json(
-        client,
-        f"/repos/{path}/branches",
-        token,
-        params={"per_page": GITHUB_MAX_BRANCHES, "page": 1},
-    )
-    if not isinstance(metadata, dict) or not isinstance(branches, list):
-        raise DatasourceProviderError("GITHUB_RESPONSE_INVALID")
-    full_name = metadata.get("full_name")
-    default_branch = metadata.get("default_branch")
-    private = metadata.get("private")
-    if (
-        not isinstance(full_name, str)
-        or full_name.casefold() != repository.casefold()
-        or not isinstance(default_branch, str)
-        or not isinstance(private, bool)
-    ):
-        raise DatasourceProviderError("GITHUB_RESPONSE_INVALID")
-    branch_names = []
-    for item in branches[:GITHUB_MAX_BRANCHES]:
-        name = item.get("name") if isinstance(item, dict) else None
-        if isinstance(name, str) and name:
-            branch_names.append(name[:255])
-    repository_name = full_name[:201]
-    return {
-        "value": repository_name,
-        "label": repository_name,
-        "metadata": {
-            "default_branch": default_branch[:255],
-            "private": private,
-        },
-        "options": {
-            "branches": [
-                {"value": name, "label": name}
-                for name in branch_names
-            ]
-        },
-    }
-
-
 def _github_json(client, path, token, params=None):
     """Read bounded JSON from the fixed GitHub API host."""
 
@@ -510,6 +559,8 @@ class GitHubToolProvider:
     def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
         """Return canonical endpoint and authorized arguments."""
 
+        if tool_key not in GITHUB_TOOL_KEYS:
+            raise ToolProviderError("tool is unsupported")
         try:
             endpoint = GitHubDatasourceProvider().validate_connection(
                 endpoint,
@@ -525,11 +576,12 @@ class GitHubToolProvider:
             raise ToolProviderError(str(exc)) from exc
         if repository.casefold() not in allowed:
             raise ToolProviderError("repository is outside connection scope")
+        normalized = {"repository": repository}
         if tool_key == "github_read_file":
-            normalized = {
-                "repository": repository,
-                "path": _tool_path(arguments.get("path"), required=True),
-            }
+            normalized["path"] = _tool_path(
+                arguments.get("path"),
+                required=True,
+            )
             ref = _tool_text(arguments.get("ref"), "ref", 255)
             if ref:
                 normalized["ref"] = ref
@@ -545,13 +597,10 @@ class GitHubToolProvider:
                 raise ToolProviderError(
                     "query scope qualifiers are not allowed"
                 )
-            normalized = {
-                "repository": repository,
-                "query": query,
-                "max_results": _tool_max_results(
-                    arguments.get("max_results")
-                ),
-            }
+            normalized["query"] = query
+            normalized["max_results"] = _tool_max_results(
+                arguments.get("max_results")
+            )
             path = _tool_path(arguments.get("path"), required=False)
             if path and (
                 any(character.isspace() for character in path) or '"' in path
@@ -560,7 +609,62 @@ class GitHubToolProvider:
             if path:
                 normalized["path"] = path
             return endpoint, normalized
-        raise ToolProviderError("tool is unsupported")
+        if tool_key in PAGINATED_TOOL_KEYS:
+            normalized.update(_tool_pagination(arguments))
+        if tool_key in NUMBERED_TOOL_KEYS:
+            normalized["number"] = _tool_positive_integer(
+                arguments.get("number"),
+                "number",
+            )
+        if tool_key == "github_commit_list":
+            ref = _tool_text(arguments.get("ref"), "ref", 255)
+            path = _tool_path(arguments.get("path"), required=False)
+            if ref:
+                normalized["ref"] = ref
+            if path:
+                normalized["path"] = path
+        elif tool_key == "github_commit_get":
+            normalized["ref"] = _tool_text(
+                arguments.get("ref"),
+                "ref",
+                255,
+                required=True,
+            )
+        elif tool_key == "github_issue_list":
+            normalized["state"] = _tool_choice(
+                arguments.get("state"),
+                "state",
+                {"open", "closed", "all"},
+                "open",
+            )
+            labels = _tool_text(arguments.get("labels"), "labels", 500)
+            if labels:
+                normalized["labels"] = labels
+        elif tool_key == "github_pull_request_list":
+            normalized["state"] = _tool_choice(
+                arguments.get("state"),
+                "state",
+                {"open", "closed", "all"},
+                "open",
+            )
+        elif tool_key == "github_workflow_run_list":
+            status = _tool_choice(
+                arguments.get("status"),
+                "status",
+                WORKFLOW_STATUSES,
+                "",
+            )
+            branch = _tool_text(arguments.get("branch"), "branch", 255)
+            if status:
+                normalized["status"] = status
+            if branch:
+                normalized["branch"] = branch
+        elif tool_key == "github_workflow_run_get":
+            normalized["run_id"] = _tool_positive_integer(
+                arguments.get("run_id"),
+                "run_id",
+            )
+        return endpoint, normalized
 
 
 def _tool_text(value, field, limit, required=False):
@@ -606,6 +710,53 @@ def _tool_max_results(value):
     ):
         raise ToolProviderError("max_results must be between 1 and 20")
     return value
+
+
+def _tool_pagination(arguments):
+    """Return bounded one-based pagination for GitHub list Tools."""
+
+    return {
+        "page": _tool_integer(arguments.get("page"), "page", 1, 1000, 1),
+        "per_page": _tool_integer(
+            arguments.get("per_page"),
+            "per_page",
+            1,
+            50,
+            20,
+        ),
+    }
+
+
+def _tool_positive_integer(value, field):
+    """Return a required positive integer Tool argument."""
+
+    return _tool_integer(value, field, 1, 2**63 - 1, None)
+
+
+def _tool_integer(value, field, minimum, maximum, default):
+    """Return one bounded integer Tool argument."""
+
+    if value is None and default is not None:
+        return default
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or value > maximum
+    ):
+        raise ToolProviderError(f"{field} is invalid")
+    return value
+
+
+def _tool_choice(value, field, choices, default):
+    """Return a normalized enum-like Tool argument."""
+
+    if value in (None, ""):
+        return default
+    text = _tool_text(value, field, 64, required=True).lower()
+    if text not in choices:
+        raise ToolProviderError(f"{field} is invalid")
+    return text
 
 
 DATASOURCE_PROVIDER = GitHubDatasourceProvider()

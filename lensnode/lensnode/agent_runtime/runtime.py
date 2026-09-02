@@ -49,10 +49,14 @@ from ..planned_evidence import (
     validate_citations,
     validate_evidence_sufficiency,
 )
-from ..plugin_tools import build_plugin_tools
+from ..plugin_tools import (
+    build_plugin_guidance_tool,
+    build_plugin_tools,
+)
 from ..runtime_modes import runtime_mode_for
 from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
+from .capability_protocol import CAPABILITY_FAMILIES
 from .direct_answer import (
     _answer_general_chat_directly,
     _contains_unfulfilled_action_promise,
@@ -784,6 +788,11 @@ class LensDeepAgentRuntime:
             emit_event=state.emit_agent_event,
         )
         state.tools.extend(state.plugin_tools)
+        state.plugin_guidance_tool = build_plugin_guidance_tool(
+            state.command
+        )
+        if state.plugin_guidance_tool is not None:
+            state.tools.append(state.plugin_guidance_tool)
         state.mcp_tools = load_mcp_tools(
             state.resources.mcp_configs,
             discovery_timeout_s=getattr(
@@ -926,14 +935,7 @@ class LensDeepAgentRuntime:
                 (
                     item
                     for item in required
-                    if item
-                    in {
-                        "artifact_delivery",
-                        "mcp",
-                        "skill",
-                        "tool",
-                        "workspace",
-                    }
+                    if item in CAPABILITY_FAMILIES or item == "tool"
                 ),
                 "tool",
             )
@@ -1146,6 +1148,7 @@ class LensDeepAgentRuntime:
                 "skill_count": len(state.resources.skill_paths),
                 "mcp_tool_count": len(state.mcp_tools),
                 "plugin_tool_count": len(state.plugin_tools),
+                "plugin_guidance": bool(state.plugin_guidance_tool),
                 "mcp_deferred": state.mcp_middleware is not None,
                 "task_tool_enabled": use_subagents,
                 "mcp_config_path": str(state.resources.mcp_config_path),

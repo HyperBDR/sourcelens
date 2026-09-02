@@ -513,19 +513,25 @@ class PluginBindingsField(serializers.Field):
                 "connection_name": binding.connection.name,
                 "plugin_key": binding.connection.plugin_key,
                 "tools": list(binding.tools or []),
+                "all_tools": True,
                 "enabled": binding.enabled,
             }
             for binding in bindings.select_related("connection").all()
         ]
 
     def to_internal_value(self, data):
-        """Validate requested tools against the installed Plugin contract."""
+        """Validate Plugin connections and normalize legacy tool lists.
+
+        Direct Assistant bindings grant the complete read-only capability set
+        declared by the installed Plugin manifest.  The legacy ``tools``
+        field is accepted for wire compatibility and validated when present,
+        but it is not an allowlist for runtime dispatch.
+        """
 
         if not isinstance(data, list):
             raise serializers.ValidationError("Expected a list of bindings.")
         validated = []
         seen = set()
-        seen_enabled_tools = set()
         for item in data:
             if not isinstance(item, dict):
                 raise serializers.ValidationError(
@@ -567,7 +573,7 @@ class PluginBindingsField(serializers.Field):
                 raise serializers.ValidationError(str(exc)) from exc
             available = {tool.key for tool in plugin.tools}
             requested = item.get("tools")
-            if requested is None:
+            if requested is None or requested == []:
                 requested = sorted(available)
             if (
                 not isinstance(requested, list)
@@ -579,12 +585,6 @@ class PluginBindingsField(serializers.Field):
                 raise serializers.ValidationError(
                     "Plugin tools must be installed read-only tools."
                 )
-            if enabled and seen_enabled_tools.intersection(requested):
-                raise serializers.ValidationError(
-                    "Enabled Plugin tool names must be unique."
-                )
-            if enabled:
-                seen_enabled_tools.update(requested)
             seen.add(connection.pk)
             validated.append(
                 {
@@ -1187,11 +1187,9 @@ class AssistantSerializer(serializers.ModelSerializer):
                 continue
             connection = binding["connection"]
             plugin = latest_plugin(connection.plugin_key)
-            selected_tools = set(binding.get("tools") or [])
             capabilities_by_plugin.setdefault(plugin.key, set()).update(
                 tool.capability
                 for tool in plugin.tools
-                if tool.key in selected_tools
             )
         for adapter in self._plugin_mcp_adapters(attrs):
             connection = adapter.connection
@@ -1238,23 +1236,26 @@ class AssistantSerializer(serializers.ModelSerializer):
         return bool(self._plugin_mcp_adapters(attrs))
 
     def _validate_plugin_tool_uniqueness(self, attrs):
-        """Reject model Tool name collisions across native and MCP bindings."""
+        """Reject Tool name collisions across native and MCP bindings."""
 
         plugin_bindings = attrs.get("plugin_bindings")
         if plugin_bindings is None and self.instance is not None:
             plugin_bindings = [
                 {
-                    "tools": binding.tools,
+                    "connection": binding.connection,
                     "enabled": binding.enabled,
                 }
                 for binding in self.instance.plugin_bindings.all()
             ]
-        tool_keys = [
-            key
-            for binding in (plugin_bindings or [])
-            if binding.get("enabled", True)
-            for key in (binding.get("tools") or [])
-        ]
+        tool_keys = []
+        for binding in plugin_bindings or []:
+            if not binding.get("enabled", True):
+                continue
+            connection = binding.get("connection")
+            if connection is None:
+                continue
+            plugin = latest_plugin(connection.plugin_key)
+            tool_keys.extend(tool.key for tool in plugin.tools)
         tool_keys.extend(
             key
             for adapter in self._plugin_mcp_adapters(attrs)
@@ -1625,12 +1626,14 @@ class PluginInvocationSerializer(serializers.ModelSerializer):
 class ConnectionSerializer(serializers.ModelSerializer):
     """Admin serializer for reusable Plugin connections."""
 
+    endpoint = serializers.URLField(required=False, allow_blank=True)
     secret_value = serializers.CharField(
         write_only=True,
         required=False,
         allow_blank=False,
     )
     has_secret = serializers.SerializerMethodField()
+    secret_hint = serializers.SerializerMethodField()
     secret_version_uuid = serializers.SerializerMethodField()
     datasource_count = serializers.SerializerMethodField()
     assistant_count = serializers.SerializerMethodField()
@@ -1646,6 +1649,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
             "allowed_scope",
             "secret_value",
             "has_secret",
+            "secret_hint",
             "secret_version_uuid",
             "datasource_count",
             "assistant_count",
@@ -1656,6 +1660,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "uuid",
             "has_secret",
+            "secret_hint",
             "secret_version_uuid",
             "datasource_count",
             "assistant_count",
@@ -1668,6 +1673,17 @@ class ConnectionSerializer(serializers.ModelSerializer):
 
         version = connection.secret_version
         return bool(version and version.encrypted_value)
+
+    def get_secret_hint(self, connection):
+        """Return a non-recoverable display hint for the stored secret."""
+
+        version = connection.secret_version
+        if version is None or not version.encrypted_value:
+            return ""
+        value = version.get_value()
+        if len(value) < 8:
+            return "••••••••"
+        return f"••••••••{value[-4:]}"
 
     def get_secret_version_uuid(self, connection):
         """Return the opaque SecretVersion identity for audit views."""

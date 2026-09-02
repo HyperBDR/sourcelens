@@ -115,6 +115,8 @@ class PluginToolSnapshotTests(TestCase):
             path = Path(root) / "github" / "1.0.0"
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
+            (path / "control.py").write_text("PLUGIN_API_VERSION = 1\n")
+            (path / "runtime.py").write_text("PLUGIN_API_VERSION = 1\n")
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 yield
 

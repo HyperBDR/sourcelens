@@ -16,6 +16,7 @@ CONNECTION_WRITE_TARGET_PATTERN = re.compile(
     r"allowed_scope\.[a-z][a-z0-9_-]{0,63})$"
 )
 SUPPORTED_PROTOCOL_VERSION = 1
+SUPPORTED_CAPABILITY_FAMILIES = frozenset({"plugin"})
 ALLOWED_HANDLERS = frozenset(
     {
         "python_v1",
@@ -37,6 +38,10 @@ SCHEMA_FORMATS = frozenset(
 )
 PLUGIN_ICON_SUFFIXES = frozenset({".png", ".svg", ".webp"})
 PLUGIN_ICON_MAX_BYTES = 256 * 1024
+GUIDANCE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+GUIDANCE_MAX_TOPICS = 24
+GUIDANCE_MAX_WHEN_TO_USE = 8
+GUIDANCE_MAX_TOOLS_PER_TOPIC = 32
 
 
 class PluginRegistryError(ValueError):
@@ -54,6 +59,7 @@ class InstalledPlugin:
     key: str
     version: str
     protocol_version: int
+    capability_family: str
     display_name: str
     description: str
     icon: str
@@ -65,6 +71,7 @@ class InstalledPlugin:
     runtime_handler: str
     datasource_handler: str
     tools: tuple
+    assistant_guidance: dict
     path: Path
 
 
@@ -75,6 +82,7 @@ class InstalledPluginTool:
     key: str
     description: str
     capability: str
+    capability_family: str
     side_effect: str
     input_schema: dict
 
@@ -189,7 +197,19 @@ def _load_plugin(root, key_dir, version_dir):
     if control_handler == "python_v1" or runtime_handler == "python_v1":
         _validate_python_entrypoint(version_dir, "control")
         _validate_python_entrypoint(version_dir, "runtime")
-    tools = _validate_tools(manifest.get("tools") or [])
+    capability_family = manifest.get("capability_family", "plugin")
+    if capability_family not in SUPPORTED_CAPABILITY_FAMILIES:
+        raise PluginRegistryError(
+            "plugin capability family is not allowed"
+        )
+    tools = _validate_tools(
+        manifest.get("tools") or [],
+        capability_family=capability_family,
+    )
+    assistant_guidance = _validate_assistant_guidance(
+        manifest.get("assistant_guidance"),
+        tools,
+    )
     display_name = _bounded_manifest_text(
         manifest.get("display_name") or key,
         "plugin display name",
@@ -222,6 +242,7 @@ def _load_plugin(root, key_dir, version_dir):
         key=key,
         version=version,
         protocol_version=protocol_version,
+        capability_family=capability_family,
         display_name=display_name,
         description=description,
         icon=icon,
@@ -233,8 +254,100 @@ def _load_plugin(root, key_dir, version_dir):
         runtime_handler=runtime_handler,
         datasource_handler=datasource_handler,
         tools=tools,
+        assistant_guidance=assistant_guidance,
         path=version_dir.resolve(),
     )
+
+
+def _validate_assistant_guidance(value, tools):
+    """Return bounded, advisory guidance for model Plugin discovery."""
+
+    if value is None:
+        return {"summary": "", "when_to_use": [], "topics": []}
+    if not isinstance(value, dict):
+        raise PluginRegistryError("plugin assistant guidance is invalid")
+    summary = _bounded_manifest_text(
+        value.get("summary") or "",
+        "plugin assistant guidance summary",
+        600,
+        required=False,
+    )
+    when_to_use = value.get("when_to_use") or []
+    if (
+        not isinstance(when_to_use, list)
+        or len(when_to_use) > GUIDANCE_MAX_WHEN_TO_USE
+    ):
+        raise PluginRegistryError(
+            "plugin assistant guidance triggers are invalid"
+        )
+    normalized_when_to_use = [
+        _bounded_manifest_text(
+            item,
+            "plugin assistant guidance trigger",
+            240,
+        )
+        for item in when_to_use
+    ]
+    tool_keys = {tool.key for tool in tools}
+    topics = value.get("topics") or []
+    if not isinstance(topics, list) or len(topics) > GUIDANCE_MAX_TOPICS:
+        raise PluginRegistryError("plugin assistant guidance topics are invalid")
+    normalized_topics = []
+    seen_topics = set()
+    for topic in topics:
+        if not isinstance(topic, dict):
+            raise PluginRegistryError(
+                "plugin assistant guidance topic is invalid"
+            )
+        key = topic.get("key")
+        if (
+            not isinstance(key, str)
+            or not GUIDANCE_KEY_PATTERN.fullmatch(key)
+            or key in seen_topics
+        ):
+            raise PluginRegistryError(
+                "plugin assistant guidance topic key is invalid"
+            )
+        topic_tools = topic.get("tool_keys") or []
+        if (
+            not isinstance(topic_tools, list)
+            or not topic_tools
+            or len(topic_tools) > GUIDANCE_MAX_TOOLS_PER_TOPIC
+            or len(set(topic_tools)) != len(topic_tools)
+            or any(
+                not isinstance(tool_key, str)
+                or tool_key not in tool_keys
+                for tool_key in topic_tools
+            )
+        ):
+            raise PluginRegistryError(
+                "plugin assistant guidance topic tools are invalid"
+            )
+        details = _bounded_manifest_text(
+            topic.get("details") or "",
+            "plugin assistant guidance details",
+            6000,
+            required=False,
+        )
+        topic_summary = _bounded_manifest_text(
+            topic.get("summary") or "",
+            "plugin assistant guidance topic summary",
+            600,
+        )
+        normalized_topics.append(
+            {
+                "key": key,
+                "summary": topic_summary,
+                "details": details,
+                "tool_keys": list(topic_tools),
+            }
+        )
+        seen_topics.add(key)
+    return {
+        "summary": summary,
+        "when_to_use": normalized_when_to_use,
+        "topics": normalized_topics,
+    }
 
 
 def _validate_plugin_icon(version_dir, value):
@@ -362,7 +475,7 @@ def _validate_datasource_definition(value, source_type, schema):
     }
 
 
-def _validate_tools(value):
+def _validate_tools(value, capability_family="plugin"):
     """Return trusted read-only tool declarations from one manifest."""
 
     if not isinstance(value, list):
@@ -375,6 +488,10 @@ def _validate_tools(value):
         key = item.get("key")
         description = item.get("description")
         capability = item.get("capability")
+        tool_capability_family = item.get(
+            "capability_family",
+            capability_family,
+        )
         side_effect = item.get("side_effect")
         if (
             not isinstance(key, str)
@@ -390,6 +507,10 @@ def _validate_tools(value):
             raise PluginRegistryError("plugin tool description is invalid")
         if capability not in READ_ONLY_TOOL_CAPABILITIES:
             raise PluginRegistryError("plugin tool capability is not allowed")
+        if tool_capability_family not in SUPPORTED_CAPABILITY_FAMILIES:
+            raise PluginRegistryError(
+                "plugin tool capability family is not allowed"
+            )
         if side_effect != "none":
             raise PluginRegistryError("plugin tool side effect is not allowed")
         schema = _validate_tool_schema(
@@ -402,6 +523,7 @@ def _validate_tools(value):
                 key=key,
                 description=description.strip(),
                 capability=capability,
+                capability_family=tool_capability_family,
                 side_effect=side_effect,
                 input_schema=schema,
             )

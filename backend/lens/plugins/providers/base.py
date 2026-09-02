@@ -178,6 +178,31 @@ class DatasourceProvider(ABC):
         )
         raise DatasourceProviderError("PROVIDER_DISCOVERY_UNSUPPORTED")
 
+    def discover_resource_options(
+        self,
+        connection_scope,
+        secret,
+        resource,
+        selected_values,
+        endpoint="",
+        connection_config=None,
+        client=None,
+        request_context=None,
+    ):
+        """Return options for one manifest resource dependency."""
+
+        del (
+            connection_scope,
+            secret,
+            resource,
+            selected_values,
+            endpoint,
+            connection_config,
+            client,
+            request_context,
+        )
+        raise DatasourceProviderError("PROVIDER_RESOURCE_OPTIONS_UNSUPPORTED")
+
     def discover_connection_resources(
         self,
         secret,

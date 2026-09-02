@@ -767,7 +767,6 @@ function formFromRow(row) {
     mcp_environment_drafts: {},
     plugin_bindings: (row.plugin_bindings || []).map((binding) => ({
       connection_uuid: binding.connection_uuid,
-      tools: [...(binding.tools || [])],
       enabled: binding.enabled !== false
     })),
     visibility: row.visibility || 'public',
@@ -840,7 +839,9 @@ function buildPayload() {
       form.value.capability === 'general_chat' ? [] : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
-    max_concurrency: Number(form.value.max_concurrency) || 5,
+    ...(mode.value === 'edit'
+      ? { max_concurrency: Number(form.value.max_concurrency) || 5 }
+      : {}),
     multimodal_model_ref: form.value.multimodal_model_ref || null,
     settings: buildAssistantSettings(),
     workspace_guide: {
@@ -872,7 +873,6 @@ function buildPayload() {
       form.value.mode === 'direct'
         ? (form.value.plugin_bindings || []).map((binding) => ({
             connection_uuid: binding.connection_uuid,
-            tools: [...(binding.tools || [])],
             enabled: binding.enabled !== false
           }))
         : [],

@@ -401,6 +401,13 @@ export async function getPluginManifest(key) {
   return unwrapResponse(response)
 }
 
+export async function getPluginIcon(key) {
+  const response = await api.get(`/lens/admin/plugins/${key}/icon/`, {
+    responseType: 'blob'
+  })
+  return response.data
+}
+
 export async function listConnections(params = {}) {
   return collectPaginatedResults(async (page) => {
     const response = await api.get('/lens/admin/connections/', {
@@ -430,8 +437,21 @@ export async function validateConnection(uuid) {
   return unwrapResponse(response)
 }
 
-export async function getConnectionResources(uuid) {
-  const response = await api.get(`/lens/admin/connections/${uuid}/resources/`)
+export async function getConnectionResources(uuid, params = {}) {
+  const response = await api.get(`/lens/admin/connections/${uuid}/resources/`, {
+    params
+  })
+  return unwrapResponse(response)
+}
+
+export async function getConnectionResourceCandidates(uuid, params = {}) {
+  const response = await api.get(
+    `/lens/admin/connections/${uuid}/resource-candidates/`,
+    {
+      params,
+      headers: { 'Cache-Control': 'no-store' }
+    }
+  )
   return unwrapResponse(response)
 }
 

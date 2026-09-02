@@ -132,7 +132,9 @@
                 :model-value="form.connection_uuid"
                 @update:model-value="handleConnectionChange"
               >
-                <option value="">{{ t('lensAdmin.mcp.selectConnection') }}</option>
+                <option value="">
+                  {{ t('lensAdmin.mcp.selectConnection') }}
+                </option>
                 <option
                   v-for="connection in pluginConnections"
                   :key="connection.uuid"

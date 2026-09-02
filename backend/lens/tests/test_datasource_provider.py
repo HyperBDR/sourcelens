@@ -1,5 +1,3 @@
-from threading import Barrier
-
 import httpx
 from django.test import SimpleTestCase
 from lens.plugins.providers.base import DatasourceProviderError
@@ -76,6 +74,12 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
             "https://github.com",
         )
 
+    def test_defaults_an_omitted_github_connection_endpoint(self):
+        self.assertEqual(
+            self.provider.validate_connection("", {}),
+            "https://github.com",
+        )
+
     def test_rejects_non_git_datasource_source_type(self):
         with self.assertRaisesMessage(DatasourceProviderError, "source type"):
             self.provider.validate_datasource_source_type("feishu")
@@ -111,24 +115,8 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
 
         self.assertNotIn("provider-secret-body", str(error.exception))
 
-    def test_discovers_only_allowed_repository_metadata(self):
+    def test_discovers_allowed_repositories_without_remote_requests(self):
         def handler(request):
-            if request.url.path == "/repos/owner/repo":
-                return httpx.Response(
-                    200,
-                    json={
-                        "full_name": "owner/repo",
-                        "default_branch": "main",
-                        "private": True,
-                    },
-                    request=request,
-                )
-            if request.url.path == "/repos/owner/repo/branches":
-                return httpx.Response(
-                    200,
-                    json=[{"name": "main"}, {"name": "release"}],
-                    request=request,
-                )
             raise AssertionError(request.url)
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -144,63 +132,51 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
                 "resources": {
                     "repositories": {
                         "items": [
-                            {
-                                "value": "owner/repo",
-                                "label": "owner/repo",
-                                "metadata": {
-                                    "default_branch": "main",
-                                    "private": True,
-                                },
-                                "options": {
-                                    "branches": [
-                                        {"value": "main", "label": "main"},
-                                        {
-                                            "value": "release",
-                                            "label": "release",
-                                        },
-                                    ]
-                                },
-                            }
+                            {"value": "owner/repo", "label": "owner/repo"}
                         ]
                     }
                 }
             },
         )
 
-    def test_discovers_allowed_repositories_in_parallel(self):
-        metadata_barrier = Barrier(2, timeout=2)
-
+    def test_discovers_branches_for_one_allowed_repository(self):
         def handler(request):
-            repository = request.url.path.split("/")[2:4]
-            name = "/".join(repository)
-            if request.url.path.endswith("/branches"):
+            if request.url.path == "/repos/owner/repo/branches":
                 return httpx.Response(
                     200,
-                    json=[{"name": "main"}],
+                    json=[{"name": "main"}, {"name": "release"}],
                     request=request,
                 )
-            metadata_barrier.wait()
-            return httpx.Response(
-                200,
-                json={
-                    "full_name": name,
-                    "default_branch": "main",
-                    "private": False,
-                },
-                request=request,
-            )
+            raise AssertionError(request.url)
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            resources = self.provider.discover_resources(
-                {"repositories": ["owner/one", "owner/two"]},
+            resources = self.provider.discover_resource_options(
+                {"repositories": ["owner/repo"]},
                 "secret",
+                "branches",
+                {"repository": "owner/repo"},
                 client=client,
             )
 
         self.assertEqual(
-            [
-                item["value"]
-                for item in resources["resources"]["repositories"]["items"]
-            ],
-            ["owner/one", "owner/two"],
+            resources,
+            {
+                "resources": {
+                    "branches": {
+                        "items": [
+                            {"value": "main", "label": "main"},
+                            {"value": "release", "label": "release"},
+                        ]
+                    }
+                }
+            },
         )
+
+    def test_rejects_branches_for_repository_outside_connection_scope(self):
+        with self.assertRaisesMessage(DatasourceProviderError, "scope"):
+            self.provider.discover_resource_options(
+                {"repositories": ["owner/repo"]},
+                "secret",
+                "branches",
+                {"repository": "other/repo"},
+            )

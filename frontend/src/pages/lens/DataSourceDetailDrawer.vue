@@ -339,6 +339,19 @@
     <div v-else class="py-12 text-center text-sm text-ink-500">
       {{ t('lensAdmin.datasourceDetail.selectHint') }}
     </div>
+    <template v-if="datasource" #footer>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <BaseButton variant="outline" @click="$emit('toggle-enabled', datasource)">
+          {{ datasource.status === 'active' ? t('lensAdmin.actions.disableDatasource') : t('lensAdmin.actions.enableDatasource') }}
+        </BaseButton>
+        <div class="flex flex-wrap gap-2">
+          <BaseButton v-if="datasource.source_type === 'managed_workspace'" variant="outline" @click="$emit('upload', datasource)">{{ t('lensAdmin.actions.uploadFile') }}</BaseButton>
+          <BaseButton v-else-if="isDataSourceSyncing(datasource)" variant="danger" @click="$emit('cancel-sync', datasource)">{{ t('lensAdmin.actions.cancelSync') }}</BaseButton>
+          <BaseButton v-else variant="outline" :disabled="datasource.status !== 'active'" @click="$emit('sync', datasource)">{{ t('lensAdmin.actions.sync') }}</BaseButton>
+          <BaseButton variant="primary" @click="$emit('edit', datasource)">{{ t('common.edit') }}</BaseButton>
+        </div>
+      </div>
+    </template>
   </BaseDrawer>
 </template>
 
@@ -377,7 +390,14 @@ const props = defineProps({
   lensnodes: { type: Array, default: () => [] }
 })
 
-defineEmits(['close'])
+defineEmits([
+  'cancel-sync',
+  'close',
+  'edit',
+  'sync',
+  'toggle-enabled',
+  'upload'
+])
 
 const { t } = useI18n()
 const formatDateTime = useShortDateTime()

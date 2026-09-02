@@ -1,6 +1,8 @@
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -17,6 +19,23 @@ User = get_user_model()
 class PluginRegistryTests(TestCase):
     """Verify trusted plugin manifest discovery."""
 
+    def test_duplicate_configured_root_is_scanned_once(self):
+        with tempfile.TemporaryDirectory() as root:
+            plugin_dir = Path(root) / "github" / "1.0.0"
+            plugin_dir.mkdir(parents=True)
+            with override_settings(LENS_PLUGIN_ROOTS=[root, root]):
+                with patch(
+                    "lens.plugins.registry._load_plugin",
+                    return_value=SimpleNamespace(
+                        key="github",
+                        version="1.0.0",
+                    ),
+                ) as load_plugin:
+                    plugins = discover_plugins()
+
+        self.assertEqual(len(plugins), 1)
+        load_plugin.assert_called_once()
+
     def _write_manifest(self, root, version, manifest):
         path = Path(root) / "github" / version
         path.mkdir(parents=True)
@@ -29,6 +48,8 @@ class PluginRegistryTests(TestCase):
 
         self.assertEqual(plugin.key, "github")
         self.assertEqual(plugin.display_name, "GitHub")
+        self.assertEqual(plugin.capability_family, "plugin")
+        self.assertEqual(plugin.icon, "assets/icon.svg")
         self.assertEqual(plugin.datasource_source_type, "git")
         self.assertEqual(plugin.connection_schema["type"], "object")
         self.assertEqual(plugin.datasource_schema["type"], "object")
@@ -44,6 +65,72 @@ class PluginRegistryTests(TestCase):
             plugin.connection_schema["properties"]["repositories"]["write_to"],
             "allowed_scope.repositories",
         )
+        self.assertEqual(
+            plugin.assistant_guidance["topics"][0]["key"],
+            "repository",
+        )
+        self.assertEqual(plugin.tools[0].capability_family, "plugin")
+
+    def test_rejects_guidance_topic_tool_not_in_manifest(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+            "tools": [
+                {
+                    "key": "github_read_file",
+                    "description": "Read one file.",
+                    "capability": "repository.read",
+                    "side_effect": "none",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                }
+            ],
+            "assistant_guidance": {
+                "topics": [
+                    {
+                        "key": "repository",
+                        "summary": "Read repository files.",
+                        "tool_keys": ["github_missing_tool"],
+                    }
+                ]
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, "1.0.0", manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(
+                    PluginRegistryError,
+                    "guidance topic tools",
+                ):
+                    discover_plugins()
+
+    def test_rejects_unknown_plugin_capability_family(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "capability_family": "mcp",
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, "1.0.0", manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(
+                    PluginRegistryError,
+                    "capability family",
+                ):
+                    discover_plugins()
 
     def test_accepts_bounded_resource_ids_and_field_dependencies(self):
         manifest = {
@@ -226,8 +313,15 @@ class PluginRegistryTests(TestCase):
                     "key": "github",
                     "version": "1.0.0",
                     "protocol_version": 1,
+                    "capability_family": "plugin",
                     "display_name": "github",
                     "description": "",
+                    "assistant_guidance": {
+                        "summary": "",
+                        "when_to_use": [],
+                        "topics": [],
+                    },
+                    "icon_url": None,
                     "datasource_source_type": "git",
                     "datasource": {
                         "key": "default",
@@ -289,6 +383,7 @@ class PluginRegistryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data[0]["key"], "github_read_file")
+        self.assertEqual(response.data[0]["capability_family"], "plugin")
         self.assertEqual(response.data[0]["side_effect"], "none")
 
     def test_admin_can_read_safe_manifest_configuration_schema(self):
@@ -300,7 +395,13 @@ class PluginRegistryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["key"], "github")
+        self.assertEqual(response.data["capability_family"], "plugin")
         self.assertEqual(response.data["display_name"], "GitHub")
+        self.assertIn("assistant_guidance", response.data)
+        self.assertEqual(
+            response.data["icon_url"],
+            "/api/lens/admin/plugins/github/icon/",
+        )
         self.assertIn("connection_schema", response.data)
         self.assertIn("datasource_schema", response.data)
         self.assertEqual(
@@ -312,6 +413,34 @@ class PluginRegistryTests(TestCase):
         )
         self.assertNotIn("handlers", response.data)
         self.assertNotIn("path", response.data)
+
+    def test_admin_can_read_the_bundled_plugin_icon(self):
+        admin = User.objects.create_user("icon-admin", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(admin)
+
+        response = client.get("/api/lens/admin/plugins/github/icon/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/svg+xml")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+
+    def test_rejects_an_icon_outside_the_plugin_package(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "icon": "../icon.svg",
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, "1.0.0", manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(PluginRegistryError, "icon"):
+                    discover_plugins()
 
     def test_rejects_a_mutating_or_unknown_plugin_tool(self):
         manifest = {

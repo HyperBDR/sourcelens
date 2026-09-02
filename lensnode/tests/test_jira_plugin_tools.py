@@ -173,6 +173,9 @@ def test_jira_get_issue_uses_snapshot_connection_config_and_lease():
     assert result["ok"] is True
     assert result["issue"]["key"] == "SL-488"
     assert "jira-api-token" not in json.dumps(result)
+    assert tool.metadata["capability_family"] == "plugin"
+    assert tool.metadata["plugin_key"] == "jira"
+    assert tool.metadata["capability"] == "issue.read"
 
 
 def test_jira_search_issues_builds_project_bounded_jql():

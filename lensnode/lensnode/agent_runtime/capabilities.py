@@ -10,6 +10,7 @@ from langchain_core.messages import ToolMessage
 
 from ..checkpoint import CheckpointResumeError
 from ..gateway_model import _tool_result_metadata
+from .capability_protocol import is_capability_family
 from .messages import normalize_plan_steps as _normalize_plan_steps
 class CapabilityBoundaryMiddleware(AgentMiddleware):
     """Apply bounded recovery without stopping the whole agent run."""
@@ -232,11 +233,34 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         return "tool"
 
     @classmethod
+    def _capability_for_tool(cls, tool, tool_name=None):
+        """Return the explicit capability family declared by a Tool."""
+
+        metadata = getattr(tool, "metadata", None) or {}
+        if isinstance(metadata, dict):
+            family = metadata.get("capability_family")
+            if is_capability_family(family):
+                return family
+        return cls._capability_name(
+            str(tool_name or getattr(tool, "name", "") or "")
+        )
+
+    @classmethod
     def _evidence_capability(cls, tool_name):
         """Return the business capability proven by a tool result."""
 
         capability = cls._capability_name(tool_name)
         if tool_name == "tool_search" or capability == "tool":
+            return None
+        return capability
+
+    @classmethod
+    def _evidence_capability_for_tool(cls, tool, tool_name=None):
+        """Return evidence capability using Tool metadata when present."""
+
+        resolved_name = str(tool_name or getattr(tool, "name", "") or "")
+        capability = cls._capability_for_tool(tool, resolved_name)
+        if resolved_name == "tool_search" or capability == "tool":
             return None
         return capability
 
@@ -349,8 +373,8 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             if skill:
                 return f"skill:{skill}"
             return f"skill:{tool_name}"
-        if capability == "mcp":
-            return f"mcp:{tool_name}"
+        if capability in {"mcp", "plugin"}:
+            return f"{capability}:{tool_name}"
         return f"tool:{tool_name}"
 
     def _record_success(self, capability, tool_name, request):
@@ -466,7 +490,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
 
     def _record_result(self, request, result):
         tool_name = self._tool_name(request)
-        capability = self._evidence_capability(tool_name)
+        capability = self._evidence_capability_for_tool(
+            request.tool,
+            tool_name,
+        )
         request_sha256 = self._normalized_arguments(request)
         request_scope = (tool_name, request_sha256)
         payload = self._parse_result(result)
@@ -587,7 +614,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             tool_call_id=tool_call.get("id") or "capability-blocked",
         )
 
-    def _requires_initial_plan(self, tool_name):
+    def _requires_initial_plan(self, tool_name, tool=None):
         if not self.require_initial_plan or self.initial_plan_exists:
             return False
         business_helpers = {
@@ -596,7 +623,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             "run_skill_transform",
         }
         return (
-            self._evidence_capability(tool_name) is not None
+            self._evidence_capability_for_tool(tool, tool_name) is not None
             or tool_name in business_helpers
         )
 
@@ -653,13 +680,13 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         remaining = []
         for tool in tools:
             tool_name = getattr(tool, "name", None)
-            capability = self._capability_name(tool_name or "")
+            capability = self._capability_for_tool(tool)
             if tool_name in self.blocked_tools:
                 continue
             if capability in self.blocked_capabilities:
                 continue
-            if capability == "mcp":
-                source = f"mcp:{tool_name}"
+            if capability in {"mcp", "plugin"}:
+                source = f"{capability}:{tool_name}"
             elif capability == "skill":
                 source = None
             else:
@@ -671,7 +698,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
 
     def _is_blocked(self, request):
         tool_name = self._tool_name(request)
-        capability = self._evidence_capability(tool_name)
+        capability = self._evidence_capability_for_tool(
+            request.tool,
+            tool_name,
+        )
         source = self._source_scope(capability, tool_name, request)
         request_scope = (
             tool_name,
@@ -679,7 +709,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         )
         return (
             tool_name in self.blocked_tools
-            or self._capability_name(tool_name)
+            or self._capability_for_tool(request.tool, tool_name)
             in self.blocked_capabilities
             or source in self.blocked_sources
             or request_scope in self.blocked_requests
@@ -717,7 +747,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         """Classify one synchronous tool result and enforce its budget."""
 
         tool_name = self._tool_name(request)
-        if self._requires_initial_plan(tool_name):
+        if self._requires_initial_plan(tool_name, request.tool):
             return self._deny_unplanned_call(request)
         if self._is_blocked(request):
             return self._deny_blocked_call(request)
@@ -731,7 +761,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         """Classify one asynchronous tool result and enforce its budget."""
 
         tool_name = self._tool_name(request)
-        if self._requires_initial_plan(tool_name):
+        if self._requires_initial_plan(tool_name, request.tool):
             return self._deny_unplanned_call(request)
         if self._is_blocked(request):
             return self._deny_blocked_call(request)
