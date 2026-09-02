@@ -27,6 +27,9 @@ def _github_read_file(
     endpoint="https://github.com",
     config=None,
 ):
+    config = config or {
+        "__allowed_scope": {"repositories": ["owner/repository"]}
+    }
     return GITHUB_RUNTIME.execute_tool(
         "github_read_file",
         client,
@@ -44,6 +47,9 @@ def _github_search_code(
     endpoint="https://github.com",
     config=None,
 ):
+    config = config or {
+        "__allowed_scope": {"repositories": ["owner/repository"]}
+    }
     return GITHUB_RUNTIME.execute_tool(
         "github_search_code",
         client,
@@ -172,6 +178,9 @@ class GitHubRuntimeClient:
                     "plugin_key": "github",
                     "resolved_config": {
                         "endpoint": "https://github.com",
+                        "allowed_scope": {
+                            "repositories": ["owner/repository"],
+                        },
                         "arguments": arguments,
                     },
                 },

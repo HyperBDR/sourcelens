@@ -209,8 +209,15 @@ def _validate_snapshot(snapshot, run_uuid, plugin_key, tool_key, call_id):
         raise PluginRuntimeError("PLUGIN_SNAPSHOT_MISMATCH")
     endpoint = str(resolved_config.get("endpoint") or "").rstrip("/")
     connection_config = resolved_config.get("connection_config") or {}
-    if not endpoint or not isinstance(connection_config, dict):
+    allowed_scope = resolved_config.get("allowed_scope")
+    if (
+        not endpoint
+        or not isinstance(connection_config, dict)
+        or not isinstance(allowed_scope, dict)
+    ):
         raise PluginRuntimeError("PLUGIN_SNAPSHOT_MISMATCH")
+    connection_config = dict(connection_config)
+    connection_config["__allowed_scope"] = allowed_scope
     return resolved_config["arguments"], endpoint, connection_config
 
 
