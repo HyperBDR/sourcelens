@@ -132,15 +132,6 @@
                       <BaseButton
                         size="sm"
                         variant="danger"
-                        :loading="revokingUuid === row.uuid"
-                        :disabled="row.status !== 'active'"
-                        @click="revokeRow(row)"
-                      >
-                        {{ t('lensAdmin.connections.revoke') }}
-                      </BaseButton>
-                      <BaseButton
-                        size="sm"
-                        variant="danger"
                         :disabled="
                           row.datasource_count > 0 || row.assistant_count > 0
                         "
@@ -252,7 +243,6 @@ import {
   getPluginManifest,
   listConnections,
   listPlugins,
-  revokeConnection,
   updateConnection,
   validateConnection
 } from '@/api/lens'
@@ -268,7 +258,6 @@ const loading = ref(false)
 const saving = ref(false)
 const validatingUuid = ref('')
 const validationResults = ref({})
-const revokingUuid = ref('')
 const drawerOpen = ref(false)
 const mode = ref('create')
 const formError = ref('')
@@ -410,22 +399,6 @@ async function validateRow(row) {
     }
   } finally {
     validatingUuid.value = ''
-  }
-}
-
-async function revokeRow(row) {
-  if (!window.confirm(t('lensAdmin.connections.revokeConfirm'))) return
-  revokingUuid.value = row.uuid
-  try {
-    await revokeConnection(row.uuid)
-    showSuccess(t('lensAdmin.connections.revokeSuccess'))
-    await load()
-  } catch (error) {
-    showError(
-      extractErrorMessage(error, t('lensAdmin.connections.revokeFailed'))
-    )
-  } finally {
-    revokingUuid.value = ''
   }
 }
 

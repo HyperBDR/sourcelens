@@ -1,14 +1,10 @@
-from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-from django.utils import timezone
 from lens.models import (
     Connection,
-    CredentialLease,
     DataSource,
-    ExecutionSnapshot,
     LensNode,
     SecretMaterial,
     SecretVersion,
@@ -226,88 +222,6 @@ class PluginConnectionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data["detail"], "CONNECTION_DISABLED")
-
-    def test_revoke_disables_secret_lineage_and_active_leases(self):
-        connection = self._create_connection()
-        sibling = Connection.objects.create(
-            name="Shared GitHub readonly",
-            plugin_key="github",
-            endpoint="https://github.com",
-            allowed_scope={"repositories": ["owner/repo"]},
-            secret_version=connection.secret_version,
-        )
-        node = LensNode.objects.create(name="Node", workspace_path="/workspace")
-        datasource = DataSource.objects.create(
-            name="Repository",
-            source_type=DataSource.SourceType.GIT,
-            lensnode=node,
-            connection=connection,
-            plugin_key="github",
-        )
-        snapshot = ExecutionSnapshot.objects.create(
-            kind=ExecutionSnapshot.Kind.DATASOURCE_SYNC,
-            connection=connection,
-            datasource=datasource,
-            secret_version=connection.secret_version,
-            plugin_key="github",
-            plugin_version="1.0.0",
-            protocol_version=1,
-        )
-        lease = CredentialLease.objects.create(
-            snapshot=snapshot,
-            lensnode=node,
-            expires_at=timezone.now() + timedelta(minutes=5),
-        )
-        sibling_datasource = DataSource.objects.create(
-            name="Shared repository",
-            source_type=DataSource.SourceType.GIT,
-            lensnode=node,
-            connection=sibling,
-            plugin_key="github",
-        )
-        sibling_snapshot = ExecutionSnapshot.objects.create(
-            kind=ExecutionSnapshot.Kind.DATASOURCE_SYNC,
-            connection=sibling,
-            datasource=sibling_datasource,
-            secret_version=sibling.secret_version,
-            plugin_key="github",
-            plugin_version="1.0.0",
-            protocol_version=1,
-        )
-        sibling_lease = CredentialLease.objects.create(
-            snapshot=sibling_snapshot,
-            lensnode=node,
-            expires_at=timezone.now() + timedelta(minutes=5),
-        )
-
-        response = self.client.post(
-            f"/api/lens/admin/connections/{connection.uuid}/revoke/",
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        connection.refresh_from_db()
-        sibling.refresh_from_db()
-        connection.secret_version.refresh_from_db()
-        connection.secret_version.material.refresh_from_db()
-        lease.refresh_from_db()
-        sibling_lease.refresh_from_db()
-        self.assertEqual(connection.status, Connection.Status.DISABLED)
-        self.assertEqual(sibling.status, Connection.Status.DISABLED)
-        self.assertEqual(connection.secret_version.status, "disabled")
-        self.assertEqual(
-            connection.secret_version.material.status,
-            "disabled",
-        )
-        self.assertIsNotNone(lease.revoked_at)
-        self.assertIsNotNone(sibling_lease.revoked_at)
-
-        repeated_response = self.client.post(
-            f"/api/lens/admin/connections/{connection.uuid}/revoke/",
-            format="json",
-        )
-
-        self.assertEqual(repeated_response.status_code, 200)
 
     def _create_connection(self, **overrides):
         material = SecretMaterial.objects.create(name="GitHub PAT")

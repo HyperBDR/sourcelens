@@ -3,7 +3,6 @@
 import uuid
 from datetime import timedelta
 
-from django.db import transaction
 from django.db.models import Count
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
@@ -236,49 +235,6 @@ class ConnectionViewSet(BaseAdminViewSet):
         if status_value:
             queryset = queryset.filter(status=status_value)
         return queryset
-
-    @action(detail=True, methods=["post"], url_path="revoke")
-    def revoke(self, request, *args, **kwargs):
-        """Emergency-revoke one Connection secret lineage and its leases."""
-
-        del request, args, kwargs
-        connection_id = self.get_object().pk
-        now = timezone.now()
-        with transaction.atomic():
-            connection = (
-                Connection.objects.select_for_update()
-                .select_related("secret_version__material")
-                .get(pk=connection_id)
-            )
-            version = connection.secret_version
-            if version is not None:
-                material = version.material
-                material.status = "disabled"
-                material.save(update_fields=["status", "updated_at"])
-                material.versions.select_for_update().update(
-                    status="disabled",
-                    updated_at=now,
-                )
-                connection_ids = list(
-                    Connection.objects.select_for_update()
-                    .filter(secret_version__material=material)
-                    .values_list("pk", flat=True)
-                )
-                Connection.objects.filter(pk__in=connection_ids).update(
-                    status=Connection.Status.DISABLED,
-                    updated_at=now,
-                )
-            else:
-                connection_ids = [connection.pk]
-                connection.status = Connection.Status.DISABLED
-                connection.save(update_fields=["status", "updated_at"])
-            CredentialLease.objects.filter(
-                snapshot__connection_id__in=connection_ids,
-                revoked_at__isnull=True,
-                expires_at__gt=now,
-            ).update(revoked_at=now)
-        connection.refresh_from_db()
-        return Response(self.get_serializer(connection).data)
 
     def destroy(self, request, *args, **kwargs):
         """Reject deletion while a connection is referenced."""

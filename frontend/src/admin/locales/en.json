@@ -1253,10 +1253,6 @@
       "saveFailed": "Failed to save Connection",
       "validationSuccess": "Connection valid; {count} resources available",
       "validationFailed": "Connection validation failed",
-      "revoke": "Revoke",
-      "revokeConfirm": "Emergency-revoke this Connection and all credentials and active leases sharing its secret? This cannot be undone.",
-      "revokeSuccess": "Connection credentials revoked",
-      "revokeFailed": "Failed to revoke Connection credentials",
       "deleteConfirm": "Delete this Connection?",
       "deleteSuccess": "Connection deleted",
       "deleteFailed": "Failed to delete Connection"

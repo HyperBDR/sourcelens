@@ -72,10 +72,10 @@ test('Connection management keeps Plugin secrets write-only in the form', async 
   assert.doesNotMatch(page, /row\.secret_value/)
   assert.match(api, /connections\/\$\{uuid\}\/validate/)
   assert.match(api, /connections\/\$\{uuid\}\/resources/)
-  assert.match(api, /connections\/\$\{uuid\}\/revoke/)
-  assert.match(page, /revokeConnection/)
+  assert.doesNotMatch(api, /connections\/\$\{uuid\}\/revoke/)
+  assert.doesNotMatch(page, /revokeConnection/)
   assert.match(page, /row\.status === 'active'/)
-  assert.match(page, /revokeConfirm/)
+  assert.doesNotMatch(page, /revokeConfirm/)
 })
 
 test('manifest schema renderer supports safe scalar, secret, array and resource fields', async () => {

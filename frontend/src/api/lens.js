@@ -430,11 +430,6 @@ export async function validateConnection(uuid) {
   return unwrapResponse(response)
 }
 
-export async function revokeConnection(uuid) {
-  const response = await api.post(`/lens/admin/connections/${uuid}/revoke/`)
-  return unwrapResponse(response)
-}
-
 export async function getConnectionResources(uuid) {
   const response = await api.get(`/lens/admin/connections/${uuid}/resources/`)
   return unwrapResponse(response)

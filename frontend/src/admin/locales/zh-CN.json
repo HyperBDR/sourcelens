@@ -1253,10 +1253,6 @@
       "saveFailed": "连接保存失败",
       "validationSuccess": "连接验证成功，可用资源 {count} 个",
       "validationFailed": "连接验证失败",
-      "revoke": "紧急撤销",
-      "revokeConfirm": "确定紧急撤销此连接及所有共享该密钥的凭证和有效租约吗？此操作不可撤销。",
-      "revokeSuccess": "连接凭证已撤销",
-      "revokeFailed": "连接凭证撤销失败",
       "deleteConfirm": "确定删除这个连接？",
       "deleteSuccess": "连接已删除",
       "deleteFailed": "连接删除失败"
