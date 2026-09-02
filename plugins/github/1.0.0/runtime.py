@@ -929,6 +929,7 @@ def _get(client, url, token, params, accept, max_bytes, truncate):
         "GET",
         url,
         params=params,
+        timeout=15.0,
         follow_redirects=False,
         headers={
             "Accept": accept,

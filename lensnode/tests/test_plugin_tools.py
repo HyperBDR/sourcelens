@@ -14,6 +14,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from lensnode.plugin_runtime import PluginRuntimeError
 from lensnode.plugin_package_loader import load_runtime_contract
 from lensnode.plugin_tools import build_plugin_tools
+from lensnode.plugin_tools import _execute_plugin_tool
 
 
 AI_GATEWAY_URL = "http://gateway/api/lens/lensnode/ai-gateway/"
@@ -400,6 +401,29 @@ def test_plugin_events_never_include_material_value():
     )
 
     assert "github-secret" not in json.dumps(events)
+
+
+def test_plugin_runtime_failure_is_returned_as_a_stable_error():
+    """Unexpected Plugin exceptions must not escape into model execution."""
+
+    def fail_handler(*_args):
+        raise RuntimeError("secret detail")
+
+    result = _execute_plugin_tool(
+        _command("github_read_file"),
+        _config(),
+        GitHubRuntimeClient(),
+        "connection-1",
+        "github",
+        "github_read_file",
+        SimpleNamespace(tool_call_id="failure-1"),
+        {"repository": "owner/repository", "path": "README.md"},
+        fail_handler,
+        None,
+    )
+
+    payload = json.loads(result)
+    assert payload == {"ok": False, "error": "PLUGIN_EXECUTION_FAILED"}
 
 
 class PluginToolCallingModel(BaseChatModel):

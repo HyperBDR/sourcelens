@@ -176,6 +176,9 @@ def _execute_plugin_tool(
     except httpx.HTTPError:
         error = "PLUGIN_REQUEST_FAILED"
         result = {"ok": False, "error": error}
+    except Exception:
+        error = "PLUGIN_EXECUTION_FAILED"
+        result = {"ok": False, "error": error}
     finally:
         if material is not None:
             material["value"] = ""
