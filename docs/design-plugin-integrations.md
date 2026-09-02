@@ -168,8 +168,6 @@ connection_schema:
 capabilities:
   - key: repository.read
     risk: low
-  - key: pull_request.read
-    risk: low
 
 datasource:
   supported: true
@@ -191,6 +189,12 @@ tools:
     capability: repository.read
     side_effect: none
   - key: github_search_code
+    capability: repository.read
+    side_effect: none
+  - key: github_issue_get
+    capability: repository.read
+    side_effect: none
+  - key: github_pull_request_get
     capability: repository.read
     side_effect: none
 ```
@@ -259,24 +263,38 @@ LLM tool call
 一个模型 Tool Call 对应一个 `tool_invoke` ExecutionSnapshot，调用 ID 作为幂等键；
 同一模型轮次中彼此独立的 Tool Call 由现有 ToolNode 并行执行，共享线程安全的
 HTTPX Client 连接池。PAT 只在受信任的 LensNode/Provider 内存中短暂存在，绝不进入
-Tool 参数、Run 快照、模型上下文、返回结果或普通事件明细。`github_read_file` 的
-结果最多读取 200 KB，`github_search_code` 的响应最多读取 1 MB，搜索结果最多 20
-项；超限、非文本和重定向均返回稳定错误码。
+Tool 参数、Run 快照、模型上下文、返回结果或普通事件明细。GitHub V1 当前提供以下
+只读资源族：
+
+- 仓库元数据和分支列表；
+- 文件读取和仓库内代码搜索；
+- Commit 列表、详情和变更文件摘要；
+- Issue 列表、详情和评论；
+- Pull Request 列表、详情、变更文件和 Review；
+- Release 列表；
+- GitHub Actions Workflow Run 列表和详情。
+
+`github_read_file` 最多读取 200 KB，其他 JSON 响应最多读取 1 MB；代码搜索最多
+返回 20 项，其他列表每页最多返回 50 项，Issue、Comment、Review 和 Release 正文
+会截断到固定长度。Commit 和 Pull Request 文件结果不返回 patch，Actions 不返回
+job、日志或 artifact。超限、非文本和重定向均返回稳定错误码。
 
 V1 不允许多个 Connection 暴露同名模型 Tool，避免在不向模型泄露 Connection 身份
 的前提下产生歧义。GitHub 搜索会拒绝 `repo:`、`org:`、`user:` 等模型可控范围限定
 符号，仓库范围只由 Connection 允许范围和 Provider 代码决定；搜索不接受不会被
 GitHub API 使用的 `ref` 参数。
 
-禁止提供 `github_raw_exec(command)` 之类的通用命令工具。未来写操作必须有独立
-capability、幂等键和按风险配置的用户确认或审批；它不属于 V1 范围。
+禁止提供 `github_raw_exec(command)`、任意 `gh api` 或任意 URL 工具。当前 GitHub
+只读工具统一使用 `repository.read`，管理员通过 Assistant Tool binding 选择具体可用
+操作。未来写操作必须有独立 capability、幂等键和按风险配置的用户确认或审批；它
+不属于 V1 范围。
 
 Skill 可以保留流程说明，但只声明依赖：
 
 ```yaml
 required_plugins:
   - plugin: github
-    capabilities: [repository.read, pull_request.read]
+    capabilities: [repository.read]
 ```
 
 Skill 负责告诉模型如何组合工具，Plugin Tool 负责实际访问外部系统。
@@ -423,11 +441,11 @@ github_get_pull_request_context
 
 ## 10. 现有 CLI 的复用方式
 
-第一阶段不重写 CLI：
+第一阶段保留既有代码同步链路，模型工具使用固定 HTTP API：
 
 ```text
 GitHub Plugin Runtime
-  ├─ Tool adapter → 受限 CLI 子命令或 API
+  ├─ Tool adapter → 固定 GitHub REST API 与安全字段投影
   └─ Datasource adapter → 现有代码同步 CLI
 ```
 
@@ -445,6 +463,13 @@ Connection 有界线程池、请求超时、调用 deadline、取消事件、指
 单项失败；连接验证仍在不可恢复或全部失败时返回稳定错误。当前实现保持 Tool 对
 模型同步返回，独立资源请求在 Provider 内部并行；后续可将同一上下文替换为
 `httpx.AsyncClient`，不改变上层 Provider 契约。
+
+Datasource 同步的取消信号会从控制通道传播到 LensNode 的执行队列和 Git
+子进程；Git 进程使用独立进程组，取消或超时会终止整个进程组，并向控制端
+回传稳定的 `cancelled` 终态。同步结果还受文件数和总字节数上限约束，避免
+仓库内容耗尽 LensNode 工作区。GitHub Plugin 默认不递归拉取 submodule，
+因此不会跟随仓库声明的任意外部地址；若未来开放该能力，必须增加显式 host
+allowlist 和资源配额。
 
 对于 GitHub/GitLab/Jira 的标准 HTTP API，优先在 Plugin Runtime 使用异步 HTTP
 客户端；CLI 保留给已有复杂流程或必须复用的同步实现。GitLab 自托管 endpoint
@@ -549,12 +574,13 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
 - 定义独立 Plugin 项目布局、受控目录发现、Registry、受限 manifest、只读 capability、
   Tool/Datasource Provider 和 ExecutionSnapshot 契约；
 - 定义 Connection、SecretVersion、节点认证和短期 lease；
-- 将现有 GitHub CLI 封装成 Plugin Runtime；
+- 将 GitHub 模型能力实现为固定 REST API Tool，不提供任意 CLI/API passthrough；
 - 实现 `GitHubDatasourceProvider` 并集成 DataSource 管理：Connection 选择、manifest
   驱动的资源配置、资源范围校验和同步任务快照；
 - 跑通 Connection → DataSource 初始、手动、定时和重试同步，LensNode 不接收解密
   credential config；
-- 跑通 `github_read_file`、`github_search_code` 等只读工具，并验证同轮独立调用并行；
+- 跑通仓库、代码、Commit、Issue、Pull Request、Release 和 Actions 只读工具，并验证
+  同轮独立调用并行；
 - 只支持一种 GitHub 认证方式，并限定允许的 endpoint；
 - 完成控制端与 LensNode 的 Plugin/version/protocol 握手；
 - 保留旧 DataSourceCredential 读路径，但禁止新功能继续扩展旧模型。
