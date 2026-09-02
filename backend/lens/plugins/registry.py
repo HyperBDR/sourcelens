@@ -313,7 +313,14 @@ def _validate_assistant_guidance(value, tools):
             not isinstance(topic_tools, list)
             or not topic_tools
             or len(topic_tools) > GUIDANCE_MAX_TOOLS_PER_TOPIC
-            or len(set(topic_tools)) != len(topic_tools)
+            or len(
+                {
+                    tool_key
+                    for tool_key in topic_tools
+                    if isinstance(tool_key, str)
+                }
+            )
+            != len(topic_tools)
             or any(
                 not isinstance(tool_key, str)
                 or tool_key not in tool_keys

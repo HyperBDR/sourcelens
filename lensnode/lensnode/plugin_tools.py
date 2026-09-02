@@ -155,7 +155,7 @@ def _guidance_json(value):
     """Serialize one bounded guidance response."""
 
     payload = json.dumps(value, ensure_ascii=False)
-    if len(payload) <= GUIDANCE_MAX_OUTPUT_BYTES:
+    if len(payload.encode("utf-8")) <= GUIDANCE_MAX_OUTPUT_BYTES:
         return payload
     if isinstance(value, dict):
         compact = dict(value)
@@ -184,7 +184,7 @@ def _guidance_json(value):
             plugins.append(reduced)
         compact["plugins"] = plugins
         payload = json.dumps(compact, ensure_ascii=False)
-    if len(payload) <= GUIDANCE_MAX_OUTPUT_BYTES:
+    if len(payload.encode("utf-8")) <= GUIDANCE_MAX_OUTPUT_BYTES:
         return payload
     return json.dumps(
         {
