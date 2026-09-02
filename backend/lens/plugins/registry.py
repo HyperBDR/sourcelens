@@ -9,6 +9,7 @@ from django.conf import settings
 
 PLUGIN_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 PLUGIN_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+TOOL_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 RESOURCE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 CONNECTION_WRITE_TARGET_PATTERN = re.compile(
     r"^(endpoint|secret_value|config\.[a-z][a-z0-9_-]{0,63}|"
@@ -17,6 +18,7 @@ CONNECTION_WRITE_TARGET_PATTERN = re.compile(
 SUPPORTED_PROTOCOL_VERSION = 1
 ALLOWED_HANDLERS = frozenset(
     {
+        "python_v1",
         "github_v1",
         "github_datasource_v1",
         "gitlab_v1",
@@ -25,26 +27,6 @@ ALLOWED_HANDLERS = frozenset(
         "jira_datasource_v1",
     }
 )
-ALLOWED_TOOL_ARGUMENTS = {
-    "github_read_file": frozenset({"repository", "path", "ref"}),
-    "github_search_code": frozenset(
-        {
-            "repository",
-            "query",
-            "path",
-            "ref",
-            "max_results",
-        }
-    ),
-    "gitlab_read_file": frozenset({"project", "path", "ref"}),
-    "gitlab_search_code": frozenset(
-        {"project", "query", "path", "ref", "max_results"}
-    ),
-    "jira_get_issue": frozenset({"issue_key"}),
-    "jira_search_issues": frozenset(
-        {"project", "query", "max_results"}
-    ),
-}
 READ_ONLY_TOOL_CAPABILITIES = frozenset(
     {"issue.read", "jira.issue.search", "repository.read"}
 )
@@ -81,6 +63,7 @@ class InstalledPlugin:
     datasource_source_type: str
     connection_schema: dict
     datasource_schema: dict
+    control_handler: str
     runtime_handler: str
     datasource_handler: str
     tools: tuple
@@ -143,6 +126,15 @@ def latest_plugin(plugin_key):
     )
 
 
+def installed_plugin(plugin_key, version):
+    """Return one exact installed Plugin version."""
+
+    for plugin in discover_plugins():
+        if plugin.key == plugin_key and plugin.version == version:
+            return plugin
+    raise PluginNotFoundError("installed plugin version is required")
+
+
 def _load_plugin(root, key_dir, version_dir):
     """Load one manifest after validating its controlled directory identity."""
 
@@ -179,12 +171,22 @@ def _load_plugin(root, key_dir, version_dir):
         raise PluginRegistryError("plugin protocol version is unsupported")
     if not isinstance(handlers, dict):
         raise PluginRegistryError("plugin handlers are required")
+    control_handler = handlers.get("control")
     runtime_handler = handlers.get("runtime")
     datasource_handler = handlers.get("datasource")
+    if control_handler == "python_v1":
+        datasource_handler = "python_v1"
+    elif control_handler is None:
+        control_handler = datasource_handler
     if runtime_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin runtime handler is not allowed")
     if datasource_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin datasource handler is not allowed")
+    if control_handler not in ALLOWED_HANDLERS:
+        raise PluginRegistryError("plugin control handler is not allowed")
+    if control_handler == "python_v1" or runtime_handler == "python_v1":
+        _validate_python_entrypoint(version_dir, "control")
+        _validate_python_entrypoint(version_dir, "runtime")
     tools = _validate_tools(manifest.get("tools") or [])
     display_name = _bounded_manifest_text(
         manifest.get("display_name") or key,
@@ -217,6 +219,7 @@ def _load_plugin(root, key_dir, version_dir):
         datasource_source_type=datasource_source_type,
         connection_schema=connection_schema,
         datasource_schema=datasource_schema,
+        control_handler=control_handler,
         runtime_handler=runtime_handler,
         datasource_handler=datasource_handler,
         tools=tools,
@@ -238,7 +241,11 @@ def _validate_tools(value):
         description = item.get("description")
         capability = item.get("capability")
         side_effect = item.get("side_effect")
-        if key not in ALLOWED_TOOL_ARGUMENTS or key in identities:
+        if (
+            not isinstance(key, str)
+            or not TOOL_KEY_PATTERN.fullmatch(key)
+            or key in identities
+        ):
             raise PluginRegistryError("plugin tool is not allowed")
         if (
             not isinstance(description, str)
@@ -276,23 +283,59 @@ def _validate_tool_schema(tool_key, value):
     required = value.get("required") or []
     if not isinstance(properties, dict) or not isinstance(required, list):
         raise PluginRegistryError("plugin tool input schema is invalid")
-    allowed = ALLOWED_TOOL_ARGUMENTS[tool_key]
-    if set(properties).difference(allowed) or set(required).difference(
-        properties
+    if (
+        len(properties) > 20
+        or len(set(required)) != len(required)
+        or set(required).difference(properties)
     ):
         raise PluginRegistryError("plugin tool input schema is not allowed")
+    normalized = {}
     for name, field in properties.items():
-        if not isinstance(field, dict):
+        if (
+            not isinstance(name, str)
+            or not PLUGIN_KEY_PATTERN.fullmatch(name)
+            or not isinstance(field, dict)
+            or field.get("type") not in {"boolean", "integer", "string"}
+        ):
             raise PluginRegistryError("plugin tool field schema is invalid")
-        expected = "integer" if name == "max_results" else "string"
-        if field.get("type") != expected:
-            raise PluginRegistryError("plugin tool field type is invalid")
+        safe_field = {"type": field["type"]}
+        description = field.get("description")
+        if description:
+            safe_field["description"] = _bounded_manifest_text(
+                description,
+                "plugin tool field description",
+                500,
+            )
+        for limit_name in ("minLength", "maxLength", "minimum", "maximum"):
+            limit = field.get(limit_name)
+            if isinstance(limit, int) and not isinstance(limit, bool):
+                safe_field[limit_name] = limit
+        normalized[name] = safe_field
     return {
         "type": "object",
-        "properties": properties,
-        "required": required,
+        "properties": normalized,
+        "required": list(required),
         "additionalProperties": False,
     }
+
+
+def _validate_python_entrypoint(version_dir, name):
+    """Require a bounded regular Python file at one fixed package path."""
+
+    path = version_dir / f"{name}.py"
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise PluginRegistryError(
+            f"plugin {name} entrypoint is required"
+        ) from exc
+    if (
+        path.is_symlink()
+        or not resolved.is_file()
+        or version_dir.resolve() not in resolved.parents
+        or resolved.stat().st_size > 1_000_000
+    ):
+        raise PluginRegistryError(f"plugin {name} entrypoint is invalid")
 
 
 def _validate_form_schema(value, label):
