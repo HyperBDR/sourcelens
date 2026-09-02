@@ -75,3 +75,30 @@ def test_requires_complete_runtime_contract(tmp_path):
 
     with pytest.raises(PluginPackageLoadError):
         load_runtime_contract("example", "1.2.3", roots=[tmp_path])
+
+
+def test_reloads_runtime_when_package_content_changes(tmp_path):
+    """Development package updates must not leave a stale runtime cached."""
+
+    package = _package(tmp_path)
+    first = load_runtime_contract(
+        "example",
+        "1.2.3",
+        roots=[tmp_path],
+    )
+    updated = RUNTIME_SOURCE.replace(
+        'return definition, executor',
+        'return {"updated": True}, executor',
+    )
+    (package / "runtime.py").write_text(updated, encoding="utf-8")
+
+    second = load_runtime_contract(
+        "example",
+        "1.2.3",
+        roots=[tmp_path],
+    )
+
+    assert first.build_tool({"key": "one"}, None)[0] == {"key": "one"}
+    assert second.build_tool({"key": "one"}, None)[0] == {
+        "updated": True
+    }

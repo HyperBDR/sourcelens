@@ -80,6 +80,9 @@ def _runtime_contract(path, plugin_key, plugin_version):
     try:
         resolved = path.resolve(strict=True)
         size = resolved.stat().st_size
+        content_digest = hashlib.sha256(
+            resolved.read_bytes()
+        ).hexdigest()[:16]
     except OSError as exc:
         raise PluginPackageLoadError(
             "plugin runtime entrypoint is required"
@@ -90,6 +93,7 @@ def _runtime_contract(path, plugin_key, plugin_version):
         str(resolved),
         plugin_key,
         plugin_version,
+        content_digest,
     )
     if (
         getattr(module, "PLUGIN_API_VERSION", None) != 1
@@ -114,12 +118,16 @@ def _runtime_contract(path, plugin_key, plugin_version):
 
 
 @lru_cache(maxsize=128)
-def _load_runtime_module(path_value, plugin_key, plugin_version):
+def _load_runtime_module(
+    path_value,
+    plugin_key,
+    plugin_version,
+    content_digest,
+):
     """Execute a fixed regular file under an opaque module identity."""
 
-    digest = hashlib.sha256(path_value.encode("utf-8")).hexdigest()[:16]
     module_name = (
-        f"_sourcelens_runtime_{plugin_key}_{plugin_version}_{digest}"
+        f"_sourcelens_runtime_{plugin_key}_{plugin_version}_{content_digest}"
         .replace("-", "_")
         .replace(".", "_")
     )
