@@ -1,6 +1,6 @@
 <template>
   <AdminLayout>
-    <div class="flex max-w-full flex-col gap-4 py-4">
+    <div class="flex max-w-full flex-col gap-5 py-4">
       <section
         class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
       >
@@ -12,11 +12,6 @@
               <h1 class="text-xl font-semibold text-ink-900">
                 {{ t('lensAdmin.pages.connections.title') }}
               </h1>
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
-              >
-                {{ connections.length }}
-              </span>
             </div>
             <p class="mt-1 text-sm text-ink-500">
               {{ t('lensAdmin.pages.connections.description') }}
@@ -37,60 +32,60 @@
           </div>
         </header>
 
-        <div class="px-5 py-4">
+        <div class="grid gap-3 border-b border-line bg-surface-sunken px-5 py-4 sm:grid-cols-3">
+          <div class="rounded-lg border border-line bg-surface px-4 py-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-ink-500">
+              {{ t('lensAdmin.connections.total') }}
+            </p>
+            <p class="mt-1 text-2xl font-semibold text-ink-900">
+              {{ connections.length }}
+            </p>
+          </div>
+          <div class="rounded-lg border border-line bg-surface px-4 py-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-ink-500">
+              {{ t('lensAdmin.connections.activeCount') }}
+            </p>
+            <p class="mt-1 text-2xl font-semibold text-success-700">
+              {{ activeConnectionCount }}
+            </p>
+          </div>
+          <div class="rounded-lg border border-line bg-surface px-4 py-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-ink-500">
+              {{ t('lensAdmin.connections.pluginCount') }}
+            </p>
+            <p class="mt-1 text-2xl font-semibold text-brand-700">
+              {{ pluginCount }}
+            </p>
+          </div>
+        </div>
+
+        <div class="px-5 py-5">
           <BaseLoading v-if="loading && !connections.length" />
           <div
             v-else-if="!connections.length"
-            class="rounded-lg border border-line bg-surface-sunken py-16 text-center text-sm text-ink-500"
+            class="rounded-xl border border-dashed border-line bg-surface-sunken px-6 py-16 text-center"
           >
-            {{ t('common.noData') }}
+            <p class="text-sm font-medium text-ink-700">
+              {{ t('common.noData') }}
+            </p>
+            <p class="mt-1 text-sm text-ink-500">
+              {{ t('lensAdmin.connections.emptyHint') }}
+            </p>
           </div>
-          <div v-else class="overflow-x-auto rounded-lg border border-line">
-            <table class="min-w-[58rem] w-full divide-y divide-line">
-              <thead class="bg-surface-sunken">
-                <tr>
-                  <th class="table-head">
-                    {{ t('lensAdmin.connections.name') }}
-                  </th>
-                  <th class="table-head">Plugin</th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.connections.scope') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.connections.usage') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.connections.status') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.connections.actions') }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line bg-surface">
-                <tr v-for="row in connections" :key="row.uuid">
-                  <td class="table-cell">
-                    <div class="font-medium text-ink-900">{{ row.name }}</div>
-                    <div class="mt-1 text-xs text-ink-500">
-                      {{
-                        row.has_secret
-                          ? t('lensAdmin.connections.secretStored')
-                          : t('lensAdmin.connections.secretMissing')
-                      }}
-                    </div>
-                  </td>
-                  <td class="table-cell text-ink-600">{{ row.plugin_key }}</td>
-                  <td class="table-cell text-ink-600">
-                    <div class="max-w-sm break-words font-mono text-xs">
-                      {{ repositoryScope(row) }}
-                    </div>
-                  </td>
-                  <td class="table-cell text-ink-600">
-                    {{ row.datasource_count }} / {{ row.assistant_count }}
-                  </td>
-                  <td class="table-cell">
+          <div v-else class="grid gap-4 lg:grid-cols-2">
+            <article
+              v-for="row in connections"
+              :key="row.uuid"
+              class="rounded-xl border border-line bg-surface p-5 shadow-sm transition-shadow hover:shadow-md"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h2 class="truncate text-base font-semibold text-ink-900">
+                      {{ row.name }}
+                    </h2>
                     <span
-                      class="rounded border px-2 py-1 text-xs"
+                      class="rounded-full border px-2 py-0.5 text-xs font-medium"
                       :class="
                         row.status === 'active'
                           ? 'border-success-200 bg-success-50 text-success-700'
@@ -99,51 +94,77 @@
                     >
                       {{ row.status }}
                     </span>
-                    <p
-                      v-if="validationResults[row.uuid]"
-                      class="mt-2 max-w-xs text-xs"
-                      :class="
-                        validationResults[row.uuid].ok
-                          ? 'text-success-700'
-                          : 'text-danger-700'
-                      "
+                  </div>
+                  <p class="mt-1 text-sm text-ink-500">
+                    {{ pluginDisplayName(row.plugin_key) }}
+                  </p>
+                </div>
+                <span
+                  class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-sm font-semibold uppercase text-brand-700"
+                  aria-hidden="true"
+                >
+                  {{ row.plugin_key.slice(0, 2) }}
+                </span>
+              </div>
+
+              <dl class="mt-5 grid grid-cols-2 gap-4 border-y border-line py-4">
+                <div>
+                  <dt class="text-xs text-ink-500">{{ t('lensAdmin.connections.scope') }}</dt>
+                  <dd class="mt-1 flex flex-wrap gap-1.5">
+                    <span
+                      v-for="item in scopeItems(row)"
+                      :key="item"
+                      class="max-w-full truncate rounded-md bg-surface-sunken px-2 py-1 font-mono text-xs text-ink-700"
                     >
-                      {{ validationResults[row.uuid].message }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <div class="flex flex-wrap gap-2">
-                      <BaseButton
-                        size="sm"
-                        variant="outline"
-                        :loading="validatingUuid === row.uuid"
-                        :disabled="row.status !== 'active'"
-                        @click="validateRow(row)"
-                      >
-                        {{ t('lensAdmin.connections.validate') }}
-                      </BaseButton>
-                      <BaseButton
-                        size="sm"
-                        variant="outline"
-                        @click="startEdit(row)"
-                      >
-                        {{ t('common.edit') }}
-                      </BaseButton>
-                      <BaseButton
-                        size="sm"
-                        variant="danger"
-                        :disabled="
-                          row.datasource_count > 0 || row.assistant_count > 0
-                        "
-                        @click="removeRow(row)"
-                      >
-                        {{ t('common.delete') }}
-                      </BaseButton>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                      {{ item }}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-xs text-ink-500">{{ t('lensAdmin.connections.usage') }}</dt>
+                  <dd class="mt-1 text-sm font-medium text-ink-800">
+                    {{ row.datasource_count }} {{ t('lensAdmin.connections.datasources') }}
+                    <span class="mx-1 text-ink-300">·</span>
+                    {{ row.assistant_count }} {{ t('lensAdmin.connections.assistants') }}
+                  </dd>
+                </div>
+              </dl>
+
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-xs text-ink-500">
+                  {{ row.has_secret ? t('lensAdmin.connections.secretStored') : t('lensAdmin.connections.secretMissing') }}
+                </span>
+                <div class="flex flex-wrap justify-end gap-2">
+                  <BaseButton
+                    size="sm"
+                    variant="outline"
+                    :loading="validatingUuid === row.uuid"
+                    :disabled="row.status !== 'active'"
+                    @click="validateRow(row)"
+                  >
+                    {{ t('lensAdmin.connections.validate') }}
+                  </BaseButton>
+                  <BaseButton size="sm" variant="outline" @click="startEdit(row)">
+                    {{ t('common.edit') }}
+                  </BaseButton>
+                  <BaseButton
+                    size="sm"
+                    variant="danger"
+                    :disabled="row.datasource_count > 0 || row.assistant_count > 0"
+                    @click="removeRow(row)"
+                  >
+                    {{ t('common.delete') }}
+                  </BaseButton>
+                </div>
+              </div>
+              <p
+                v-if="validationResults[row.uuid]"
+                class="mt-3 text-xs"
+                :class="validationResults[row.uuid].ok ? 'text-success-700' : 'text-danger-700'"
+              >
+                {{ validationResults[row.uuid].message }}
+              </p>
+            </article>
           </div>
         </div>
       </section>
@@ -263,6 +284,13 @@ const mode = ref('create')
 const formError = ref('')
 const form = ref(defaultForm())
 
+const activeConnectionCount = computed(
+  () => connections.value.filter((row) => row.status === 'active').length
+)
+const pluginCount = computed(
+  () => new Set(connections.value.map((row) => row.plugin_key)).size
+)
+
 const manifest = computed(
   () => pluginManifests.value[form.value.plugin_key] || null
 )
@@ -296,6 +324,20 @@ function hasFieldValue(value) {
 function repositoryScope(row) {
   const scope = row.allowed_scope || {}
   return Object.keys(scope).length ? JSON.stringify(scope) : '-'
+}
+
+function scopeItems(row) {
+  const repositories = row.allowed_scope?.repositories
+  if (Array.isArray(repositories) && repositories.length) return repositories
+  return [repositoryScope(row)]
+}
+
+function pluginDisplayName(pluginKey) {
+  return (
+    pluginManifests.value[pluginKey]?.display_name ||
+    pluginKey ||
+    t('lensAdmin.connections.unknownPlugin')
+  )
 }
 
 async function load() {
