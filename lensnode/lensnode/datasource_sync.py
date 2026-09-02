@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -922,12 +923,12 @@ def _test_git_connection(config):
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
 
     branch = str(config.get("branch") or "").strip()
-    auth_url = _git_auth_url(repo_url, config)
     try:
         result = _run_git(
-            ["ls-remote", "--heads", auth_url],
+            ["ls-remote", "--heads", repo_url],
             timeout=60,
             detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **_git_run_options(config),
         )
     except DataSourceSyncError:
         organization_result = _discover_git_organization(config)
@@ -1368,11 +1369,11 @@ def _git_repo_branches(repo_url, config):
     """Return remote branches for one repository URL."""
 
     try:
-        auth_url = _git_auth_url(repo_url, config)
         result = _run_git(
-            ["ls-remote", "--heads", auth_url],
+            ["ls-remote", "--heads", repo_url],
             timeout=60,
             detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **_git_run_options(config),
         )
     except DataSourceSyncError:
         return []
@@ -1487,8 +1488,15 @@ def _sync_git(command, workspace_path, emit):
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
 
     target = normalize_target_path(command.get("target_path"), workspace_path)
-    branch = config.get("branch") or "main"
-    auth_url = _git_auth_url(repo_url, config)
+    git_options = _git_run_options(config)
+    branch = config.get("branch") or _git_default_branch_from_remote(
+        repo_url,
+        git_options,
+    )
+    if not branch:
+        raise DataSourceSyncError(
+            "LENS_SOURCE_GIT_DEFAULT_BRANCH_UNAVAILABLE"
+        )
     previous_manifest = _read_manifest(target)
     previous_items = manifest_store.manifest_items_by_source_id(
         previous_manifest
@@ -1509,12 +1517,28 @@ def _sync_git(command, workspace_path, emit):
                 "--branch",
                 branch,
                 "--single-branch",
-                auth_url,
+                repo_url,
                 str(target),
             ],
             detail_prefix="LENS_SOURCE_GIT_CLONE_FAILED",
+            **git_options,
         )
     else:
+        remote_url = _git_output(
+            ["remote", "get-url", "origin"],
+            cwd=target,
+        )
+        if _has_embedded_credentials(remote_url):
+            _run_git(
+                [
+                    "remote",
+                    "set-url",
+                    "origin",
+                    _strip_url_credentials(repo_url),
+                ],
+                cwd=target,
+                detail_prefix="LENS_SOURCE_GIT_REMOTE_UPDATE_FAILED",
+            )
         _run_git(
             [
                 "fetch",
@@ -1526,6 +1550,7 @@ def _sync_git(command, workspace_path, emit):
             ],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_FETCH_FAILED",
+            **git_options,
         )
         _run_git(
             ["checkout", branch],
@@ -2729,6 +2754,7 @@ def _run_git(
     cwd=None,
     timeout=600,
     detail_prefix="LENS_SOURCE_SYNC_FAILED",
+    env=None,
 ):
     """Run a Git command and raise a datasource error on failure."""
 
@@ -2740,6 +2766,7 @@ def _run_git(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
     except subprocess.CalledProcessError as exc:
         detail = _git_error_detail(exc)
@@ -2756,9 +2783,74 @@ def _git_error_detail(exc):
     stderr = (exc.stderr or "").strip()
     stdout = (exc.stdout or "").strip()
     detail = stderr or stdout or str(exc)
+    detail = _redact_git_detail(detail)
     if len(detail) > 1000:
         return f"{detail[:1000]}..."
     return detail
+
+
+def _git_run_options(config):
+    """Return subprocess options that keep Git credentials ephemeral."""
+
+    environment = _git_auth_environment(config)
+    return {"env": environment} if environment is not None else {}
+
+
+def _git_auth_environment(config):
+    """Provide Git authentication through process-only configuration."""
+
+    if not isinstance(config, dict) or config.get("auth_scheme") != "token":
+        return None
+    credentials = _load_credentials(config)
+    token = credentials.get("token") or credentials.get("password")
+    if not isinstance(token, str) or not token:
+        return None
+    encoded = base64.b64encode(
+        f"x-access-token:{token}".encode("utf-8")
+    ).decode("ascii")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded}",
+        }
+    )
+    return environment
+
+
+def _has_embedded_credentials(value):
+    """Return whether a URL contains userinfo credentials."""
+
+    parsed = parse.urlsplit(str(value or ""))
+    return bool(parsed.username or parsed.password)
+
+
+def _strip_url_credentials(value):
+    """Remove userinfo credentials from one URL before persisting it."""
+
+    parsed = parse.urlsplit(str(value or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return str(value or "")
+    hostname = parsed.hostname or ""
+    netloc = hostname
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def _redact_git_detail(value):
+    """Remove URL credentials from Git diagnostics."""
+
+    return re.sub(
+        r"(https?://)[^/\s@]+@",
+        r"\1***@",
+        str(value or ""),
+        flags=re.IGNORECASE,
+    )
 
 
 def _git_output(args, cwd=None):
@@ -2792,6 +2884,27 @@ def _git_remote_branches(output):
     return branches
 
 
+def _git_default_branch_from_remote(repo_url, git_options=None):
+    """Return the remote HEAD branch without embedding credentials in a URL."""
+
+    try:
+        result = _run_git(
+            ["ls-remote", "--symref", repo_url, "HEAD"],
+            timeout=60,
+            detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **(git_options or {}),
+        )
+    except DataSourceSyncError:
+        return ""
+    for line in str(getattr(result, "stdout", "") or "").splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "ref:" and parts[1].startswith(
+            "refs/heads/"
+        ) and parts[2] == "HEAD":
+            return parts[1][len("refs/heads/") :]
+    return ""
+
+
 def _default_git_branch(branches):
     """Return the preferred branch from a remote branch list."""
 
@@ -2813,25 +2926,6 @@ def _normalize_repo_url(value):
             (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")
         )
     return str(value or "").rstrip("/")
-
-
-def _git_auth_url(repo_url, config):
-    """Inject HTTPS token credentials into a Git URL when configured."""
-
-    if config.get("auth_scheme") != "token":
-        return repo_url
-    credentials = _load_credentials(config)
-    token = credentials.get("token") or credentials.get("password")
-    username = credentials.get("username") or "oauth2"
-    if not token:
-        raise DataSourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-    parsed = parse.urlsplit(repo_url)
-    if parsed.scheme not in {"http", "https"}:
-        raise DataSourceSyncError("LENS_SOURCE_AUTH_SCHEME_UNSUPPORTED")
-    netloc = f"{parse.quote(username)}:{parse.quote(token)}@{parsed.netloc}"
-    return parse.urlunsplit(
-        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
-    )
 
 
 def _load_credentials(config):

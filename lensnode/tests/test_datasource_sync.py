@@ -21,7 +21,8 @@ from lensnode.datasource_sync import (
     _feishu_item_unchanged,
     _feishu_target_file_path,
     _git_remote_branches,
-    _git_auth_url,
+    _git_auth_environment,
+    _git_error_detail,
     _http_json,
     _manifest_item_to_sync_item,
     _poll_feishu_export_task,
@@ -210,18 +211,34 @@ def test_managed_workspace_upload_rejects_archive_path_traversal(tmp_path):
     assert not (tmp_path / "outside.txt").exists()
 
 
-def test_git_auth_url_uses_inline_access_token():
-    """HTTPS token auth can use the datasource config access token."""
+def test_git_auth_environment_keeps_token_out_of_repository_url():
+    """Git credentials are supplied through ephemeral process config."""
 
-    url = _git_auth_url(
-        "https://github.com/example/repo.git",
+    environment = _git_auth_environment(
         {
             "auth_scheme": "token",
             "access_token": "ghp_example",
-        },
+        }
     )
 
-    assert url == "https://oauth2:ghp_example@github.com/example/repo.git"
+    assert environment["GIT_TERMINAL_PROMPT"] == "0"
+    assert environment["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert "ghp_example" not in environment["GIT_CONFIG_VALUE_0"]
+    assert "Basic" in environment["GIT_CONFIG_VALUE_0"]
+
+
+def test_git_error_detail_redacts_url_credentials():
+    """Git diagnostics must not return credentials to task history."""
+
+    class Failure:
+        stderr = (
+            "fatal: unable to access "
+            "'https://oauth2:secret@github.com/repo'"
+        )
+        stdout = ""
+
+    assert "secret" not in _git_error_detail(Failure())
+    assert "https://***@github.com/repo" in _git_error_detail(Failure())
 
 
 def test_git_remote_branches_parses_heads():
