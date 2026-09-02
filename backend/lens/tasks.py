@@ -19,9 +19,12 @@ from .datasource_services import (
     get_datasource_upload_timeout_s,
 )
 from .models import (
+    CredentialLease,
     DataSource,
+    ExecutionSnapshot,
     GlobalSetting,
     LensNode,
+    PluginInvocation,
     Run,
     RunExecution,
     RunTraceExport,
@@ -1837,7 +1840,7 @@ def run_retention_task():
     retention_days = setting.value if setting else 30
     cutoff = timezone.now() - timedelta(days=int(retention_days))
 
-    deleted, _ = Run.objects.filter(
+    terminal_runs = Run.objects.filter(
         status__in=[
             Run.Status.AWAITING_USER_INPUT,
             Run.Status.DONE,
@@ -1845,11 +1848,32 @@ def run_retention_task():
             Run.Status.CANCELLED,
         ],
         finished_at__lt=cutoff,
-    ).delete()
+    )
+    run_ids = list(terminal_runs.values_list("id", flat=True))
+    run_snapshot_ids = list(
+        ExecutionSnapshot.objects.filter(run_id__in=run_ids).values_list(
+            "id",
+            flat=True,
+        )
+    )
+    datasource_snapshot_ids = list(
+        ExecutionSnapshot.objects.filter(
+            run__isnull=True,
+            created_at__lt=cutoff,
+        ).values_list("id", flat=True)
+    )
+    snapshot_ids = run_snapshot_ids + datasource_snapshot_ids
+    if snapshot_ids:
+        CredentialLease.objects.filter(snapshot_id__in=snapshot_ids).delete()
+        PluginInvocation.objects.filter(snapshot_id__in=snapshot_ids).delete()
+        ExecutionSnapshot.objects.filter(id__in=snapshot_ids).delete()
+
+    deleted, _ = terminal_runs.delete()
 
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_metrics = {
         "deleted": deleted,
+        "plugin_snapshots_deleted": len(snapshot_ids),
         "retention_days": retention_days,
     }
     record.last_run_at = timezone.now()
