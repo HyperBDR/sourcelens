@@ -13,8 +13,43 @@
         <span v-if="isRequired(field)" class="text-danger-600">*</span>
       </label>
 
+      <div
+        v-if="isTreeField(field)"
+        class="max-h-56 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
+      >
+        <div
+          v-for="group in treeGroups(field)"
+          :key="group.owner"
+          class="mb-1 last:mb-0"
+        >
+          <label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm font-medium hover:bg-surface">
+            <input
+              type="checkbox"
+              :checked="groupSelected(field, group)"
+              :indeterminate="groupPartial(field, group)"
+              @change="toggleGroup(field, group, $event.target.checked)"
+            />
+            <span class="text-ink-800">{{ group.owner }}</span>
+          </label>
+          <div class="ml-6 border-l border-line pl-2">
+            <label
+              v-for="item in group.items"
+              :key="optionValue(item)"
+              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface"
+            >
+              <input
+                type="checkbox"
+                :checked="arrayValue(field).includes(optionValue(item))"
+                @change="toggleArrayItem(field, optionValue(item), $event.target.checked)"
+              />
+              <span class="min-w-0 truncate text-ink-700">{{ optionLabel(item) }}</span>
+              <span v-if="item.metadata?.private" class="text-xs text-ink-500">Private</span>
+            </label>
+          </div>
+        </div>
+      </div>
       <textarea
-        v-if="isArrayField(field)"
+        v-else-if="isArrayField(field)"
         :id="fieldId(field)"
         :value="arrayValue(field).join('\n')"
         class="form-input min-h-24 font-mono"
@@ -114,6 +149,49 @@ function arrayValue(field) {
 
 function isArrayField(field) {
   return field.type === 'array'
+}
+
+function isTreeField(field) {
+  return isArrayField(field) && field.format === 'provider-resource' &&
+    optionsFor(field).length > 0
+}
+
+function treeGroups(field) {
+  const groups = new Map()
+  optionsFor(field).forEach((item) => {
+    const value = optionValue(item)
+    const owner = value.includes('/') ? value.split('/')[0] : 'Resources'
+    if (!groups.has(owner)) groups.set(owner, [])
+    groups.get(owner).push(item)
+  })
+  return [...groups.entries()].map(([owner, items]) => ({ owner, items }))
+}
+
+function groupSelected(field, group) {
+  const selected = arrayValue(field)
+  return group.items.every((item) => selected.includes(optionValue(item)))
+}
+
+function groupPartial(field, group) {
+  const selected = arrayValue(field)
+  const count = group.items.filter((item) => selected.includes(optionValue(item))).length
+  return count > 0 && count < group.items.length
+}
+
+function toggleGroup(field, group, checked) {
+  const selected = new Set(arrayValue(field))
+  group.items.forEach((item) => {
+    if (checked) selected.add(optionValue(item))
+    else selected.delete(optionValue(item))
+  })
+  setField(field, [...selected])
+}
+
+function toggleArrayItem(field, value, checked) {
+  const selected = new Set(arrayValue(field))
+  if (checked) selected.add(value)
+  else selected.delete(value)
+  setField(field, [...selected])
 }
 
 function isResourceOptionField(field) {

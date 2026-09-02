@@ -193,6 +193,23 @@
           </span>
           <input v-model="form.name" class="form-input" required />
         </label>
+        <div
+          v-if="connectionResourceField"
+          class="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface-sunken px-3 py-2"
+        >
+          <p class="text-xs text-ink-500">
+            {{ t('lensAdmin.connections.discoverResourcesHint') }}
+          </p>
+          <BaseButton
+            size="sm"
+            variant="outline"
+            :loading="discoveringResources"
+            :disabled="!hasFieldValue(form.secret_value)"
+            @click="discoverConnectionResources"
+          >
+            {{ t('lensAdmin.connections.discoverResourcesAction') }}
+          </BaseButton>
+        </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-ink-700">Plugin</span>
           <BaseSelect
@@ -213,51 +230,8 @@
           v-if="manifest?.connection_schema"
           v-model="form"
           :schema="manifest.connection_schema"
+          :resources="connectionResourceOptions"
         />
-        <section
-          v-if="connectionResourceField"
-          class="rounded-lg border border-line bg-surface-sunken p-3"
-        >
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p class="text-sm font-medium text-ink-800">
-                {{ t('lensAdmin.connections.discoverResources') }}
-              </p>
-              <p class="mt-1 text-xs text-ink-500">
-                {{ t('lensAdmin.connections.discoverResourcesHint') }}
-              </p>
-            </div>
-            <BaseButton
-              size="sm"
-              variant="outline"
-              :loading="discoveringResources"
-              :disabled="!hasFieldValue(form.secret_value)"
-              @click="discoverConnectionResources"
-            >
-              {{ t('lensAdmin.connections.discoverResourcesAction') }}
-            </BaseButton>
-          </div>
-          <div
-            v-if="connectionResourceCandidates.length"
-            class="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-line bg-surface p-2"
-          >
-            <label
-              v-for="item in connectionResourceCandidates"
-              :key="item.value"
-              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
-            >
-              <input
-                type="checkbox"
-                :checked="selectedConnectionResource(item.value)"
-                @change="toggleConnectionResource(item.value, $event.target.checked)"
-              >
-              <span class="min-w-0 truncate text-ink-800">{{ item.label }}</span>
-              <span v-if="item.metadata?.private" class="text-xs text-ink-500">
-                {{ t('lensAdmin.connections.privateResource') }}
-              </span>
-            </label>
-          </div>
-        </section>
         <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
           {{ t('lensAdmin.connections.tokenEditHint') }}
         </p>
@@ -330,6 +304,12 @@ const formError = ref('')
 const form = ref(defaultForm())
 const discoveringResources = ref(false)
 const connectionResourceCandidates = ref([])
+
+const connectionResourceOptions = computed(() => ({
+  [connectionResourceField.value?.[1]?.resource || '']: {
+    items: connectionResourceCandidates.value
+  }
+}))
 
 const activeConnectionCount = computed(
   () => connections.value.filter((row) => row.status === 'active').length
