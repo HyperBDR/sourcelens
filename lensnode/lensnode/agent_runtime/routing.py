@@ -14,6 +14,9 @@ from .capability_protocol import (
 from .messages import build_initial_messages as _build_initial_messages
 
 LOGGER = logging.getLogger("lensnode")
+ROUTE_CLASSIFICATION_MAX_TOKENS = 1024
+
+
 def _parse_route_decision(content):
     """Parse a bounded runtime route decision with a safe fallback."""
 
@@ -217,6 +220,7 @@ def _select_general_chat_route(
             # with identical route decisions). Providers that lack the
             # parameter drop it via gateway drop_params handling.
             reasoning_effort="none",
+            max_tokens=ROUTE_CLASSIFICATION_MAX_TOKENS,
         )
     except RunCancelledError:
         raise

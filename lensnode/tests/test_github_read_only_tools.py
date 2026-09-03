@@ -129,7 +129,7 @@ def test_repository_and_branch_results_are_bounded_and_sanitized():
         assert request.url.path == "/repos/HyperBDR/sourcelens/branches"
         assert parse_qs(request.url.query.decode()) == {
             "page": ["2"],
-            "per_page": ["25"],
+            "per_page": ["20"],
         }
         return httpx.Response(
             200,
@@ -145,7 +145,7 @@ def test_repository_and_branch_results_are_bounded_and_sanitized():
 
     branches = _execute(
         "github_branch_list",
-        {"repository": "HyperBDR/sourcelens", "page": 2, "per_page": 25},
+        {"repository": "HyperBDR/sourcelens", "page": 2, "per_page": 20},
         branches_handler,
     )
 
@@ -387,6 +387,18 @@ def test_list_tools_bound_pages_and_filter_pull_requests_from_issue_results():
 
     assert [item["number"] for item in result["items"]] == [1]
     assert result["has_more"] is False
+
+
+def test_list_tools_reject_oversized_pages():
+    with pytest.raises(PluginRuntimeError, match="PLUGIN_ARGUMENTS_INVALID"):
+        _execute(
+            "github_commit_list",
+            {
+                "repository": "HyperBDR/sourcelens",
+                "per_page": 21,
+            },
+            lambda request: httpx.Response(200, json=[], request=request),
+        )
 
 
 def test_comments_files_reviews_releases_and_runs_have_bounded_shapes():

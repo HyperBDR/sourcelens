@@ -1,8 +1,9 @@
 """Agent streaming, wrap-up synthesis, and event emission."""
 
+import json
 import logging
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..agent_tools import SELF_REPORTING_TOOLS
 from ..gateway_model import GatewayStreamError, RunCancelledError
@@ -17,10 +18,16 @@ from .prompts import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+WRAPUP_MAX_CONTEXT_CHARS = 36000
+WRAPUP_SYSTEM_MAX_CHARS = 8000
+WRAPUP_ITEM_MAX_CHARS = 1200
+
+
 class EmptyAgentResponseError(RuntimeError):
     """The agent and its one recovery attempt both returned no text."""
 
     code = "EMPTY_AGENT_RESPONSE"
+
 
 def _run_agent_with_turn_limit(
     agent,
@@ -307,6 +314,66 @@ def _strip_dangling_tool_call(messages):
     return messages
 
 
+def _message_content_text(message):
+    """Return bounded plain text for one message in a wrap-up digest."""
+
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(content or "")
+
+
+def _compact_wrapup_messages(messages):
+    """Collapse a long agent history into a bounded evidence digest."""
+
+    if sum(len(_message_content_text(message)) for message in messages) <= (
+        WRAPUP_MAX_CONTEXT_CHARS
+    ):
+        return list(messages)
+    system_messages = []
+    evidence_parts = []
+    for message in messages:
+        message_type = getattr(message, "type", "message")
+        content = _message_content_text(message).strip()
+        if message_type == "system":
+            if content:
+                system_messages.append(
+                    SystemMessage(
+                        content=content[:WRAPUP_SYSTEM_MAX_CHARS]
+                    )
+                )
+            continue
+        tool_calls = getattr(message, "tool_calls", None) or []
+        tool_names = ", ".join(
+            str(call.get("name") or "tool")
+            for call in tool_calls
+            if isinstance(call, dict)
+        )
+        label = message_type
+        if tool_names:
+            label = f"{label} ({tool_names})"
+        if content:
+            evidence_parts.append(
+                f"[{label}] {content[:WRAPUP_ITEM_MAX_CHARS]}"
+            )
+    evidence = "\n".join(evidence_parts)
+    if len(evidence) > WRAPUP_MAX_CONTEXT_CHARS:
+        evidence = (
+            "[Earlier evidence omitted to keep the final context bounded.]\n"
+            + evidence[-WRAPUP_MAX_CONTEXT_CHARS:]
+        )
+    digest = HumanMessage(
+        content=(
+            "Collected run evidence for final synthesis:\n"
+            f"{evidence or '[no evidence text]'}"
+        )
+    )
+    return [*system_messages, digest]
+
+
 def _synthesize_wrapup_answer(
     model,
     current,
@@ -375,7 +442,9 @@ def _synthesize_wrapup_answer(
         f"{instruction}\n\n"
         f"{_answer_language_requirement(answer_language)}"
     )
-    wrapup_messages = _strip_dangling_tool_call(current) + [
+    wrapup_messages = _compact_wrapup_messages(
+        _strip_dangling_tool_call(current)
+    ) + [
         HumanMessage(content=instruction)
     ]
     if emit_event is not None:
@@ -389,6 +458,8 @@ def _synthesize_wrapup_answer(
         response = model.invoke(
             wrapup_messages,
             runtime_final_synthesis=True,
+            max_tokens=4096,
+            reasoning_effort="none",
         )
     except RunCancelledError:
         raise

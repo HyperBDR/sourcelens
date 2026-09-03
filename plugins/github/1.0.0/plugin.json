@@ -227,9 +227,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],
@@ -264,9 +264,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],
@@ -322,9 +322,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],
@@ -378,9 +378,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository", "number"],
@@ -411,9 +411,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],
@@ -467,9 +467,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository", "number"],
@@ -501,9 +501,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository", "number"],
@@ -530,9 +530,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],
@@ -567,9 +567,9 @@
           },
           "per_page": {
             "type": "integer",
-            "description": "Maximum items to return, from 1 through 50.",
+            "description": "Maximum items to return, from 1 through 20.",
             "minimum": 1,
-            "maximum": 50
+            "maximum": 20
           }
         },
         "required": ["repository"],

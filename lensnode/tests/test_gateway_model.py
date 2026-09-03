@@ -727,6 +727,67 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
     }
 
 
+def test_default_model_calls_are_clamped_to_remaining_work_budget(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.read().decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "ok", "finish_reason": "stop"},
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        token_budget_max_tokens=100000,
+        token_budget_final_reserve_tokens=2000,
+    )
+
+    model._generate([HumanMessage(content="investigate")])
+
+    assert requests[0]["max_tokens"] == 8192
+
+
+def test_final_synthesis_is_clamped_to_remaining_budget(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.read().decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "ok", "finish_reason": "stop"},
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        token_budget_max_tokens=10000,
+        token_budget_final_reserve_tokens=2000,
+    )
+
+    model._generate(
+        [HumanMessage(content="summarize")],
+        runtime_final_synthesis=True,
+        max_tokens=4096,
+        reasoning_effort="none",
+    )
+
+    assert requests[0]["max_tokens"] == 2000
+
+
 def test_resume_restores_token_and_loop_guardrail_state(monkeypatch):
     def handler(_request):
         return httpx.Response(

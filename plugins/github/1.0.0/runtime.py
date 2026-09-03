@@ -355,7 +355,7 @@ def _list_result(
 
     items = _items(payload)
     page = _page_value(arguments, "page", 1, 1000, 1)
-    per_page = _page_value(arguments, "per_page", 1, 50, 20)
+    per_page = _page_value(arguments, "per_page", 1, 20, 10)
     return {
         "ok": True,
         "repository": repository,
@@ -830,7 +830,7 @@ def _pagination(arguments):
 
     return {
         "page": _page_value(arguments, "page", 1, 1000, 1),
-        "per_page": _page_value(arguments, "per_page", 1, 50, 20),
+        "per_page": _page_value(arguments, "per_page", 1, 20, 10),
     }
 
 

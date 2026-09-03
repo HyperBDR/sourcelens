@@ -6,7 +6,12 @@ from typing import ClassVar
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from lensnode import agent_runtime
@@ -1246,6 +1251,73 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert model.options["temperature"] == 0
     # Route classification is a control call: light reasoning budget only.
     assert model.options["reasoning_effort"] == "none"
+    assert model.options["max_tokens"] == 1024
+
+
+def test_wrapup_synthesis_uses_a_bounded_non_reasoning_call():
+    class Model:
+        def __init__(self):
+            self.options = None
+
+        def invoke(self, _messages, **kwargs):
+            self.options = kwargs
+            return SimpleNamespace(content="done")
+
+    model = Model()
+
+    answer = _synthesize_wrapup_answer(
+        model,
+        [HumanMessage(content="evidence")],
+        "English",
+        None,
+        reason="token_budget_wrapup",
+    )
+
+    assert answer == "done"
+    assert model.options == {
+        "runtime_final_synthesis": True,
+        "max_tokens": 4096,
+        "reasoning_effort": "none",
+    }
+
+
+def test_wrapup_synthesis_compacts_large_history_before_invoke():
+    class Model:
+        def __init__(self):
+            self.messages = None
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            return SimpleNamespace(content="done")
+
+    model = Model()
+    messages = [SystemMessage(content="system instructions")]
+    for index in range(80):
+        messages.extend(
+            [
+                AIMessage(content=f"analysis {index} " + "x" * 1800),
+                ToolMessage(
+                    content=(
+                        f"tool evidence {index} " + "y" * 1800
+                    ),
+                    tool_call_id=f"call-{index}",
+                ),
+            ]
+        )
+
+    _synthesize_wrapup_answer(
+        model,
+        messages,
+        "English",
+        None,
+        reason="token_budget_wrapup",
+    )
+
+    assert len(model.messages) == 3
+    assert sum(
+        len(str(message.content)) for message in model.messages
+    ) <= 40000
+    assert "tool evidence 79" in model.messages[-2].content
 
 
 def test_route_selection_includes_current_images_in_classifier_input():
@@ -5527,7 +5599,11 @@ def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
     assert "budget synthesis" in answer
     assert "token budget" not in answer.lower()
     assert "Token 调查预算" not in answer
-    assert model.invoked_kwargs == {"runtime_final_synthesis": True}
+    assert model.invoked_kwargs == {
+        "runtime_final_synthesis": True,
+        "max_tokens": 4096,
+        "reasoning_effort": "none",
+    }
 
 
 def test_empty_terminal_response_recovers_once_without_tools():
