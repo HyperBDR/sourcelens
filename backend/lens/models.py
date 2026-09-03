@@ -1456,6 +1456,12 @@ class SharedQA(TimestampedUUIDModel):
     assistant_slug = models.SlugField(max_length=180, blank=True, default="")
     question = models.TextField(blank=True, default="")
     answer = models.TextField(blank=True, default="")
+    content_language = models.CharField(
+        max_length=16,
+        blank=True,
+        default="",
+        help_text="Language used by the generated Q&A content.",
+    )
     title = models.CharField(max_length=200, blank=True, default="")
     is_listed = models.BooleanField(default=False)
     status = models.CharField(
@@ -1476,7 +1482,13 @@ class SharedQA(TimestampedUUIDModel):
     class Meta:
         indexes = [
             models.Index(
-                fields=["assistant", "is_listed", "status", "-published_at"],
+                fields=[
+                    "assistant",
+                    "content_language",
+                    "is_listed",
+                    "status",
+                    "-published_at",
+                ],
                 name="lens_sharedqa_list_idx",
             ),
         ]

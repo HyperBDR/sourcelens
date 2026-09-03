@@ -44,6 +44,16 @@
         <h1 class="mt-3 text-xl font-semibold text-ink-900">
           {{ qa.title || qa.question }}
         </h1>
+        <p v-if="languageMismatch" class="mt-2 text-xs text-ink-400">
+          {{
+            t('lens.qa.contentLanguageNotice', {
+              language: contentLanguageLabel
+            })
+          }}
+        </p>
+        <p v-else-if="!contentLanguage" class="mt-2 text-xs text-ink-400">
+          {{ t('lens.qa.originalLanguageNotice') }}
+        </p>
 
         <section
           class="mt-5 rounded-lg border border-line bg-surface px-4 py-4"
@@ -164,7 +174,7 @@ import { useUserStore } from '@/store/user'
 
 const props = defineProps({ token: { type: String, required: true } })
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { showSuccess, showError } = useToast()
@@ -176,6 +186,24 @@ const loading = ref(true)
 const accessState = ref(null)
 const previewFile = ref(null)
 const isAuthenticated = computed(() => userStore.isAuthenticated)
+const contentLanguage = computed(() => qa.value?.content_language || '')
+const contentLanguageKey = computed(() =>
+  contentLanguage.value.startsWith('zh')
+    ? 'zh-CN'
+    : contentLanguage.value.startsWith('es')
+      ? 'es'
+      : 'en'
+)
+const contentLanguageLabel = computed(() =>
+  contentLanguage.value
+    ? t(`settings.preferences.languages.${contentLanguageKey.value}`)
+    : ''
+)
+const languageMismatch = computed(
+  () =>
+    Boolean(contentLanguage.value) &&
+    contentLanguage.value.split('-')[0] !== locale.value.split('-')[0]
+)
 
 function accessStateFromError(error) {
   const code = error?.response?.data?.code

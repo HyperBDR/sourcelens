@@ -12,6 +12,11 @@
     >
       {{ item.answer_snippet }}
     </p>
+    <p v-if="languageMismatch" class="mt-1 text-xs text-ink-400">
+      {{
+        t('lens.qa.contentLanguageNotice', { language: contentLanguageLabel })
+      }}
+    </p>
     <div class="mt-2 flex items-center gap-3 text-xs text-ink-400">
       <span>{{ formatDate(item.published_at, 'yyyy-MM-dd HH:mm') }}</span>
       <span>{{ t('lens.qa.viewCount', { count: item.view_count }) }}</span>
@@ -20,11 +25,30 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { formatDate } from '@/utils/formatting'
 
-defineProps({ item: { type: Object, required: true } })
+const props = defineProps({ item: { type: Object, required: true } })
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const contentLanguage = computed(() => props.item.content_language || '')
+const contentLanguageKey = computed(() =>
+  contentLanguage.value.startsWith('zh')
+    ? 'zh-CN'
+    : contentLanguage.value.startsWith('es')
+      ? 'es'
+      : 'en'
+)
+const contentLanguageLabel = computed(() =>
+  contentLanguage.value
+    ? t(`settings.preferences.languages.${contentLanguageKey.value}`)
+    : ''
+)
+const languageMismatch = computed(
+  () =>
+    Boolean(contentLanguage.value) &&
+    contentLanguage.value.split('-')[0] !== locale.value.split('-')[0]
+)
 </script>

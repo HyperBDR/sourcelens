@@ -165,6 +165,8 @@
       "ctaTitle": "Have a similar question?",
       "ctaAction": "Chat with {name}",
       "viewCount": "{count} views",
+      "contentLanguageNotice": "This Q&A is in {language}.",
+      "originalLanguageNotice": "This Q&A is shown in its original language.",
       "notFound": "This Q&A doesn't exist or has been unshared.",
       "loginRequiredTitle": "Sign in to view this Q&A",
       "loginRequiredDescription": "This shared Q&A may be limited to specific users or organization members. Sign in and try again.",
