@@ -42,9 +42,21 @@ export function sanitizeHtml(dirty) {
       'th',
       'td',
       'span',
-      'div'
+      'div',
+      'button'
     ],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'target', 'rel']
+    ALLOWED_ATTR: [
+      'href',
+      'src',
+      'alt',
+      'title',
+      'class',
+      'target',
+      'rel',
+      'type',
+      'aria-label',
+      'data-markdown-code-copy'
+    ]
   })
 }
 
