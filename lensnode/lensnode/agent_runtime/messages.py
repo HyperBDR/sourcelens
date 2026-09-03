@@ -1,5 +1,10 @@
 """Pure message and event helpers for the LensNode agent runtime."""
 
+import json
+
+
+MAX_STREAMED_PLAN_ARGUMENT_CHARS = 262_144
+
 
 def extract_final_message(response):
     """Extract final assistant content from a Deep Agents response."""
@@ -95,6 +100,92 @@ def normalize_plan_steps(todos):
             }
         )
     return steps
+
+
+def _find_todos_array_start(arguments):
+    """Return the first character inside the top-level todos array."""
+
+    decoder = json.JSONDecoder()
+    object_depth = 0
+    array_depth = 0
+    index = 0
+    while index < len(arguments):
+        char = arguments[index]
+        if char == '"':
+            try:
+                value, end = decoder.raw_decode(arguments, index)
+            except (TypeError, ValueError):
+                return None
+            if (
+                object_depth == 1
+                and array_depth == 0
+                and value == "todos"
+            ):
+                cursor = end
+                while cursor < len(arguments) and arguments[cursor].isspace():
+                    cursor += 1
+                if cursor >= len(arguments) or arguments[cursor] != ":":
+                    index = end
+                    continue
+                cursor += 1
+                while cursor < len(arguments) and arguments[cursor].isspace():
+                    cursor += 1
+                if cursor < len(arguments) and arguments[cursor] == "[":
+                    return cursor + 1
+            index = end
+            continue
+        if char == "{":
+            object_depth += 1
+        elif char == "}":
+            object_depth = max(0, object_depth - 1)
+        elif char == "[":
+            array_depth += 1
+        elif char == "]":
+            array_depth = max(0, array_depth - 1)
+        index += 1
+    return None
+
+
+def extract_streamed_plan_steps(arguments):
+    """Extract fully closed todo objects from partial JSON arguments."""
+
+    if not isinstance(arguments, str) or not arguments:
+        return []
+    if len(arguments) > MAX_STREAMED_PLAN_ARGUMENT_CHARS:
+        return []
+
+    try:
+        payload = json.loads(arguments)
+    except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        return normalize_plan_steps(payload.get("todos"))
+
+    array_start = _find_todos_array_start(arguments)
+    if array_start is None:
+        return []
+
+    decoder = json.JSONDecoder()
+    todos = []
+    cursor = array_start
+    while cursor < len(arguments) and len(todos) < 12:
+        while cursor < len(arguments) and (
+            arguments[cursor].isspace() or arguments[cursor] == ","
+        ):
+            cursor += 1
+        if cursor >= len(arguments) or arguments[cursor] == "]":
+            break
+        if arguments[cursor] != "{":
+            break
+        try:
+            item, end = decoder.raw_decode(arguments, cursor)
+        except (TypeError, ValueError):
+            break
+        if not isinstance(item, dict):
+            break
+        todos.append(item)
+        cursor = end
+    return normalize_plan_steps(todos)
 
 
 def tool_call_summary(call):

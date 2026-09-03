@@ -2133,6 +2133,14 @@ TOKEN_BUDGET_PROFILES = {
     },
 }
 
+TOKEN_BUDGET_PROFILE_BY_AGENT_ROUNDS = {
+    Assistant.AgentRounds.FLASH: Assistant.TokenBudgetProfile.STANDARD,
+    Assistant.AgentRounds.FAST: Assistant.TokenBudgetProfile.STANDARD,
+    Assistant.AgentRounds.BALANCED: Assistant.TokenBudgetProfile.STANDARD,
+    Assistant.AgentRounds.DEEP: Assistant.TokenBudgetProfile.DEEP,
+    Assistant.AgentRounds.MAX: Assistant.TokenBudgetProfile.UNLIMITED,
+}
+
 RUN_TIMEOUT_SECONDS = 3600
 
 AGENT_TURNS_BY_ROUNDS = {
@@ -2152,6 +2160,23 @@ def token_budget_for_profile(profile):
         "profile": selected,
         **TOKEN_BUDGET_PROFILES[selected],
     }
+
+
+def token_budget_profile_for_rounds(agent_rounds):
+    """Return the Token budget profile bound to an execution strategy."""
+
+    return TOKEN_BUDGET_PROFILE_BY_AGENT_ROUNDS.get(
+        agent_rounds,
+        Assistant.TokenBudgetProfile.STANDARD,
+    )
+
+
+def token_budget_for_rounds(agent_rounds):
+    """Return the Token budget bound to an execution strategy."""
+
+    return token_budget_for_profile(
+        token_budget_profile_for_rounds(agent_rounds)
+    )
 
 
 def run_timeout_for_rounds(agent_rounds):
@@ -2180,7 +2205,7 @@ def create_run_execution_snapshot(
     """Create or return the per-run LensNode execution snapshot."""
 
     assistant = run.session.assistant
-    token_budget = token_budget_for_profile(assistant.token_budget_profile)
+    token_budget = token_budget_for_rounds(assistant.agent_rounds)
     profile = getattr(run.session.user, "profile", None)
     answer_language = normalize_answer_language(
         answer_language or getattr(profile, "language", None)

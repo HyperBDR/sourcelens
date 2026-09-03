@@ -2,6 +2,65 @@ export function eventCategory(event) {
   return String(event?.event_type || '').split('.', 1)[0] || 'other'
 }
 
+export const ACTIVE_TRAJECTORY_RUN_STATUSES = new Set([
+  'queued',
+  'running',
+  'streaming'
+])
+
+export function shouldKeepTrajectoryStream({
+  active,
+  runUuid,
+  runStatus,
+  awaitingDone = false
+}) {
+  return Boolean(
+    active &&
+      runUuid &&
+      (awaitingDone || ACTIVE_TRAJECTORY_RUN_STATUSES.has(runStatus))
+  )
+}
+
+export function trajectoryEventKey(event) {
+  const runUuid = String(event?.trace_run_uuid || '')
+  const eventId = String(event?.event_id || event?.uuid || '')
+  return `${runUuid}:${eventId}`
+}
+
+export function mergeTrajectoryEvents(current, incoming) {
+  const merged = new Map()
+  for (const event of current || []) {
+    merged.set(trajectoryEventKey(event), event)
+  }
+  for (const event of incoming || []) {
+    merged.set(trajectoryEventKey(event), event)
+  }
+  return sortTrajectoryEvents([...merged.values()])
+}
+
+export function applyTrajectoryStreamUpdate(current, message) {
+  const previousRevision = String(message?.previous_revision || '')
+  if (
+    message?.type !== 'sync' &&
+    previousRevision &&
+    current.revision &&
+    previousRevision !== current.revision
+  ) {
+    return { ...current, requiresResync: true }
+  }
+
+  return {
+    ...current,
+    events: mergeTrajectoryEvents(current.events, message?.events),
+    summary: message?.summary || current.summary,
+    revision: message?.revision || current.revision,
+    cursor: message?.cursor || current.cursor,
+    sequence: message?.sequence ?? current.sequence,
+    run: message?.run || current.run,
+    requiresResync: false
+  }
+}
+
 const INSPECTOR_MIN_WIDTH = 320
 const LEDGER_MIN_WIDTH = 420
 

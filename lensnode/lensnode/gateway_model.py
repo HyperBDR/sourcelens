@@ -100,6 +100,19 @@ class RunCancelledError(RuntimeError):
     code = "RUN_CANCELLED"
 
 
+def _normalize_stream_error(error):
+    """Map transient HTTP transport failures to a recoverable stream error."""
+
+    if isinstance(error, GatewayStreamError):
+        return error
+    if isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        return GatewayStreamError(
+            "MODEL_STREAM_ERROR",
+            "AI gateway transport was interrupted.",
+        )
+    return error
+
+
 def _in_subagent_context():
     """Return True if the current LLM call originates from a subagent.
 
@@ -199,6 +212,9 @@ class LensGatewayChatModel(BaseChatModel):
     # Lets control calls surface a "model is thinking" pulse without
     # leaking the reasoning text into the user-facing stream.
     on_reasoning_delta: Optional[Any] = None
+    # Receives cumulative OpenAI-compatible tool-call argument snapshots.
+    # The runtime uses this only for safe, user-visible plan progress.
+    on_tool_call_delta: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
     trace_context: dict[str, Any] = Field(default_factory=dict)
@@ -563,6 +579,9 @@ class LensGatewayChatModel(BaseChatModel):
                     "failed",
                     error=exc,
                 )
+                normalized = _normalize_stream_error(exc)
+                if normalized is not exc:
+                    raise normalized from exc
                 raise
             if self._should_retry_length_capped(result):
                 result = self._retry_length_capped(
@@ -937,6 +956,25 @@ class LensGatewayChatModel(BaseChatModel):
                                     reasoning_parts.append(text)
                                     if reasoning_cb is not None:
                                         reasoning_cb(text)
+                                elif (
+                                    text
+                                    and kind == "tool_call"
+                                    and self.on_tool_call_delta is not None
+                                    and not silent
+                                ):
+                                    try:
+                                        tool_delta = json.loads(text)
+                                    except (TypeError, ValueError):
+                                        tool_delta = None
+                                    if isinstance(tool_delta, dict):
+                                        try:
+                                            self.on_tool_call_delta(tool_delta)
+                                        except Exception:
+                                            LOGGER.warning(
+                                                "Tool-call delta callback "
+                                                "failed",
+                                                exc_info=True,
+                                            )
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}

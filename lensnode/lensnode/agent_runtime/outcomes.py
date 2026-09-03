@@ -151,6 +151,35 @@ def _finalize_runtime_outcome(
         if termination_detail.get("capability") not in required:
             termination_detail = {}
 
+    if evidence_requirement == "adaptive":
+        if isinstance(failure_records, dict):
+            unresolved_records = [
+                detail
+                for detail in failure_records.values()
+                if isinstance(detail, dict)
+                and detail.get("scope") == "unresolved"
+            ]
+        else:
+            unresolved_records = []
+        if unresolved_records:
+            if not termination_detail:
+                failure = unresolved_records[0]
+                termination_detail = {
+                    "reason": "execution_failed",
+                    "capability": failure.get("capability") or "tool",
+                    "error_type": failure.get("error_type") or "tool",
+                    "tool": failure.get("tool") or "",
+                    "source": failure.get("source") or "",
+                }
+            if truncated and stop_reason:
+                termination_detail["trigger"] = stop_reason
+            return "partial", termination_detail
+        if truncated:
+            return "partial", {
+                "reason": stop_reason or "execution_limit",
+            }
+        return "completed", {}
+
     if evidence_requirement == "tool_result" and not relevant_successes:
         if not termination_detail:
             capability = next(iter(sorted(required)), "tool")
@@ -290,6 +319,18 @@ def _unverified_execution_answer(
 def _route_guidance(route):
     """Return concise execution guidance for the selected runtime route."""
 
+    if route in {"agent_execute", "adaptive"}:
+        return (
+            "\n\nExecution guidance: Decide from the user's request and the "
+            "available tools whether to answer directly, make an obvious "
+            "single tool call, or run a multi-step investigation. Use "
+            "write_todos only for genuinely multi-step work (for example, "
+            "three or more distinct steps, multiple independent operations, "
+            "or work whose next steps depend on intermediate results). Skip "
+            "it for simple answers and focused single-tool actions. Once a "
+            "todo list exists, update its statuses as work progresses and "
+            "finish only after the requested result is verified."
+        )
     if route == "plan_execute":
         return (
             "\n\nRuntime route: plan_execute. Before any business tool, call "

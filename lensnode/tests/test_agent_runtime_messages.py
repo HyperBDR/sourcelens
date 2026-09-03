@@ -1,5 +1,8 @@
 from lensnode.agent_runtime.direct_answer import _answer_general_chat_directly
-from lensnode.agent_runtime.messages import build_initial_messages
+from lensnode.agent_runtime.messages import (
+    build_initial_messages,
+    extract_streamed_plan_steps,
+)
 
 
 def test_build_initial_messages_includes_current_images():
@@ -40,6 +43,48 @@ def test_build_initial_messages_does_not_replay_history_for_images():
             ],
         }
     ]
+
+
+def test_extract_streamed_plan_steps_ignores_incomplete_next_step():
+    steps = extract_streamed_plan_steps(
+        '{"todos":['
+        '{"content":"Inspect","status":"in_progress"},'
+        '{"content":"Deliver"'
+    )
+
+    assert steps == [
+        {
+            "id": "step-1",
+            "title": "Inspect",
+            "status": "in_progress",
+        }
+    ]
+
+
+def test_extract_streamed_plan_steps_handles_json_string_delimiters():
+    steps = extract_streamed_plan_steps(
+        '{"todos":['
+        '{"content":"Inspect } and \\"quoted\\" text",'
+        '"status":"pending"},'
+    )
+
+    assert steps[0]["title"] == 'Inspect } and "quoted" text'
+
+
+def test_extract_streamed_plan_steps_returns_empty_for_invalid_payload():
+    assert extract_streamed_plan_steps("not-json") == []
+    assert extract_streamed_plan_steps('{"other":[]}') == []
+
+
+def test_extract_streamed_plan_steps_limits_visible_steps():
+    todos = ",".join(
+        f'{{"content":"Step {index}"}}' for index in range(15)
+    )
+
+    steps = extract_streamed_plan_steps(f'{{"todos":[{todos}]}}')
+
+    assert len(steps) == 12
+    assert steps[-1]["title"] == "Step 11"
 
 
 def test_direct_answer_includes_current_images():

@@ -305,11 +305,17 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                 detail.get("source")
                 for detail in self.failure_records.values()
                 if detail.get("capability") != capability
-                and detail.get("capability") in self.required_capabilities
+                and (
+                    detail.get("capability") in self.required_capabilities
+                    or not self.required_capabilities
+                )
                 and detail.get("scope") == "unresolved"
                 and detail.get("source")
             }
-            if capability in self.required_capabilities and alternatives:
+            if (
+                capability in self.required_capabilities
+                or not self.required_capabilities
+            ) and alternatives:
                 self.alternative_recovery_count += 1
                 self.recovered_sources.update(alternatives)
                 recovery_type = "alternative_capability"

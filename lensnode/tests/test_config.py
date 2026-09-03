@@ -77,6 +77,18 @@ def test_load_config_reads_run_token_budget(monkeypatch):
     assert config.token_budget_warn_ratio == 0.75
 
 
+def test_load_config_reads_stream_recovery_policy(monkeypatch):
+    monkeypatch.setenv("LENSNODE_STREAM_RECOVERY_ATTEMPTS", "5")
+    monkeypatch.setenv("LENSNODE_STREAM_RECOVERY_BACKOFF_S", "2.5")
+    monkeypatch.setenv("LENSNODE_STREAM_RECOVERY_BACKOFF_MAX_S", "12")
+
+    config = load_config()
+
+    assert config.stream_recovery_attempts == 5
+    assert config.stream_recovery_backoff_s == 2.5
+    assert config.stream_recovery_backoff_max_s == 12.0
+
+
 def test_resolve_token_budget_prefers_run_sent_budget():
     config = type(
         "Config",

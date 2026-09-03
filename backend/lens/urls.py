@@ -45,6 +45,7 @@ from .views import (
     SessionViewSet,
     SharedQAViewSet,
     SkillViewSet,
+    admin_run_trajectory_stream_view,
     run_stream_view,
 )
 
@@ -198,6 +199,11 @@ urlpatterns = [
         "admin/runs/<uuid:run_uuid>/trajectory/",
         AdminRunTrajectoryView.as_view(),
         name="lens-admin-run-trajectory",
+    ),
+    path(
+        "admin/runs/<uuid:run_uuid>/trajectory/stream/",
+        admin_run_trajectory_stream_view,
+        name="lens-admin-run-trajectory-stream",
     ),
     path(
         "admin/runs/<uuid:run_uuid>/diagnostics/",

@@ -16,6 +16,7 @@ from .admin_runs import (
     AdminRunRetryView,
     AdminRunTrajectoryView,
     _admin_run_step_counts,
+    admin_run_trajectory_stream_view,
 )
 from .assistants import AssistantViewSet, PublicAssistantView
 from .credentials import DataSourceCredentialViewSet
@@ -66,6 +67,7 @@ __all__ = [
     "AdminRunResumeView",
     "AdminRunRetryView",
     "AdminRunTrajectoryView",
+    "admin_run_trajectory_stream_view",
     "AdminRunDiagnosticsView",
     "AdminRunDiagnosticTurnsView",
     "AdminUserAccessDetailView",

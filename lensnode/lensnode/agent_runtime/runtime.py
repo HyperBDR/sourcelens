@@ -863,6 +863,7 @@ class LensDeepAgentRuntime:
             return None
         if not state.runtime_mode.execution_gates:
             return None
+
         routing_started_at = time.monotonic()
         state.emit_agent_event(
             "deepagents.runtime.stage.start",
@@ -1102,7 +1103,7 @@ class LensDeepAgentRuntime:
             ),
             "name": f"lensnode-{state.command.get('task') or 'agent'}",
         }
-        if state.resources.skill_paths:
+        if state.resources.skill_paths and use_subagents:
             state.kwargs["skills"] = state.resources.skill_paths
 
         state.summarizer = _build_summarization_middleware(
@@ -1321,7 +1322,27 @@ class LensDeepAgentRuntime:
                 else None
             ),
             input_checkpoint_seeded=state.initial_checkpoint_seeded,
-            stream_recovery_attempts=1 if state.checkpoint_ready else 0,
+            stream_recovery_attempts=(
+                int(
+                    getattr(
+                        self.config,
+                        "stream_recovery_attempts",
+                        1,
+                    )
+                )
+                if state.checkpoint_ready
+                else 0
+            ),
+            stream_recovery_backoff_s=float(
+                getattr(self.config, "stream_recovery_backoff_s", 1.0)
+            ),
+            stream_recovery_backoff_max_s=float(
+                getattr(
+                    self.config,
+                    "stream_recovery_backoff_max_s",
+                    8.0,
+                )
+            ),
             on_stream_recovery=(
                 (lambda: state.emit_output("", reset=True))
                 if state.emit_output is not None

@@ -82,6 +82,7 @@ from .services import (
     MAX_SUBAGENTS_PER_RUN,
     assistant_supports_document_attachments,
     create_execution_run,
+    token_budget_profile_for_rounds,
     validate_retry_run,
 )
 from .skill_generation import (
@@ -849,6 +850,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "mcp_summary",
             "plugin_summary",
             "supports_document_attachments",
+            "token_budget_profile",
             "status",
             "created_at",
             "updated_at",
@@ -969,6 +971,17 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         attrs.pop("kind", None)
         attrs.pop("selected_task", None)
+        agent_rounds = attrs.get(
+            "agent_rounds",
+            getattr(
+                self.instance,
+                "agent_rounds",
+                Assistant.AgentRounds.BALANCED,
+            ),
+        )
+        attrs["token_budget_profile"] = token_budget_profile_for_rounds(
+            agent_rounds
+        )
         mode = attrs.pop("mode", None)
         lensnode_uuid = attrs.pop("lensnode_uuid", None)
         if lensnode_uuid is not None:

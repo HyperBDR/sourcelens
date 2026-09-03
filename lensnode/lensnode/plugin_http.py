@@ -113,9 +113,16 @@ class PluginHttpClient:
             "params",
             "headers",
             "follow_redirects",
+            "timeout",
         }
         if unsupported:
             raise PluginHttpClientError("PLUGIN_HTTP_OPTIONS_REJECTED")
+        if "timeout" in kwargs and (
+            not isinstance(kwargs["timeout"], (int, float))
+            or isinstance(kwargs["timeout"], bool)
+            or kwargs["timeout"] <= 0
+        ):
+            raise PluginHttpClientError("PLUGIN_HTTP_TIMEOUT_INVALID")
         origin = _request_origin(url)
         if origin not in self._origins:
             raise PluginHttpClientError("PLUGIN_HTTP_ORIGIN_REJECTED")

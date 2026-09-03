@@ -75,6 +75,7 @@ from lens.services import (
     rewrite_query,
     run_timeout_for_rounds,
     select_execution_lensnode,
+    token_budget_for_rounds,
     validate_run_dispatch,
 )
 from lens.tasks import (
@@ -176,6 +177,27 @@ class LensServiceTests(TransactionTestCase):
     def test_max_agent_turns_falls_back_to_balanced(self):
         self.assertEqual(max_agent_turns_for_rounds("unknown"), 26)
         self.assertEqual(max_agent_turns_for_rounds(None), 26)
+
+    def test_token_budget_follows_execution_strategy(self):
+        expected = {
+            "flash": ("standard", 200000, 40000),
+            "fast": ("standard", 200000, 40000),
+            "balanced": ("standard", 200000, 40000),
+            "deep": ("deep", 500000, 75000),
+            "max": ("unlimited", 0, 0),
+        }
+
+        for agent_rounds, budget_values in expected.items():
+            with self.subTest(agent_rounds=agent_rounds):
+                budget = token_budget_for_rounds(agent_rounds)
+                self.assertEqual(
+                    (
+                        budget["profile"],
+                        budget["max_tokens"],
+                        budget["final_reserve_tokens"],
+                    ),
+                    budget_values,
+                )
 
     def test_unbound_assistant_uses_least_loaded_compatible_lensnode(self):
         busy_run = create_execution_run(
@@ -1173,11 +1195,11 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertEqual(run.execution.agent_rounds, "max")
         self.assertEqual(run.execution.run_timeout_s, 3600)
-        self.assertEqual(run.execution.token_budget_profile, "deep")
-        self.assertEqual(run.execution.token_budget_max_tokens, 500000)
+        self.assertEqual(run.execution.token_budget_profile, "unlimited")
+        self.assertEqual(run.execution.token_budget_max_tokens, 0)
         self.assertEqual(
             run.execution.token_budget_final_reserve_tokens,
-            75000,
+            0,
         )
 
     def test_execute_answer_run_creates_missing_legacy_snapshot(self):
@@ -1616,14 +1638,17 @@ class LensServiceTests(TransactionTestCase):
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")
-    def test_dispatch_sends_assistant_profile_token_budget(
+    def test_dispatch_sends_agent_rounds_token_budget_snapshot(
         self,
         get_channel_layer,
         mock_async_to_sync,
     ):
         sender = mock_async_to_sync.return_value
-        self.assistant.token_budget_profile = "deep"
-        self.assistant.save(update_fields=["token_budget_profile"])
+        self.assistant.agent_rounds = "deep"
+        self.assistant.token_budget_profile = "unlimited"
+        self.assistant.save(
+            update_fields=["agent_rounds", "token_budget_profile"]
+        )
         run = create_execution_run(
             session=self.session,
             question="Analyze everything",
@@ -1631,8 +1656,11 @@ class LensServiceTests(TransactionTestCase):
         )
         execution = run.execution
 
+        self.assistant.agent_rounds = "balanced"
         self.assistant.token_budget_profile = "standard"
-        self.assistant.save(update_fields=["token_budget_profile"])
+        self.assistant.save(
+            update_fields=["agent_rounds", "token_budget_profile"]
+        )
         dispatch_run_to_lensnode(run, "Analyze everything")
 
         payload = sender.call_args.args[1]["payload"]
@@ -1661,8 +1689,11 @@ class LensServiceTests(TransactionTestCase):
         mock_async_to_sync,
     ):
         sender = mock_async_to_sync.return_value
-        self.assistant.token_budget_profile = "unlimited"
-        self.assistant.save(update_fields=["token_budget_profile"])
+        self.assistant.agent_rounds = "max"
+        self.assistant.token_budget_profile = "standard"
+        self.assistant.save(
+            update_fields=["agent_rounds", "token_budget_profile"]
+        )
         run = create_execution_run(
             session=self.session,
             question="Analyze without a token cap",

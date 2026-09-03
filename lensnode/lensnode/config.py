@@ -45,6 +45,9 @@ class LensNodeConfig:
     planner_repair_enabled: bool = False
     execution_backend: str = "trusted_container"
     delegation_base_url: str = ""
+    stream_recovery_attempts: int = 3
+    stream_recovery_backoff_s: float = 1.0
+    stream_recovery_backoff_max_s: float = 8.0
 
 
 def _optional_int(value):
@@ -230,5 +233,14 @@ def load_config():
         ),
         offload_human_tokens=_optional_int(
             os.getenv("LENSNODE_OFFLOAD_HUMAN_TOKENS")
+        ),
+        stream_recovery_attempts=int(
+            os.getenv("LENSNODE_STREAM_RECOVERY_ATTEMPTS", "3")
+        ),
+        stream_recovery_backoff_s=float(
+            os.getenv("LENSNODE_STREAM_RECOVERY_BACKOFF_S", "1")
+        ),
+        stream_recovery_backoff_max_s=float(
+            os.getenv("LENSNODE_STREAM_RECOVERY_BACKOFF_MAX_S", "8")
         ),
     )

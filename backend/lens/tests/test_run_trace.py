@@ -2,9 +2,9 @@ import uuid
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from django.contrib.auth import get_user_model
-from django.test import TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -12,6 +12,7 @@ from lens.consumers import LensNodeConsumer
 from lens.models import Assistant, LensNode, Run, RunTraceEvent, Session
 from lens.run_trace import RunTraceValidationError, append_run_trace_events
 from lens.services import create_execution_run, dispatch_run_to_lensnode
+from lens.views.admin_runs import stream_admin_run_trajectory_events_async
 
 User = get_user_model()
 
@@ -529,3 +530,255 @@ class AdminRunTrajectoryAPITests(RunTraceFixtureMixin, TestCase):
         response = client.get(f"/api/lens/admin/runs/{self.run.uuid}/trajectory/")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_trajectory_response_exposes_stable_stream_checkpoint(self):
+        append_run_trace_events(
+            self.run.uuid,
+            self.node.uuid,
+            [self.trace_event(sequence=1)],
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["stream_cursor"])
+        self.assertTrue(response.data["revision"])
+
+
+class AdminRunTrajectoryStreamTests(RunTraceFixtureMixin, TransactionTestCase):
+    def setUp(self):
+        self.create_trace_fixture()
+
+    def test_stream_resumes_after_checkpoint_without_replaying_events(self):
+        append_run_trace_events(
+            self.run.uuid,
+            self.node.uuid,
+            [self.trace_event(sequence=1)],
+        )
+        admin = User.objects.create_user(
+            username="trace-stream-admin",
+            password="x",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        checkpoint = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
+        ).data
+
+        async def consume():
+            stream = stream_admin_run_trajectory_events_async(
+                self.run.uuid,
+                cursor=checkpoint["stream_cursor"],
+                revision=checkpoint["revision"],
+                poll_interval=0,
+                terminal_quiet_polls=1,
+            )
+            sync_event = await anext(stream)
+            await sync_to_async(append_run_trace_events)(
+                self.run.uuid,
+                self.node.uuid,
+                [self.trace_event(sequence=2)],
+            )
+            append_event = await anext(stream)
+            await stream.aclose()
+            return sync_event, append_event
+
+        sync_event, append_event = async_to_sync(consume)()
+
+        self.assertEqual(sync_event["type"], "sync")
+        self.assertEqual(sync_event["events"], [])
+        self.assertEqual(
+            sync_event["previous_revision"],
+            checkpoint["revision"],
+        )
+        self.assertEqual(append_event["type"], "append")
+        self.assertEqual(
+            [item["event_id"] for item in append_event["events"]],
+            [str(self.run.trace_events.get(sequence=2).event_id)],
+        )
+        self.assertNotEqual(
+            append_event["revision"],
+            append_event["previous_revision"],
+        )
+
+    def test_stream_endpoint_requires_admin_console_access(self):
+        client = Client()
+        client.force_login(self.user)
+
+        response = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/stream/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_stream_endpoint_rejects_an_invalid_cursor(self):
+        admin = User.objects.create_user(
+            username="invalid-cursor-trace-stream-admin",
+            password="x",
+            is_staff=True,
+        )
+        client = Client()
+        client.force_login(admin)
+
+        response = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/stream/",
+            {"cursor": "not-a-cursor"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_stream_endpoint_rejects_a_cursor_from_another_run(self):
+        other_run = create_execution_run(
+            self.run.session,
+            "Inspect another trace",
+            enqueue=False,
+        )
+        append_run_trace_events(
+            other_run.uuid,
+            self.node.uuid,
+            [self.trace_event(sequence=1)],
+        )
+        admin = User.objects.create_user(
+            username="cross-run-cursor-trace-stream-admin",
+            password="x",
+            is_staff=True,
+        )
+        api_client = APIClient()
+        api_client.force_authenticate(admin)
+        other_checkpoint = api_client.get(
+            f"/api/lens/admin/runs/{other_run.uuid}/trajectory/"
+        ).data
+        client = Client()
+        client.force_login(admin)
+
+        response = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/stream/",
+            {"cursor": other_checkpoint["stream_cursor"]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_stream_discovers_delegated_runs_created_after_sync(self):
+        def create_child_event():
+            child_assistant = Assistant.objects.create(
+                name="Live delegated trace assistant",
+                slug=f"live-delegated-trace-{uuid.uuid4()}",
+                lensnode=self.node,
+                selected_task="general_chat",
+            )
+            child_session = Session.objects.create(
+                assistant=child_assistant,
+                user=self.user,
+            )
+            child_run = create_execution_run(
+                child_session,
+                "Inspect the live delegated run",
+                enqueue=False,
+                parent_run=self.run,
+            )
+            append_run_trace_events(
+                child_run.uuid,
+                self.node.uuid,
+                [self.trace_event(sequence=1)],
+            )
+            return child_run
+
+        async def consume():
+            stream = stream_admin_run_trajectory_events_async(
+                self.run.uuid,
+                poll_interval=0,
+            )
+            sync_event = await anext(stream)
+            child_run = await sync_to_async(create_child_event)()
+            append_event = await anext(stream)
+            await stream.aclose()
+            return sync_event, append_event, child_run
+
+        sync_event, append_event, child_run = async_to_sync(consume)()
+
+        self.assertEqual(sync_event["events"], [])
+        self.assertEqual(append_event["type"], "append")
+        self.assertEqual(
+            append_event["events"][0]["trace_run_uuid"],
+            str(child_run.uuid),
+        )
+        self.assertEqual(append_event["events"][0]["trace_run_role"], "child")
+
+    def test_stream_advances_cursor_when_filters_hide_new_events(self):
+        append_run_trace_events(
+            self.run.uuid,
+            self.node.uuid,
+            [self.trace_event(sequence=1)],
+        )
+        admin = User.objects.create_user(
+            username="filtered-trace-stream-admin",
+            password="x",
+            is_staff=True,
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        checkpoint = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
+        ).data
+
+        async def consume():
+            stream = stream_admin_run_trajectory_events_async(
+                self.run.uuid,
+                cursor=checkpoint["stream_cursor"],
+                revision=checkpoint["revision"],
+                filters={"category": "tool"},
+                display_sequence=checkpoint["stream_sequence"],
+                poll_interval=0,
+            )
+            sync_event = await anext(stream)
+            await sync_to_async(append_run_trace_events)(
+                self.run.uuid,
+                self.node.uuid,
+                [self.trace_event(sequence=2)],
+            )
+            append_event = await anext(stream)
+            await stream.aclose()
+            return sync_event, append_event
+
+        sync_event, append_event = async_to_sync(consume)()
+
+        self.assertEqual(sync_event["events"], [])
+        self.assertEqual(append_event["type"], "append")
+        self.assertEqual(append_event["events"], [])
+        self.assertNotEqual(append_event["cursor"], sync_event["cursor"])
+        self.assertEqual(append_event["sequence"], 2)
+
+    def test_terminal_stream_endpoint_emits_sync_and_done(self):
+        self.run.status = Run.Status.DONE
+        self.run.finished_at = timezone.now()
+        self.run.save(update_fields=["status", "finished_at", "updated_at"])
+        admin = User.objects.create_user(
+            username="terminal-trace-stream-admin",
+            password="x",
+            is_staff=True,
+        )
+        client = Client()
+        client.force_login(admin)
+
+        response = client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/stream/",
+            HTTP_ACCEPT="text/event-stream",
+        )
+
+        async def collect():
+            chunks = []
+            async for chunk in response.streaming_content:
+                chunks.append(chunk)
+            return b"".join(chunks).decode("utf-8")
+
+        body = async_to_sync(collect)()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            response["Content-Type"].startswith("text/event-stream")
+        )
+        self.assertIn('"type": "sync"', body)
+        self.assertIn('"type": "done"', body)

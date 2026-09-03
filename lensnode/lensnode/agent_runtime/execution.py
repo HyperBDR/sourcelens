@@ -2,12 +2,14 @@
 
 import json
 import logging
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..agent_tools import SELF_REPORTING_TOOLS
 from ..gateway_model import GatewayStreamError, RunCancelledError
 from .messages import (
+    extract_streamed_plan_steps as _extract_streamed_plan_steps,
     extract_final_message as _extract_final_message,
     normalize_plan_steps as _normalize_plan_steps,
     tool_call_summary as _tool_call_summary,
@@ -46,6 +48,8 @@ def _run_agent_with_turn_limit(
     on_checkpoint_state=None,
     input_checkpoint_seeded=False,
     stream_recovery_attempts=0,
+    stream_recovery_backoff_s=1.0,
+    stream_recovery_backoff_max_s=8.0,
     on_stream_recovery=None,
     subagent_display_names=None,
 ):
@@ -102,14 +106,25 @@ def _run_agent_with_turn_limit(
         graph_input = {"messages": []}
     else:
         graph_input = {"messages": messages}
-    for state in _stream_agent_states_with_recovery(
+    state_stream = _stream_agent_states_with_recovery(
         agent,
         graph_input,
         thread,
         stream_recovery_attempts,
         emit_event,
         on_stream_recovery,
-    ):
+        stream_recovery_backoff_s,
+        stream_recovery_backoff_max_s,
+    )
+    state_stream = _stream_agent_states_with_invalid_tool_recovery(
+        agent,
+        state_stream,
+        thread,
+        emit_event,
+        stream_recovery_backoff_s,
+        stream_recovery_backoff_max_s,
+    )
+    for state in state_stream:
         if cancel_event is not None and cancel_event.is_set():
             raise RunCancelledError(
                 "Run was cancelled; stopping the agent loop."
@@ -243,6 +258,97 @@ def _run_agent_with_turn_limit(
     return answer, truncated, termination_reason
 
 
+def _stream_agent_states_with_invalid_tool_recovery(
+    agent,
+    state_stream,
+    thread,
+    emit_event,
+    backoff_s,
+    backoff_max_s,
+):
+    """Give the model one chance to repair malformed todo JSON."""
+
+    repaired = False
+    stream = iter(state_stream)
+    while True:
+        try:
+            state = next(stream)
+        except StopIteration:
+            return
+        yield state
+        messages = state.get("messages", [])
+        if (
+            repaired
+            or _extract_final_message(state).strip()
+            or not _has_malformed_write_todos(messages)
+        ):
+            continue
+        repaired = True
+        if emit_event is not None:
+            emit_event(
+                "deepagents.tool_call.recovering",
+                {"tool": "write_todos", "reason": "invalid_arguments"},
+            )
+        correction = HumanMessage(
+            content=(
+                "The previous write_todos call had invalid JSON arguments. "
+                "Retry write_todos once using a complete JSON object with a "
+                "todos array; do not execute business tools until the call "
+                "is valid."
+            ),
+            additional_kwargs={"hide_from_ui": True},
+        )
+        if thread is None:
+            retry_input = {
+                "messages": [
+                    message
+                    for message in messages
+                    if not _is_malformed_tool_message(message)
+                ]
+                + [correction]
+            }
+        else:
+            retry_input = {"messages": [correction]}
+        stream = iter(
+            _stream_agent_states_with_recovery(
+                agent,
+                retry_input,
+                thread,
+                0,
+                emit_event,
+                None,
+                backoff_s,
+                backoff_max_s,
+            )
+        )
+
+
+def _has_malformed_write_todos(messages):
+    """Return whether messages contain an invalid write_todos call."""
+
+    for message in reversed(messages or []):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in getattr(message, "invalid_tool_calls", None) or []:
+            name = (
+                call.get("name")
+                if isinstance(call, dict)
+                else getattr(call, "name", None)
+            )
+            if str(name or "") == "write_todos":
+                return True
+        return False
+    return False
+
+
+def _is_malformed_tool_message(message):
+    """Return whether an AI message contains an invalid tool call."""
+
+    if getattr(message, "type", "") != "ai":
+        return False
+    return bool(getattr(message, "invalid_tool_calls", None))
+
+
 def _stream_agent_states_with_recovery(
     agent,
     graph_input,
@@ -250,6 +356,8 @@ def _stream_agent_states_with_recovery(
     recovery_attempts,
     emit_event,
     on_recovery,
+    backoff_s,
+    backoff_max_s,
 ):
     """Resume a failed gateway stream from the latest graph checkpoint."""
 
@@ -283,15 +391,73 @@ def _stream_agent_states_with_recovery(
             if on_recovery is not None:
                 on_recovery()
             if emit_event is not None:
+                delay_s = min(
+                    max(float(backoff_s), 0.0) * (2 ** (attempt - 1)),
+                    max(float(backoff_max_s), 0.0),
+                )
                 emit_event(
                     "deepagents.stream.recovering",
                     {
                         "attempt": attempt,
                         "max_attempts": max_attempts,
                         "code": exc.code,
+                        "backoff_s": delay_s,
                     },
                 )
+            else:
+                delay_s = min(
+                    max(float(backoff_s), 0.0) * (2 ** (attempt - 1)),
+                    max(float(backoff_max_s), 0.0),
+                )
+            if delay_s > 0:
+                LOGGER.info(
+                    "Waiting %.1fs before checkpoint stream recovery "
+                    "attempt %s/%s.",
+                    delay_s,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(delay_s)
             graph_input = None
+
+
+def _stream_agent_states_with_plan_updates(
+    state_stream,
+    model,
+    emit_event,
+    plan_state,
+):
+    """Temporarily turn complete streamed todos into plan snapshots."""
+
+    if (
+        model is None
+        or emit_event is None
+        or not hasattr(model, "on_tool_call_delta")
+    ):
+        yield from state_stream
+        return
+
+    previous_callback = model.on_tool_call_delta
+
+    def on_tool_call_delta(delta):
+        if isinstance(delta, dict) and delta.get("name") == "write_todos":
+            steps = _extract_streamed_plan_steps(delta.get("arguments"))
+            if steps:
+                _update_plan_state(
+                    plan_state,
+                    steps,
+                    emit_event,
+                    finalize=False,
+                )
+        if callable(previous_callback):
+            previous_callback(delta)
+
+    model.on_tool_call_delta = on_tool_call_delta
+    try:
+        yield from state_stream
+    finally:
+        if model.on_tool_call_delta is on_tool_call_delta:
+            model.on_tool_call_delta = previous_callback
 
 
 def _strip_dangling_tool_call(messages):
@@ -442,9 +608,10 @@ def _synthesize_wrapup_answer(
         f"{instruction}\n\n"
         f"{_answer_language_requirement(answer_language)}"
     )
-    wrapup_messages = _compact_wrapup_messages(
-        _strip_dangling_tool_call(current)
-    ) + [
+    wrapup_history = _strip_dangling_tool_call(current)
+    if reason == "empty":
+        wrapup_history = _filter_recovery_history(wrapup_history)
+    wrapup_messages = _compact_wrapup_messages(wrapup_history) + [
         HumanMessage(content=instruction)
     ]
     if emit_event is not None:
@@ -470,6 +637,35 @@ def _synthesize_wrapup_answer(
     if isinstance(content, str):
         return content.strip()
     return str(content or "").strip()
+
+
+def _filter_recovery_history(messages):
+    """Exclude synthetic control turns from empty-answer synthesis."""
+
+    filtered = []
+    for message in messages or []:
+        message_type = getattr(message, "type", "")
+        content = _message_content_text(message).strip().lower()
+        if message_type == "human" and (
+            "previous turn produced no visible answer" in content
+            or "上一轮没有输出可见答案" in content
+        ):
+            continue
+        if message_type == "ai" and (
+            "direct answer mode" in content
+            or "不能调用工具" in content
+            or "禁止调用工具" in content
+        ):
+            continue
+        if (
+            message_type == "ai"
+            and getattr(message, "invalid_tool_calls", None)
+            and not getattr(message, "tool_calls", None)
+            and not content
+        ):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _model_summary(message, limit=160):
@@ -568,6 +764,54 @@ def _response_stop_reason(metadata):
     return None
 
 
+def _merge_plan_statuses(existing_steps, incoming_steps):
+    """Keep finalized plan titles while applying incoming step statuses."""
+
+    incoming_by_id = {item["id"]: item for item in incoming_steps}
+    return [
+        {
+            **item,
+            "status": incoming_by_id.get(item["id"], item)["status"],
+        }
+        for item in existing_steps
+    ]
+
+
+def _update_plan_state(
+    state,
+    incoming_steps,
+    emit_event,
+    *,
+    finalize,
+):
+    """Publish one changed plan snapshot and optionally finalize its shape."""
+
+    existing_steps = state.get("steps") or []
+    if state.get("initial_plan_finalized"):
+        steps = _merge_plan_statuses(existing_steps, incoming_steps)
+    else:
+        steps = incoming_steps
+    if finalize:
+        state["initial_plan_finalized"] = True
+    if steps == existing_steps:
+        return False
+
+    state["revision"] = int(state.get("revision") or 0) + 1
+    state["steps"] = steps
+    emit_event(
+        "workflow.plan.updated",
+        {
+            "event_type": "plan.updated",
+            "visibility": "user",
+            "payload": {
+                "revision": state["revision"],
+                "steps": steps,
+            },
+        },
+    )
+    return True
+
+
 def _emit_new_tool_calls(
     messages,
     seen,
@@ -598,36 +842,13 @@ def _emit_new_tool_calls(
                 state = plan_state if plan_state is not None else {
                     "revision": 0
                 }
-                state["revision"] = int(state.get("revision") or 0) + 1
                 todos = (call.get("args") or {}).get("todos") or []
                 incoming_steps = _normalize_plan_steps(todos)
-                initial_steps = state.get("steps") or []
-                if initial_steps:
-                    incoming_by_id = {
-                        item["id"]: item for item in incoming_steps
-                    }
-                    steps = [
-                        {
-                            **item,
-                            "status": incoming_by_id.get(
-                                item["id"], item
-                            )["status"],
-                        }
-                        for item in initial_steps
-                    ]
-                else:
-                    steps = incoming_steps
-                state["steps"] = steps
-                emit_event(
-                    "workflow.plan.updated",
-                    {
-                        "event_type": "plan.updated",
-                        "visibility": "user",
-                        "payload": {
-                            "revision": state["revision"],
-                            "steps": steps,
-                        },
-                    },
+                _update_plan_state(
+                    state,
+                    incoming_steps,
+                    emit_event,
+                    finalize=True,
                 )
                 if (
                     todos

@@ -206,6 +206,99 @@ def test_resume_starts_after_unacknowledged_trace_cursor():
     asyncio.run(exercise())
 
 
+def test_reconnect_replays_pending_trace_frames_before_newer_frames():
+    async def exercise():
+        client = _make_client()
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 1}],
+            }
+        )
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 2}],
+            }
+        )
+        client._outbox.clear()
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 3}],
+            }
+        )
+
+        client._restore_pending_trace_frames()
+
+        assert [
+            frame["events"][0]["sequence"] for frame in client._outbox
+        ] == [1, 2, 3]
+
+    asyncio.run(exercise())
+
+
+def test_reconnect_does_not_duplicate_pending_batch_frames():
+    async def exercise():
+        client = _make_client()
+        frame = {
+            "type": "run_trace_events",
+            "run_uuid": "run-1",
+            "events": [{"sequence": 1}, {"sequence": 2}],
+        }
+        client._enqueue(frame)
+        client._outbox.clear()
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 3}],
+            }
+        )
+
+        client._restore_pending_trace_frames()
+
+        assert [
+            event["sequence"]
+            for item in client._outbox
+            for event in item["events"]
+        ] == [1, 2, 3]
+
+    asyncio.run(exercise())
+
+
+def test_reconnect_replays_pending_trace_before_terminal_frame():
+    async def exercise():
+        client = _make_client()
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 1}],
+            }
+        )
+        client._outbox.clear()
+        client._enqueue(
+            {
+                "type": "run_done",
+                "run_uuid": "run-1",
+                "status": "failed",
+            }
+        )
+
+        client._restore_pending_trace_frames()
+
+        assert [frame["type"] for frame in client._outbox] == [
+            "run_trace_events",
+            "run_done",
+        ]
+
+    asyncio.run(exercise())
+
+
 def test_completed_run_hands_terminal_frame_to_outbox():
     """A completed run enters the outbox before leaving running_tasks."""
 

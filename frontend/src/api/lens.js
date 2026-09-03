@@ -90,6 +90,63 @@ export async function getAdminRunTrajectory(runUuid, params = {}) {
   return unwrapResponse(response)
 }
 
+export async function streamAdminRunTrajectory(
+  runUuid,
+  {
+    cursor = '',
+    revision = '',
+    sequence = 0,
+    q = '',
+    category = '',
+    signal,
+    onEvent
+  } = {}
+) {
+  const params = new URLSearchParams()
+  if (cursor) params.set('cursor', cursor)
+  if (revision) params.set('revision', revision)
+  if (sequence) params.set('sequence', String(sequence))
+  if (q) params.set('q', q)
+  if (category) params.set('category', category)
+  const query = params.toString()
+  const baseUrl = String(api.defaults.baseURL || '/api').replace(/\/$/, '')
+  const token = localStorage.getItem('access_token')
+  const headers = { Accept: 'text/event-stream' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(
+    `${baseUrl}/lens/admin/runs/${runUuid}/trajectory/stream/${query ? `?${query}` : ''}`,
+    {
+      credentials: 'include',
+      headers,
+      signal
+    }
+  )
+  if (!response.ok || !response.body) {
+    const error = new Error('Trajectory stream failed')
+    error.response = { status: response.status }
+    throw error
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() || ''
+    for (const frame of frames) {
+      const data = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n')
+      if (data) onEvent?.(JSON.parse(data))
+    }
+  }
+}
+
 export async function getAdminRunTrajectoryExport(runUuid) {
   const events = []
   let afterSequence = 0

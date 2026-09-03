@@ -423,23 +423,64 @@ class LensNodeClient:
         self._restore_pending_terminal_frames()
 
     def _restore_pending_trace_frames(self):
-        """Requeue unacknowledged trace events once per reconnect."""
+        """Requeue unacknowledged trace events in per-run sequence order.
 
-        queued = {
-            (
-                str(frame.get("run_uuid") or ""),
-                event.get("sequence"),
+        Frames emitted while a connection is down can be newer than frames
+        that were already popped by the send loop but never acknowledged.
+        Rebuilding each run's trace segment prevents the newer frames from
+        overtaking those older pending frames after reconnect.
+        """
+
+        trace_frames = collections.OrderedDict()
+        known_frame_ids = set()
+        covered_sequences = collections.defaultdict(set)
+        for frame in self._outbox:
+            if frame.get("type") != "run_trace_events":
+                continue
+            run_uuid = str(frame.get("run_uuid") or "")
+            sequences = tuple(
+                event.get("sequence") for event in frame.get("events") or []
             )
-            for frame in self._outbox
-            if frame.get("type") == "run_trace_events"
-            for event in frame.get("events") or []
-        }
-        restored_frames = set()
-        for key, frame in self._pending_trace_frames.items():
-            frame_id = id(frame)
-            if key not in queued and frame_id not in restored_frames:
-                self._outbox.append(frame)
-                restored_frames.add(frame_id)
+            if run_uuid and sequences:
+                trace_frames[(run_uuid, sequences)] = frame
+                known_frame_ids.add(id(frame))
+                covered_sequences[run_uuid].update(sequences)
+        for (run_uuid, sequence), frame in self._pending_trace_frames.items():
+            if (
+                id(frame) in known_frame_ids
+                or sequence in covered_sequences[run_uuid]
+            ):
+                continue
+            key = (run_uuid, (sequence,))
+            trace_frames.setdefault(key, frame)
+            known_frame_ids.add(id(frame))
+            covered_sequences[run_uuid].add(sequence)
+
+        ordered_by_run = collections.defaultdict(list)
+        for (run_uuid, _sequences), frame in trace_frames.items():
+            ordered_by_run[run_uuid].append(frame)
+        for frames in ordered_by_run.values():
+            frames.sort(
+                key=lambda frame: min(
+                    event.get("sequence", 0)
+                    for event in frame.get("events") or []
+                )
+            )
+
+        rebuilt = collections.deque()
+        emitted_runs = set()
+        for frame in self._outbox:
+            run_uuid = str(frame.get("run_uuid") or "")
+            if run_uuid in ordered_by_run and run_uuid not in emitted_runs:
+                rebuilt.extend(ordered_by_run[run_uuid])
+                emitted_runs.add(run_uuid)
+            if frame.get("type") == "run_trace_events":
+                continue
+            rebuilt.append(frame)
+        for run_uuid, frames in ordered_by_run.items():
+            if run_uuid not in emitted_runs:
+                rebuilt.extend(frames)
+        self._outbox = rebuilt
         if self._outbox:
             self._outbox_ready.set()
 

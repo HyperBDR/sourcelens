@@ -84,15 +84,47 @@ test('trajectory JSON uses compact recursive indentation', async () => {
   assert.match(node, /:indent="indent"/)
 })
 
-test('active runs refresh trajectory events incrementally', async () => {
+test('active runs follow the trajectory stream with polling fallback', async () => {
   const contents = await source()
 
   assert.match(contents, /runStatus: \{ type: String, default: '' \}/)
-  assert.match(contents, /const ACTIVE_RUN_STATUSES = new Set/)
-  assert.match(contents, /function scheduleRefresh\(\)/)
   assert.match(
     contents,
-    /refreshTimer = setTimeout\(\(\) => fetchTrajectory\(true\), 2000\)/
+    /const ACTIVE_RUN_STATUSES = ACTIVE_TRAJECTORY_RUN_STATUSES/
   )
-  assert.match(contents, /clearTimeout\(refreshTimer\)/)
+  assert.match(contents, /streamAdminRunTrajectory/)
+  assert.match(contents, /new AbortController\(\)/)
+  assert.match(contents, /const awaitingStreamDone = ref\(false\)/)
+  assert.match(contents, /function scheduleFallbackRefresh\(\)/)
+  assert.match(contents, /function syncTerminalTrajectory\(runUuid\)/)
+  assert.match(contents, /requiresResync/)
+  assert.match(contents, /else if \(loaded === false\)/)
+  assert.match(contents, /controller !== streamController/)
+  assert.match(contents, /controller\?\.abort\(\)/)
+  assert.match(
+    contents,
+    /if \(streamController\) return\s+if \(active && events\.value\.length === 0\)/
+  )
+})
+
+test('live trajectory follows the tail without interrupting history review', async () => {
+  const contents = await source()
+
+  assert.match(contents, /@scroll="handleTrajectoryScroll"/)
+  assert.match(contents, /const pendingNewEventCount = ref\(0\)/)
+  assert.match(contents, /function isFollowingTrajectoryTail\(\)/)
+  assert.match(contents, /function scrollToLatestTrajectory\(\)/)
+  assert.match(contents, /trajectory-new-events/)
+})
+
+test('live events do not advance the historical pagination cursor', async () => {
+  const contents = await source()
+
+  assert.match(contents, /const nextAfterSequence = ref\(0\)/)
+  assert.match(
+    contents,
+    /const afterSequence = append \? nextAfterSequence\.value : 0/
+  )
+  assert.match(contents, /nextAfterSequence\.value = Number\(/)
+  assert.doesNotMatch(contents, /function latestSequence\(/)
 })
