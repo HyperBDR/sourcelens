@@ -23,6 +23,7 @@ from lens.models import (
 )
 from lens.services import (
     build_loaded_mcps,
+    build_loaded_plugin_skills,
     build_loaded_plugins,
     create_execution_run,
     dispatch_run_to_lensnode,
@@ -613,6 +614,26 @@ class AssistantPluginBindingTests(TestCase):
         payload = mock_async_to_sync.return_value.call_args.args[1]["payload"]
         self.assertEqual(payload["loaded_plugins"], loaded)
         self.assertNotIn("ghp-runtime-secret", json.dumps(payload))
+
+    def test_virtual_plugin_skill_has_safe_scope_references(self):
+        AssistantPluginBinding.objects.create(
+            assistant=self.assistant,
+            connection=self.connection,
+            tools=["github_read_file"],
+        )
+
+        with self.plugin_root():
+            skills = build_loaded_plugin_skills(self.assistant)
+
+        self.assertEqual(len(skills), 1)
+        skill = skills[0]
+        self.assertEqual(skill["skill_kind"], "plugin_virtual")
+        self.assertEqual(
+            skill["definition"]["allowed_scope"]["repositories"],
+            ["HyperBDR/sourcelens"],
+        )
+        self.assertNotIn("ghp-runtime-secret", json.dumps(skill))
+        self.assertNotIn("connection_uuid", skill["definition"])
 
     def test_inactive_secret_material_is_excluded_from_run_tools(self):
         AssistantPluginBinding.objects.create(

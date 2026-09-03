@@ -16,6 +16,12 @@ PLUGIN_VERSION = "1.0.0"
 RESPONSE_MAX_BYTES = 1_000_000
 
 
+def http_origins(endpoint):
+    """Return the validated Jira Cloud origin for connection pooling."""
+
+    return (_endpoint(endpoint),)
+
+
 def build_tool(definition, executor):
     """Create a fixed Jira Cloud read-only tool."""
 

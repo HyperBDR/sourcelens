@@ -40,6 +40,13 @@ TOOL_KEYS = frozenset(
 )
 
 
+def http_origins(endpoint):
+    """Return fixed HTTPS origins used by the GitHub REST runtime."""
+
+    _endpoint(endpoint)
+    return (API_URL,)
+
+
 def build_tool(definition, executor):
     """Create a fixed GitHub read-only tool from its manifest declaration."""
 

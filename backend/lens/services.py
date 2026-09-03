@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -1770,11 +1771,159 @@ def build_loaded_plugins(assistant):
                     "plugin_display_name": plugin.display_name,
                     "plugin_version": plugin.version,
                     "protocol_version": plugin.protocol_version,
+                    "plugin_description": plugin.description,
                     "assistant_guidance": plugin.assistant_guidance,
+                    "allowed_scope": _public_plugin_scope(
+                        connection.allowed_scope
+                    ),
                     "tools": tools,
                 }
             )
     return loaded
+
+
+def build_loaded_plugin_skills(assistant, loaded_plugins=None):
+    """Build an advisory virtual Skill for each Plugin Connection."""
+
+    loaded_plugins = (
+        build_loaded_plugins(assistant)
+        if loaded_plugins is None
+        else loaded_plugins
+    )
+    virtual_skills = []
+    seen_connections = set()
+    for plugin in loaded_plugins:
+        if not isinstance(plugin, dict):
+            continue
+        plugin_key = str(plugin.get("plugin_key") or "").strip()
+        connection_uuid = str(plugin.get("connection_uuid") or "").strip()
+        version = str(plugin.get("plugin_version") or "").strip()
+        if not plugin_key or not connection_uuid or not version:
+            continue
+        if connection_uuid in seen_connections:
+            continue
+        seen_connections.add(connection_uuid)
+        guidance = plugin.get("assistant_guidance") or {}
+        if not isinstance(guidance, dict):
+            guidance = {}
+        summary = str(
+            guidance.get("summary")
+            or plugin.get("plugin_description")
+            or plugin.get("plugin_display_name")
+            or plugin_key
+        ).strip()[:600]
+        when_to_use = [
+            str(value).strip()[:240]
+            for value in (guidance.get("when_to_use") or [])[:8]
+            if str(value).strip()
+        ]
+        topics = []
+        for topic in (guidance.get("topics") or [])[:24]:
+            if not isinstance(topic, dict):
+                continue
+            key = str(topic.get("key") or "").strip()[:64]
+            topic_summary = str(topic.get("summary") or "").strip()[:600]
+            details = str(topic.get("details") or "").strip()[:6000]
+            if key:
+                topics.append(
+                    {
+                        "key": key,
+                        "summary": topic_summary,
+                        "details": details,
+                    }
+                )
+        tools = [
+            {
+                "description": str(item.get("description") or "")[:600],
+                "capability": str(item.get("capability") or "")[:128],
+                "side_effect": str(item.get("side_effect") or "")[:32],
+            }
+            for item in (plugin.get("tools") or [])
+            if isinstance(item, dict)
+        ]
+        descriptor = {
+            "plugin_virtual": True,
+            "plugin_key": plugin_key,
+            "plugin_display_name": str(
+                plugin.get("plugin_display_name") or plugin_key
+            )[:160],
+            "plugin_version": version,
+            "description": summary,
+            "summary": summary,
+            "when_to_use": when_to_use,
+            "topics": topics,
+            "tools": tools,
+            "allowed_scope": plugin.get("allowed_scope") or {},
+        }
+        content_hash = _content_hash(descriptor)
+        scope_tag = hashlib.sha256(
+            connection_uuid.encode("utf-8")
+        ).hexdigest()[:12]
+        virtual_skills.append(
+            {
+                "skill_uuid": str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        "sourcelens:plugin-skill:" + connection_uuid,
+                    )
+                ),
+                "skill_package_name": (
+                    f"plugin-virtual-{plugin_key}-{scope_tag}"
+                ),
+                "skill_name": (
+                    f"{descriptor['plugin_display_name']} Plugin"
+                ),
+                "skill_kind": "plugin_virtual",
+                "version": version,
+                "content_hash": content_hash,
+                "definition": descriptor,
+                "package_hash": None,
+                "package_size": 0,
+                "package_manifest": {
+                    "file_count": 4,
+                    "directories": ["references"],
+                },
+                "load_config": {"mode": "context", "inject": True},
+            }
+        )
+    return virtual_skills
+
+
+def _public_plugin_scope(scope):
+    """Return bounded, non-sensitive Connection scope for Skill references."""
+
+    sensitive = {
+        "secret",
+        "token",
+        "password",
+        "credential",
+        "material",
+        "endpoint",
+        "url",
+    }
+
+    def clean(value, key=""):
+        lowered = key.lower()
+        if any(term in lowered for term in sensitive):
+            return None
+        if isinstance(value, dict):
+            result = {}
+            for item_key, item_value in value.items():
+                cleaned = clean(item_value, str(item_key))
+                if cleaned is not None:
+                    result[str(item_key)[:64]] = cleaned
+            return result
+        if isinstance(value, list):
+            return [
+                cleaned
+                for item in value[:200]
+                if (cleaned := clean(item, key)) is not None
+            ]
+        if isinstance(value, (str, int, float, bool)):
+            return str(value)[:500] if isinstance(value, str) else value
+        return None
+
+    return clean(copy.deepcopy(scope)) or {}
 
 
 def _content_hash(value):
@@ -2044,14 +2193,22 @@ def create_run_execution_snapshot(
         routing_assistant_uuids,
         routing_assistant_explicit,
     )
+    loaded_plugins = build_loaded_plugins(assistant)
+    loaded_skills = build_loaded_skills(assistant)
+    loaded_skills.extend(
+        build_loaded_plugin_skills(
+            assistant,
+            loaded_plugins=loaded_plugins,
+        )
+    )
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
             "lensnode": run.lensnode,
             "task": execution_task_for_capability(assistant.capability),
-            "loaded_skills": build_loaded_skills(assistant),
+            "loaded_skills": loaded_skills,
             "loaded_mcps": build_loaded_mcps(assistant),
-            "loaded_plugins": build_loaded_plugins(assistant),
+            "loaded_plugins": loaded_plugins,
             "agent_rounds": assistant.agent_rounds,
             "run_timeout_s": run_timeout_for_rounds(assistant.agent_rounds),
             "target_dirs": (
@@ -2117,32 +2274,45 @@ def _build_run_runtime_snapshot(
             )
         )
         subagents = subagents[:MAX_SUBAGENTS_PER_RUN]
-        subagents = [
-            {
-                "uuid": str(item.uuid),
-                "name": item.name,
-                "description": item.description,
-                "routing_description": build_routing_description(
+        resolved_subagents = []
+        for item in subagents:
+            loaded_plugins = build_loaded_plugins(item)
+            loaded_skills = build_loaded_skills(item)
+            loaded_skills.extend(
+                build_loaded_plugin_skills(
                     item,
-                    answer_language,
-                ),
-                "capability": item.capability,
-                "task": execution_task_for_capability(item.capability),
-                "lensnode_uuid": (str(item.lensnode.uuid) if item.lensnode_id else ""),
-                "target_dirs": (
-                    []
-                    if item.capability == Assistant.Capability.GENERAL_CHAT
-                    else item.selected_dirs
-                ),
-                "workspace_guide": item.workspace_guide,
-                "agent_model_ref": str(item.agent_model_ref or ""),
-                "settings": item.settings or {},
-                "loaded_skills": build_loaded_skills(item),
-                "loaded_mcps": build_loaded_mcps(item),
-                "loaded_plugins": build_loaded_plugins(item),
-            }
-            for item in subagents
-        ]
+                    loaded_plugins=loaded_plugins,
+                )
+            )
+            resolved_subagents.append(
+                {
+                    "uuid": str(item.uuid),
+                    "name": item.name,
+                    "description": item.description,
+                    "routing_description": build_routing_description(
+                        item,
+                        answer_language,
+                    ),
+                    "capability": item.capability,
+                    "task": execution_task_for_capability(item.capability),
+                    "lensnode_uuid": (
+                        str(item.lensnode.uuid) if item.lensnode_id else ""
+                    ),
+                    "target_dirs": (
+                        []
+                        if item.capability
+                        == Assistant.Capability.GENERAL_CHAT
+                        else item.selected_dirs
+                    ),
+                    "workspace_guide": item.workspace_guide,
+                    "agent_model_ref": str(item.agent_model_ref or ""),
+                    "settings": item.settings or {},
+                    "loaded_plugins": loaded_plugins,
+                    "loaded_skills": loaded_skills,
+                    "loaded_mcps": build_loaded_mcps(item),
+                }
+            )
+        subagents = resolved_subagents
     return {
         "assistant_uuid": str(assistant.uuid),
         "assistant_updated_at": assistant.updated_at.isoformat(),

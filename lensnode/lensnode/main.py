@@ -19,25 +19,15 @@ from .checkpoint import (
     get_checkpoint_saver,
 )
 from .config import load_config
-from .delegation_events import delegation_events
 from .datasource_sync import DataSourceSyncError
 from .datasource_sync import convert_managed_workspace
 from .datasource_sync import inspect_datasource_path, sync_datasource
 from .datasource_sync import test_datasource_connection
 from .datasource_sync import upload_managed_workspace
-from .executor import TASKS, LensNodeExecutor
+from .delegation_events import delegation_events
 from .execution_queue import ExecutionClass, LensNodeExecutionQueue
+from .executor import TASKS, LensNodeExecutor
 from .gateway_model import RunCancelledError
-from .plugin_runtime import (
-    PluginRuntimeError,
-    acquire_plugin_lease,
-    fetch_plugin_snapshot,
-    retrieve_plugin_material,
-)
-from .plugin_package_loader import (
-    PluginPackageLoadError,
-    load_runtime_contract,
-)
 from .logging_utils import (
     elapsed_since,
     format_duration,
@@ -45,10 +35,21 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
+from .plugin_http import PluginHttpClientPool
+from .plugin_package_loader import (
+    PluginPackageLoadError,
+    load_runtime_contract,
+)
+from .plugin_runtime import (
+    PluginRuntimeError,
+    acquire_plugin_lease,
+    fetch_plugin_snapshot,
+    retrieve_plugin_material,
+)
 from .runtime_resources import (
-    delete_skill_cache,
     cleanup_run_runtime_resources,
     cleanup_stale_runtime_resources,
+    delete_skill_cache,
 )
 from .tls import create_config_ssl_context
 from .tls import warn_if_verification_disabled
@@ -81,9 +82,17 @@ class LensNodeClient:
                 keepalive_expiry=60.0,
             ),
         )
+        self.plugin_http_pool = PluginHttpClientPool(
+            timeout=config.request_timeout_s,
+            verify=self.ssl_context,
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=60.0,
+        )
         self.executor = LensNodeExecutor(
             config,
             http_client=self.gateway_http_client,
+            plugin_http_pool=self.plugin_http_pool,
         )
         self.stopping = asyncio.Event()
         # Set while draining on shutdown/upgrade: stop accepting new runs and
@@ -309,7 +318,10 @@ class LensNodeClient:
             try:
                 close_checkpoint_saver()
             finally:
-                self.gateway_http_client.close()
+                try:
+                    self.plugin_http_pool.close()
+                finally:
+                    self.gateway_http_client.close()
 
     async def _drain_running_tasks(self):
         """Wait for in-flight runs to finish, bounded by the drain timeout."""
@@ -1076,6 +1088,28 @@ class LensNodeClient:
                     material,
                     message.get("trigger") or "plugin",
                 )
+                plugin_http_pool = getattr(
+                    self,
+                    "plugin_http_pool",
+                    None,
+                )
+                if plugin_http_pool is not None and callable(
+                    runtime.http_origins
+                ):
+                    resolved = snapshot.get("resolved_config") or {}
+                    endpoint = resolved.get("endpoint")
+                    connection_scope = (
+                        snapshot.get("connection_uuid")
+                        or snapshot.get("snapshot_uuid")
+                        or message.get("snapshot_uuid")
+                    )
+                    command["provider_http_client"] = (
+                        plugin_http_pool.bind(
+                            plugin_key,
+                            connection_scope,
+                            runtime.http_origins(endpoint),
+                        )
+                    )
                 if message.get("cancel_event") is not None:
                     command["cancel_event"] = message["cancel_event"]
             except PluginPackageLoadError:

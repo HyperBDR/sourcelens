@@ -3,9 +3,9 @@
 import uuid
 from datetime import timedelta
 
-from django.http import FileResponse
 from django.db.models import Count
 from django.db.models.deletion import ProtectedError
+from django.http import FileResponse
 from django.utils import timezone
 from lens.models import (
     Connection,
@@ -13,6 +13,7 @@ from lens.models import (
     ExecutionSnapshot,
     PluginInvocation,
 )
+from lens.plugins.http import PluginHttpClientError, plugin_http_pool
 from lens.plugins.providers import (
     DatasourceProviderError,
     get_datasource_provider,
@@ -104,6 +105,20 @@ def _resource_option_selection(connection, resource, request):
     if not value:
         raise DatasourceProviderError("resource dependency is required")
     return {dependency: value}
+
+
+def _connection_http_client(provider, connection):
+    """Return the host-managed HTTP client for one saved Connection."""
+
+    origins = provider.http_origins(
+        connection.endpoint,
+        connection.config,
+    )
+    return plugin_http_pool.bind(
+        connection.plugin_key,
+        connection.uuid,
+        origins,
+    )
 
 
 class PluginRuntimeNoStoreMixin:
@@ -306,15 +321,22 @@ class ConnectionViewSet(BaseAdminViewSet):
         try:
             provider = get_datasource_provider(plugin_key)
             endpoint = provider.validate_connection(endpoint, config)
-            resources = provider.discover_connection_resources(
-                secret_value,
-                endpoint=endpoint,
-                connection_config=config,
-                query=request.data.get("query", ""),
-                cursor=request.data.get("cursor", ""),
-                limit=request.data.get("limit", 50),
-            )
-        except (DatasourceProviderError, PluginNotFoundError) as exc:
+            origins = provider.http_origins(endpoint, config)
+            with plugin_http_pool.temporary(plugin_key, origins) as client:
+                resources = provider.discover_connection_resources(
+                    secret_value,
+                    endpoint=endpoint,
+                    connection_config=config,
+                    query=request.data.get("query", ""),
+                    cursor=request.data.get("cursor", ""),
+                    limit=request.data.get("limit", 50),
+                    client=client,
+                )
+        except (
+            DatasourceProviderError,
+            PluginHttpClientError,
+            PluginNotFoundError,
+        ) as exc:
             return Response({"detail": str(exc)}, status=400)
         response = Response(resources)
         response["Cache-Control"] = "no-store"
@@ -334,17 +356,18 @@ class ConnectionViewSet(BaseAdminViewSet):
         except (TypeError, ValueError):
             return Response({"detail": "RESOURCE_LIMIT_INVALID"}, status=400)
         try:
-            resources = get_datasource_provider(
-                connection.plugin_key
-            ).discover_connection_resources(
+            provider = get_datasource_provider(connection.plugin_key)
+            client = _connection_http_client(provider, connection)
+            resources = provider.discover_connection_resources(
                 secret_or_response,
                 endpoint=connection.endpoint,
                 connection_config=connection.config,
                 query=request.query_params.get("query", ""),
                 cursor=request.query_params.get("cursor", ""),
                 limit=limit,
+                client=client,
             )
-        except DatasourceProviderError as exc:
+        except (DatasourceProviderError, PluginHttpClientError) as exc:
             return Response({"detail": str(exc)}, status=400)
         response = Response(resources)
         response["Cache-Control"] = "no-store"
@@ -393,14 +416,15 @@ class ConnectionViewSet(BaseAdminViewSet):
         if isinstance(secret_or_response, Response):
             return secret_or_response
         try:
-            result = get_datasource_provider(
-                connection.plugin_key
-            ).validate_live_connection(
+            provider = get_datasource_provider(connection.plugin_key)
+            client = _connection_http_client(provider, connection)
+            result = provider.validate_live_connection(
                 secret_or_response,
                 endpoint=connection.endpoint,
                 connection_config=connection.config,
+                client=client,
             )
-        except DatasourceProviderError as exc:
+        except (DatasourceProviderError, PluginHttpClientError) as exc:
             return Response(
                 {"status": "failed", "detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -418,6 +442,7 @@ class ConnectionViewSet(BaseAdminViewSet):
             return secret_or_response
         try:
             provider = get_datasource_provider(connection.plugin_key)
+            client = _connection_http_client(provider, connection)
             resource = request.query_params.get("resource", "")
             selection = _resource_option_selection(
                 connection,
@@ -430,6 +455,7 @@ class ConnectionViewSet(BaseAdminViewSet):
                     secret_or_response,
                     endpoint=connection.endpoint,
                     connection_config=connection.config,
+                    client=client,
                 )
             else:
                 resources = provider.discover_resource_options(
@@ -439,8 +465,9 @@ class ConnectionViewSet(BaseAdminViewSet):
                     selection,
                     endpoint=connection.endpoint,
                     connection_config=connection.config,
+                    client=client,
                 )
-        except DatasourceProviderError as exc:
+        except (DatasourceProviderError, PluginHttpClientError) as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -649,7 +676,11 @@ class PluginExecutionSnapshotView(
         if node is None:
             return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
         snapshot = (
-            ExecutionSnapshot.objects.select_related("datasource", "run")
+            ExecutionSnapshot.objects.select_related(
+                "connection",
+                "datasource",
+                "run",
+            )
             .filter(uuid=snapshot_uuid)
             .first()
         )
@@ -657,6 +688,7 @@ class PluginExecutionSnapshotView(
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
         payload = {
             "snapshot_uuid": str(snapshot.uuid),
+            "connection_uuid": str(snapshot.connection.uuid),
             "plugin_key": snapshot.plugin_key,
             "plugin_version": snapshot.plugin_version,
             "protocol_version": snapshot.protocol_version,

@@ -211,8 +211,12 @@ TASKS = [
 class LensNodeExecutor:
     """Translate LensNode protocol commands into Deep Agents execution."""
 
-    def __init__(self, config, http_client=None):
-        self.agent = LensDeepAgentRuntime(config, http_client=http_client)
+    def __init__(self, config, http_client=None, plugin_http_pool=None):
+        self.agent = LensDeepAgentRuntime(
+            config,
+            http_client=http_client,
+            plugin_http_pool=plugin_http_pool,
+        )
         self._pending_workers = {}
         self._pending_cleanup_runs = set()
 

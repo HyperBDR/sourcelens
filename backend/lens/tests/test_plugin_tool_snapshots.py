@@ -453,6 +453,10 @@ class PluginToolSnapshotTests(TestCase):
 
         self.assertEqual(config_response.status_code, 200)
         self.assertEqual(config_response.data["run_uuid"], str(run.uuid))
+        self.assertEqual(
+            config_response.data["connection_uuid"],
+            str(self.connection.uuid),
+        )
         self.assertEqual(config_response.data["tool_key"], "github_read_file")
         self.assertEqual(lease_response.status_code, 201)
         self.assertEqual(material_response.status_code, 200)

@@ -4,12 +4,12 @@ import json
 import time
 
 import httpx
-from langchain_core.tools import StructuredTool
 
 from .plugin_package_loader import (
     PluginPackageLoadError,
     load_runtime_contract,
 )
+from .plugin_http import PluginHttpClientError
 from .plugin_runtime import (
     PluginRuntimeError,
     acquire_plugin_lease,
@@ -24,177 +24,15 @@ class PluginToolError(RuntimeError):
 
 
 RESULT_MAX_BYTES = 900_000
-GUIDANCE_MAX_OUTPUT_BYTES = 12_000
 
 
-def build_plugin_guidance_tool(command):
-    """Build a bounded helper for progressive Plugin instructions."""
-
-    entries = {}
-    for binding in command.get("loaded_plugins") or []:
-        if not isinstance(binding, dict):
-            continue
-        plugin_key = str(binding.get("plugin_key") or "").strip()
-        guidance = binding.get("assistant_guidance")
-        if not plugin_key or not isinstance(guidance, dict):
-            continue
-        if (
-            guidance.get("summary")
-            or guidance.get("when_to_use")
-            or guidance.get("topics")
-        ):
-            entries[plugin_key] = {
-                "plugin_key": plugin_key,
-                "plugin_display_name": str(
-                    binding.get("plugin_display_name") or plugin_key
-                )[:160],
-                "guidance": guidance,
-            }
-    if not entries:
-        return None
-
-    def plugin_help(plugin: str = "", topic: str = "", query: str = ""):
-        """Return progressive, advisory guidance for bound Plugins."""
-
-        plugin = str(plugin or "").strip()[:128]
-        topic = str(topic or "").strip()[:128]
-        query = str(query or "").strip()[:256]
-        selected = list(entries.values())
-        if plugin:
-            selected = [
-                item
-                for item in selected
-                if item["plugin_key"].lower() == plugin.lower()
-                or item["plugin_display_name"].lower() == plugin.lower()
-            ]
-        if not selected:
-            return _guidance_json(
-                {
-                    "ok": False,
-                    "error": "PLUGIN_GUIDANCE_NOT_FOUND",
-                }
-            )
-        terms = [term for term in query.lower().split() if term]
-        result = []
-        for item in selected:
-            guidance = item["guidance"]
-            topics = guidance.get("topics") or []
-            if topic:
-                topics = [
-                    value
-                    for value in topics
-                    if isinstance(value, dict)
-                    and str(value.get("key") or "").lower() == topic.lower()
-                ]
-                if not topics:
-                    continue
-            elif terms:
-                topics = [
-                    value
-                    for value in topics
-                    if _guidance_matches(value, terms)
-                ]
-            result.append(
-                {
-                    "plugin": item["plugin_key"],
-                    "display_name": item["plugin_display_name"],
-                    "summary": str(guidance.get("summary") or "")[:600],
-                    "when_to_use": [
-                        str(value)[:240]
-                        for value in (guidance.get("when_to_use") or [])[:8]
-                    ],
-                    "topics": [
-                        {
-                            "key": str(value.get("key") or "")[:64],
-                            "summary": str(value.get("summary") or "")[:600],
-                            "details": str(value.get("details") or "")[:6000],
-                        }
-                        for value in topics[:24]
-                        if isinstance(value, dict)
-                    ],
-                }
-            )
-        if not result:
-            return _guidance_json(
-                {
-                    "ok": False,
-                    "error": "PLUGIN_GUIDANCE_TOPIC_NOT_FOUND",
-                }
-            )
-        return _guidance_json({"ok": True, "plugins": result})
-
-    tool = StructuredTool.from_function(
-        func=plugin_help,
-        name="plugin_help",
-        description=(
-            "Get concise, progressive usage guidance for a bound built-in "
-            "Plugin. Use a Plugin key and optional topic or query."
-        ),
-    )
-    tool.metadata = {
-        "capability_family": "plugin",
-        "plugin_key": "guidance",
-        "capability": "plugin.guidance",
-    }
-    return tool
-
-
-def _guidance_matches(topic, terms):
-    """Return whether a guidance topic matches all requested terms."""
-
-    if not isinstance(topic, dict):
-        return False
-    haystack = " ".join(
-        str(topic.get(key) or "")
-        for key in ("key", "summary", "details", "tool_keys")
-    ).lower()
-    return all(term in haystack for term in terms)
-
-
-def _guidance_json(value):
-    """Serialize one bounded guidance response."""
-
-    payload = json.dumps(value, ensure_ascii=False)
-    if len(payload.encode("utf-8")) <= GUIDANCE_MAX_OUTPUT_BYTES:
-        return payload
-    if isinstance(value, dict):
-        compact = dict(value)
-        plugins = []
-        for item in value.get("plugins") or []:
-            if not isinstance(item, dict):
-                continue
-            reduced = {
-                key: item.get(key)
-                for key in (
-                    "plugin",
-                    "display_name",
-                    "summary",
-                    "when_to_use",
-                )
-                if key in item
-            }
-            reduced["topics"] = [
-                {
-                    "key": topic.get("key"),
-                    "summary": topic.get("summary"),
-                }
-                for topic in (item.get("topics") or [])[:8]
-                if isinstance(topic, dict)
-            ]
-            plugins.append(reduced)
-        compact["plugins"] = plugins
-        payload = json.dumps(compact, ensure_ascii=False)
-    if len(payload.encode("utf-8")) <= GUIDANCE_MAX_OUTPUT_BYTES:
-        return payload
-    return json.dumps(
-        {
-            "ok": False,
-            "error": "PLUGIN_GUIDANCE_TOO_LARGE",
-        }
-    )
-
-
-def build_plugin_tools(command, config, http_client, emit_event=None):
+def build_plugin_tools(
+    command,
+    config,
+    http_client,
+    emit_event=None,
+    plugin_http_pool=None,
+):
     """Build tools from exact runtime versions in frozen Plugin bindings."""
 
     loaded_plugins = command.get("loaded_plugins") or []
@@ -254,6 +92,8 @@ def build_plugin_tools(command, config, http_client, emit_event=None):
                     arguments,
                     _contract.execute_tool,
                     emit_event,
+                    plugin_http_pool=plugin_http_pool,
+                    http_origins=_contract.http_origins,
                 )
 
             try:
@@ -287,6 +127,8 @@ def _execute_plugin_tool(
     arguments,
     handler,
     emit_event,
+    plugin_http_pool=None,
+    http_origins=None,
 ):
     """Authorize, lease, and execute one Tool without exposing secret."""
 
@@ -348,9 +190,21 @@ def _execute_plugin_tool(
             != endpoint.rstrip("/")
         ):
             raise PluginRuntimeError("PLUGIN_MATERIAL_MISMATCH")
+        provider_client = http_client
+        if plugin_http_pool is not None:
+            origins = (
+                http_origins(endpoint)
+                if callable(http_origins)
+                else (endpoint,)
+            )
+            provider_client = plugin_http_pool.bind(
+                plugin_key,
+                connection_uuid,
+                origins,
+            )
         result = handler(
             tool_key,
-            http_client,
+            provider_client,
             normalized_arguments,
             material["value"],
             endpoint,
@@ -359,7 +213,7 @@ def _execute_plugin_tool(
     except PluginRuntimeError as exc:
         error = str(exc)
         result = {"ok": False, "error": error}
-    except httpx.HTTPError:
+    except (httpx.HTTPError, PluginHttpClientError):
         error = "PLUGIN_REQUEST_FAILED"
         result = {"ok": False, "error": error}
     except Exception:

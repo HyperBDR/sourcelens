@@ -2850,7 +2850,7 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
-def test_plugin_guidance_index_is_compact_and_advisory():
+def test_legacy_plugin_guidance_is_not_injected_into_general_chat():
     prompt = _general_chat_system_prompt(
         {
             "task": "general_chat",
@@ -2876,13 +2876,13 @@ def test_plugin_guidance_index_is_compact_and_advisory():
         }
     )
 
-    assert "Plugin guidance index" in prompt
-    assert "Inspect approved repositories." in prompt
+    assert "Plugin guidance index" not in prompt
+    assert "Inspect approved repositories." not in prompt
     assert "Detailed instructions stay deferred." not in prompt
-    assert "plugin_help" in prompt
+    assert "plugin_help" not in prompt
 
 
-def test_plugin_guidance_is_available_in_knowledge_prompt():
+def test_legacy_plugin_guidance_is_not_injected_into_knowledge_prompt():
     prompt = _knowledge_system_prompt(
         {"prompt": "Answer from workspace evidence."},
         {
@@ -2901,7 +2901,8 @@ def test_plugin_guidance_is_available_in_knowledge_prompt():
         },
     )
 
-    assert "Plugin guidance index" in prompt
+    assert "Plugin guidance index" not in prompt
+    assert "Inspect approved repositories." not in prompt
     assert prompt.endswith("tool boundary.\n")
 
 
@@ -5847,7 +5848,7 @@ def test_simple_general_chat_route_keeps_subagents_disabled(
     )
 
     assert captured["subagents"] == []
-    assert "skills" not in captured or captured["skills"] is None
+    assert captured["skills"] == ["skills/income"]
     assert any(
         isinstance(item, agent_runtime._NoTaskMiddleware)
         and not item.allow_task_tool

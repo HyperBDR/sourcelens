@@ -235,19 +235,23 @@ assistant_guidance:
       tool_keys: [github_repository_get, github_read_file]
 ```
 
-运行时分为两层：
+控制面会为每个已绑定 Connection 生成隔离的虚拟 Plugin Skill 快照，复用现有
+Skill 的渐进式加载机制：
 
-1. 初始 System Prompt 只注入 `summary`、`when_to_use` 和主题摘要，作为轻量能力
-   索引；没有 guidance 的 Plugin 不增加 Prompt 内容。
-2. 当模型需要更具体的用法时，调用受控的 `plugin_help` Tool，按 Plugin key、主题
-   或查询词读取当前 Run 已绑定 Plugin 的详细说明。返回内容限制为 12 KiB，且不
-   返回 Manifest 内部的 `tool_keys` 映射。
+1. 初始 System Prompt 只注入虚拟 Skill 的简短描述、适用场景和 references 导航；
+   详细能力、主题与允许资源列表写入 Skill 包中的 `references/`，按需读取。
+2. `references/repositories.md`（或 Provider 对应的资源文件）可以列出当前
+   Connection 的允许仓库/项目标识，仅用于选择 Tool 参数，不代表授权。每次调用
+   仍由控制面和 Provider Runtime 双重校验。
 
 `assistant_guidance` 是不可信的说明数据，不是授权或执行配置。它不能授予新的
 Connection scope、capability 或 Tool，也不能覆盖平台安全边界；真实执行仍必须经过
 ExecutionSnapshot、Lease、Secret Material 和 Plugin Runtime。Registry 需要校验
 主题数量、文本长度、主题 key 唯一性，以及 `tool_keys` 必须引用同一 Manifest 中
-已声明的 Tool。Guidance 随 Plugin 版本加载，更新 Plugin 后重新生成运行时索引。
+已声明的 Tool。虚拟 Skill 不得包含 Token、Secret、Connection UUID、Lease、内部
+endpoint 或其他运行时材料。其缓存内容至少受 `plugin_key + plugin_version +
+allowed_scope` 哈希影响；更新 Plugin 或 Connection scope 后重新生成 Skill 快照。
+宿主不再注册 Plugin 专属的 `plugin_help` Tool，详细说明统一通过 Skill 文件读取。
 
 动态页面使用 Manifest schema 生成供应商字段和资源选择控件；通用 renderer 只保留
 少量受控组件，后端始终再次执行完整校验。
@@ -461,9 +465,9 @@ github_get_pull_request_context
   └─ comments
 ```
 
-建议 Runtime 提供统一的 `PluginRequestContext`：
+建议 Runtime 使用宿主提供的统一 `PluginRequestContext`/HTTP 客户端池：
 
-- async HTTP client 和连接池；
+- Connection-scoped HTTP client 和连接池；
 - 每次调用和每个 Connection 的并发上限；
 - deadline、取消传播和重试策略；
 - Provider rate-limit budget；
@@ -507,8 +511,11 @@ Datasource 同步的取消信号会从控制通道传播到 LensNode 的执行�
 因此不会跟随仓库声明的任意外部地址；若未来开放该能力，必须增加显式 host
 allowlist 和资源配额。
 
-对于 GitHub/GitLab/Jira 的标准 HTTP API，优先在 Plugin Runtime 使用异步 HTTP
-客户端；CLI 保留给已有复杂流程或必须复用的同步实现。GitLab 自托管 endpoint
+对于 GitHub/GitLab/Jira 的标准 HTTP API，Plugin Runtime 使用宿主管理的 HTTPX
+客户端池；当前同步 Tool 通过线程并发安全地复用连接，后续如切换异步实现不改变
+上层 Provider 契约。客户端启用 HTTP/2 协商，服务端不支持时自动回退到 HTTP/1.1
+keep-alive，不需要 Plugin 分支处理。CLI 保留给已有复杂流程或必须复用的同步实现。
+GitLab 自托管 endpoint
 允许企业管理员配置任意 HTTPS 根域名，生产部署应在网络层或管理员配置中增加
 出站 allowlist，并防范私网解析和 DNS rebinding，不能仅依赖 URL 格式校验。
 
@@ -722,13 +729,16 @@ import、命令、前端代码或远程 URL。控制面和 LensNode 都仅按冻
 `plugin_key + plugin_version` 找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
 entrypoint、超限文件及导出身份不一致的包。
 
-`control.py` 导出数据源和 Tool Provider，`runtime.py` 导出：
+`control.py` 导出数据源和 Tool Provider；数据源 Provider 额外声明
+`http_origins(endpoint, connection_config)`，让控制面为连接校验和资源发现注入
+受限客户端。`runtime.py` 导出：
 
 ```python
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "github"
 PLUGIN_VERSION = "1.0.0"
 
+http_origins(endpoint)
 build_tool(definition, executor)
 execute_tool(tool_key, client, arguments, secret, endpoint, config)
 build_datasource_command(snapshot, material, trigger)

@@ -13,6 +13,9 @@ PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "example"
 PLUGIN_VERSION = "1.2.3"
 
+def http_origins(endpoint):
+    return (endpoint,)
+
 def build_tool(definition, executor):
     return definition, executor
 
@@ -45,6 +48,9 @@ def test_loads_exact_runtime_contract_from_configured_root(tmp_path):
     assert callable(contract.build_tool)
     assert callable(contract.execute_tool)
     assert callable(contract.build_datasource_command)
+    assert contract.http_origins("https://example.com") == (
+        "https://example.com",
+    )
 
 
 def test_rejects_runtime_identity_mismatch(tmp_path):

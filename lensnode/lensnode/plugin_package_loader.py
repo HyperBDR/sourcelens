@@ -24,6 +24,7 @@ class PluginRuntimeContract:
 
     plugin_key: str
     plugin_version: str
+    http_origins: object
     build_tool: object
     execute_tool: object
     build_datasource_command: object
@@ -108,9 +109,13 @@ def _runtime_contract(path, plugin_key, plugin_version):
     )
     if any(not callable(item) for item in exports):
         raise PluginPackageLoadError("plugin runtime contract is invalid")
+    http_origins = getattr(module, "http_origins", None)
+    if http_origins is not None and not callable(http_origins):
+        raise PluginPackageLoadError("plugin runtime contract is invalid")
     return PluginRuntimeContract(
         plugin_key=plugin_key,
         plugin_version=plugin_version,
+        http_origins=http_origins,
         build_tool=exports[0],
         execute_tool=exports[1],
         build_datasource_command=exports[2],

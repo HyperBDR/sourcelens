@@ -144,6 +144,11 @@ class DatasourceProvider(ABC):
             raise DatasourceProviderError("connection scope must be an object")
         return connection_scope
 
+    def http_origins(self, endpoint, connection_config=None):
+        """Return HTTPS origins approved for host-managed HTTP clients."""
+
+        return (self.validate_connection(endpoint, connection_config),)
+
     def validate_live_connection(
         self,
         secret,

@@ -63,6 +63,7 @@ PLUGIN_VERSION = "1.2.3"
 class Provider:
     key = "example"
 
+    def http_origins(self, *args): pass
     def validate_connection(self, *args): pass
     def validate_connection_scope(self, *args): pass
     def validate_live_connection(self, *args, **kwargs): pass
@@ -150,6 +151,7 @@ PLUGIN_VERSION = "1.2.3"
 class Provider:
     key = "example"
 
+    def http_origins(self, *args): pass
     def validate_connection(self, *args): pass
     def validate_connection_scope(self, *args): pass
     def validate_live_connection(self, *args, **kwargs): pass

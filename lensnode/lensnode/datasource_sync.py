@@ -9,15 +9,16 @@ import tarfile
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
 import httpx
 
+from . import datasource_manifest as manifest_store
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
-from . import datasource_manifest as manifest_store
 from .document_convert import empty_cost_stats
 from .document_convert import is_convertible, post_process_documents
 from .document_convert import merge_cost_stats
@@ -1991,7 +1992,10 @@ def _sync_jira(command, workspace_path, emit):
     target = normalize_target_path(command.get("target_path"), workspace_path)
     issues_dir = target / "issues"
     issues_dir.mkdir(parents=True, exist_ok=True)
-    issues = _jira_fetch_issues(config)
+    issues = _jira_fetch_issues(
+        config,
+        client=command.get("provider_http_client"),
+    )
     previous_paths = {
         path.relative_to(target).as_posix()
         for path in issues_dir.glob("*.md")
@@ -2062,7 +2066,7 @@ def _sync_jira(command, workspace_path, emit):
     }
 
 
-def _jira_fetch_issues(config):
+def _jira_fetch_issues(config, client=None):
     """Fetch a bounded page of recently updated Jira Cloud Issues."""
 
     endpoint = str(config.get("endpoint") or "").rstrip("/")
@@ -2092,8 +2096,13 @@ def _jira_fetch_issues(config):
         f"{email}:{token}".encode("utf-8")
     ).decode("ascii")
     try:
-        with httpx.Client(timeout=30, follow_redirects=False) as client:
-            with client.stream(
+        client_context = (
+            nullcontext(client)
+            if client is not None
+            else httpx.Client(timeout=30, follow_redirects=False)
+        )
+        with client_context as request_client:
+            with request_client.stream(
                 "GET",
                 f"{endpoint}/rest/api/3/search/jql",
                 params={

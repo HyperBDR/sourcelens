@@ -319,23 +319,20 @@ def _directory_path(value):
 
 
 class _GitLabClient:
-    """Manage an optional injected HTTPX client without closing it."""
+    """Require the HTTP client injected by the SourceLens host."""
 
     def __init__(self, client):
         self.client = client
-        self.owned = client is None
 
     def __enter__(self):
         if self.client is None:
-            self.client = httpx.Client(
-                timeout=GITLAB_TIMEOUT_SECONDS,
-                follow_redirects=False,
+            raise DatasourceProviderError(
+                "PLUGIN_HTTP_CLIENT_REQUIRED"
             )
         return self.client
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.owned:
-            self.client.close()
+        return False
 
 
 def _secret_value(value):

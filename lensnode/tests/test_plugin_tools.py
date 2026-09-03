@@ -17,7 +17,6 @@ from lensnode.plugin_tools import (
     PluginToolError,
     _execute_plugin_tool,
     _json,
-    build_plugin_guidance_tool,
     build_plugin_tools,
 )
 
@@ -251,6 +250,41 @@ def test_build_plugin_tools_hides_runtime_and_connection_inputs():
     assert tools[0].metadata["capability"] == "repository.read"
 
 
+def test_plugin_tool_uses_connection_scoped_provider_http_client():
+    control_client = GitHubRuntimeClient()
+
+    class Pool:
+        def __init__(self):
+            self.bindings = []
+
+        def bind(self, plugin_key, connection_uuid, origins):
+            self.bindings.append((plugin_key, connection_uuid, origins))
+            return control_client
+
+    pool = Pool()
+    tool = build_plugin_tools(
+        _command("github_read_file"),
+        _config(),
+        control_client,
+        plugin_http_pool=pool,
+    )[0]
+
+    result = json.loads(tool.func(
+        repository="owner/repository",
+        path="README.md",
+        runtime=SimpleNamespace(tool_call_id="provider-http-1"),
+    ))
+
+    assert result["ok"] is True
+    assert pool.bindings == [
+        (
+            "github",
+            "connection-1",
+            ("https://api.github.com",),
+        )
+    ]
+
+
 def test_build_plugin_tools_rejects_unsupported_capability_family():
     command = _command("github_read_file")
     command["loaded_plugins"][0]["tools"][0]["capability_family"] = "mcp"
@@ -259,43 +293,6 @@ def test_build_plugin_tools_rejects_unsupported_capability_family():
         build_plugin_tools(command, _config(), GitHubRuntimeClient())
 
     assert str(exc_info.value) == "PLUGIN_TOOL_INVALID"
-
-
-def test_plugin_guidance_tool_returns_topic_details_for_bound_plugin():
-    command = _command("github_read_file")
-    command["loaded_plugins"][0]["plugin_display_name"] = "GitHub"
-    command["loaded_plugins"][0]["assistant_guidance"] = {
-        "summary": "Inspect approved repositories.",
-        "when_to_use": ["Current repository questions."],
-        "topics": [
-            {
-                "key": "repository",
-                "summary": "Read repository files.",
-                "details": "Use an approved owner/repository value.",
-                "tool_keys": ["github_read_file"],
-            }
-        ],
-    }
-
-    tool = build_plugin_guidance_tool(command)
-
-    assert tool is not None
-    assert tool.name == "plugin_help"
-    assert tool.metadata["capability_family"] == "plugin"
-    result = json.loads(
-        tool.invoke({"plugin": "github", "topic": "repository"})
-    )
-    assert result["ok"] is True
-    assert result["plugins"][0]["topics"][0]["details"].startswith(
-        "Use an approved"
-    )
-    assert "tool_keys" not in result["plugins"][0]["topics"][0]
-
-
-def test_plugin_guidance_tool_does_not_expose_unbound_plugin():
-    tool = build_plugin_guidance_tool(_command("github_read_file"))
-
-    assert tool is None
 
 
 def test_github_read_file_uses_snapshot_lease_and_bounded_result():

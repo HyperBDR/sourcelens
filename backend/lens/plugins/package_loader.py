@@ -73,6 +73,7 @@ def _validate_datasource_provider(provider):
 
     methods = (
         "discover_resources",
+        "http_origins",
         "validate_connection",
         "validate_connection_scope",
         "validate_datasource_config",

@@ -102,17 +102,29 @@ Plugin 可以通过可选的 `assistant_guidance` 提供类似 Skill 的渐进�
 }
 ```
 
-`summary` 和主题 `summary` 会作为小型索引进入初始上下文；主题的 `details` 不会
-默认注入。运行时为存在 guidance 的绑定提供 `plugin_help`，模型可按 Plugin key、
-主题或查询词取得受限详情。该工具只查询当前 Run 已绑定的 Plugin，结果上限为
-12 KiB。
+控制面会为每个已绑定的 Connection 生成一个隔离的虚拟 Plugin Skill 快照。初始
+上下文只注入该 Skill 的简短描述、适用场景和 references 导航；详细主题、能力与
+资源列表写入 Skill 包中的 `references/`，由统一 Skill 渐进式加载机制按需读取。
+允许仓库/项目标识可以出现在 `references/repositories.md` 中，仅用于选择 Tool
+参数，不代表授权；每次调用仍由控制面和 Provider Runtime 双重校验。
+
+虚拟 Plugin Skill 是能力和资源导航，不是用户 Skill 的业务工作流指令，也不能
+改变 Connection scope、capability、Tool schema 或平台安全规则。它不包含 Token、
+Secret、Connection UUID、Lease、内部 endpoint 或其他运行时材料。其缓存键至少受
+`plugin_key + plugin_version + allowed_scope` 内容哈希影响，Connection scope 变化
+后必须生成新的 Skill 内容。
 
 Registry 必须限制主题数量、文本长度和 `tool_keys`，并确认每个 Tool key 已在同一
 Manifest 声明。Guidance 是面向模型的不可信说明，不能覆盖系统规则、Connection
 scope、capability 或 Tool schema，也不能包含凭证、隐藏指令、任意 URL 或运行时路径。
-Guidance 与 Plugin 版本一同进入执行快照，Plugin 更新后重新加载。
+Guidance 与 Plugin 版本一同进入执行快照，Plugin 更新后重新加载。宿主不再注册
+Plugin 专属的 `plugin_help` Tool；详细说明统一通过虚拟 Skill 文件渐进加载。
 
 ## 5. Runtime 入口
+
+`control.py` 的 Datasource Provider 必须实现
+`http_origins(endpoint, connection_config)`，返回控制面连接校验和资源发现可访问的
+HTTPS origin。宿主据此注入受限客户端；Provider 不得自行创建或关闭客户端。
 
 `runtime.py` 必须导出以下固定符号：
 
@@ -120,6 +132,9 @@ Guidance 与 Plugin 版本一同进入执行快照，Plugin 更新后重新加�
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "github"
 PLUGIN_VERSION = "1.0.0"
+
+def http_origins(endpoint):
+    """Return validated HTTPS origins used by this runtime."""
 
 def build_tool(definition, executor):
     """Build one model-facing Tool from a validated declaration."""
@@ -166,6 +181,22 @@ metadata.capability = <Tool.capability>
 - 外部响应必须做结构校验、大小限制、正文截断和敏感字段过滤；
 - Tool 失败返回稳定错误码，不能把第三方原始异常或响应原样交给模型；
 - 写操作不属于 V1，未来必须使用新的 capability、幂等键和确认策略。
+
+### 6.1 Plugin HTTP 客户端与协议降级
+
+控制面和 LensNode 都为 Plugin Runtime 提供宿主管理的 HTTP 客户端池。Plugin
+不应自行创建或关闭 `httpx.Client`，而是使用宿主注入的 Connection-scoped
+客户端。客户端按 `plugin + connection + HTTPS origin` 复用连接，认证 Header
+仅附加在当前请求上，不跨 Connection 共享 Cookie 或认证状态。未保存 Connection
+的资源预览使用请求级临时客户端，结束后立即关闭，不进入长期连接池。
+
+客户端允许 HTTP/2 协商；如果目标服务端、代理或 TLS 链路不支持 HTTP/2，HTTPX
+会自动回退到 HTTP/1.1。回退不会导致 Plugin 失败，仍然可以复用 HTTP/1.1
+keep-alive 连接，但不会有同一条 HTTP/2 连接上的并发流复用。Plugin 不需要根据
+协议版本分支处理，也不应在 HTTP/2 协商失败后自行重复请求。
+
+宿主仍强制 HTTPS、origin allowlist、无重定向和请求/响应上限。HTTP/2 只优化传输
+层，不能放宽 Connection scope、Tool capability 或 Provider 参数校验。
 
 ## 7. Assistant Binding 约定
 

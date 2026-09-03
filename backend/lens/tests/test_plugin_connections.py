@@ -24,6 +24,14 @@ class PluginConnectionApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        self.provider_http_client = object()
+        pool_patcher = patch("lens.views.plugins.plugin_http_pool")
+        self.plugin_http_pool = pool_patcher.start()
+        self.addCleanup(pool_patcher.stop)
+        self.plugin_http_pool.bind.return_value = self.provider_http_client
+        self.plugin_http_pool.temporary.return_value.__enter__.return_value = (
+            self.provider_http_client
+        )
 
     def test_create_connection_encrypts_secret_and_masks_response(self):
         response = self.client.post(
@@ -52,6 +60,7 @@ class PluginConnectionApiTests(TestCase):
     def test_preview_resources_uses_unsaved_secret_without_persisting(self, provider_factory):
         provider = provider_factory.return_value
         provider.validate_connection.return_value = "https://github.com"
+        provider.http_origins.return_value = ("https://api.github.com",)
         provider.discover_connection_resources.return_value = {
             "resources": {
                 "repositories": {
@@ -82,12 +91,18 @@ class PluginConnectionApiTests(TestCase):
             query="",
             cursor="",
             limit=50,
+            client=self.provider_http_client,
+        )
+        self.plugin_http_pool.temporary.assert_called_once_with(
+            "github",
+            ("https://api.github.com",),
         )
 
     @patch("lens.views.plugins.get_datasource_provider")
     def test_resource_candidates_use_stored_secret(self, provider_factory):
         connection = self._create_connection()
         provider = provider_factory.return_value
+        provider.http_origins.return_value = ("https://api.github.com",)
         provider.discover_connection_resources.return_value = {
             "resources": {
                 "repositories": {
@@ -113,6 +128,12 @@ class PluginConnectionApiTests(TestCase):
             query="",
             cursor="",
             limit=50,
+            client=self.provider_http_client,
+        )
+        self.plugin_http_pool.bind.assert_called_once_with(
+            "github",
+            connection.uuid,
+            ("https://api.github.com",),
         )
         self.assertEqual(
             response.data["resources"]["repositories"]["items"][0][
@@ -242,6 +263,7 @@ class PluginConnectionApiTests(TestCase):
             "stored-secret",
             endpoint="https://github.com",
             connection_config={},
+            client=self.provider_http_client,
         )
         self.assertEqual(response.data["status"], "success")
         self.assertNotIn("stored-secret", str(response.data))
@@ -280,6 +302,7 @@ class PluginConnectionApiTests(TestCase):
             "stored-secret",
             endpoint="https://github.com",
             connection_config={},
+            client=self.provider_http_client,
         )
         self.assertEqual(
             response.data["resources"]["repositories"]["items"][0]["value"],
@@ -322,6 +345,7 @@ class PluginConnectionApiTests(TestCase):
             {"repository": "owner/repo"},
             endpoint="https://github.com",
             connection_config={},
+            client=self.provider_http_client,
         )
 
     def test_resource_options_reject_unknown_repository(self):

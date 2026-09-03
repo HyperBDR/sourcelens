@@ -50,7 +50,6 @@ from ..planned_evidence import (
     validate_evidence_sufficiency,
 )
 from ..plugin_tools import (
-    build_plugin_guidance_tool,
     build_plugin_tools,
 )
 from ..runtime_modes import runtime_mode_for
@@ -269,9 +268,10 @@ def _build_summarization_middleware(
 class LensDeepAgentRuntime:
     """Run a real LangChain Deep Agents execution for one LensNode command."""
 
-    def __init__(self, config, http_client=None):
+    def __init__(self, config, http_client=None, plugin_http_pool=None):
         self.config = config
         self.http_client = http_client
+        self.plugin_http_pool = plugin_http_pool
 
     async def answer(
         self,
@@ -786,13 +786,9 @@ class LensDeepAgentRuntime:
             self.config,
             self.http_client,
             emit_event=state.emit_agent_event,
+            plugin_http_pool=self.plugin_http_pool,
         )
         state.tools.extend(state.plugin_tools)
-        state.plugin_guidance_tool = build_plugin_guidance_tool(
-            state.command
-        )
-        if state.plugin_guidance_tool is not None:
-            state.tools.append(state.plugin_guidance_tool)
         state.mcp_tools = load_mcp_tools(
             state.resources.mcp_configs,
             discovery_timeout_s=getattr(
@@ -1106,7 +1102,7 @@ class LensDeepAgentRuntime:
             ),
             "name": f"lensnode-{state.command.get('task') or 'agent'}",
         }
-        if state.resources.skill_paths and use_subagents:
+        if state.resources.skill_paths:
             state.kwargs["skills"] = state.resources.skill_paths
 
         state.summarizer = _build_summarization_middleware(
@@ -1148,7 +1144,6 @@ class LensDeepAgentRuntime:
                 "skill_count": len(state.resources.skill_paths),
                 "mcp_tool_count": len(state.mcp_tools),
                 "plugin_tool_count": len(state.plugin_tools),
-                "plugin_guidance": bool(state.plugin_guidance_tool),
                 "mcp_deferred": state.mcp_middleware is not None,
                 "task_tool_enabled": use_subagents,
                 "mcp_config_path": str(state.resources.mcp_config_path),

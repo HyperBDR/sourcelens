@@ -53,7 +53,7 @@ def test_jira_sync_exports_bounded_issue_markdown(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "lensnode.datasource_sync._jira_fetch_issues",
-        lambda config: [
+        lambda config, client=None: [
             {
                 "key": "SL-488",
                 "fields": {

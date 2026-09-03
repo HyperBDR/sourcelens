@@ -111,6 +111,12 @@ class GitHubDatasourceProvider(DatasourceProvider):
 
     key = "github"
 
+    def http_origins(self, endpoint, connection_config=None):
+        """Return the fixed GitHub REST API origin."""
+
+        self.validate_connection(endpoint, connection_config)
+        return (GITHUB_API_URL,)
+
     def validate_datasource_source_type(self, source_type):
         """Bind the GitHub Provider to the existing Git datasource runtime."""
 
@@ -456,23 +462,20 @@ def _directory_path(value):
 
 
 class _GitHubClient:
-    """Manage an optional injected HTTPX client without closing it."""
+    """Require the HTTP client injected by the SourceLens host."""
 
     def __init__(self, client):
         self.client = client
-        self.owned = client is None
 
     def __enter__(self):
         if self.client is None:
-            self.client = httpx.Client(
-                timeout=GITHUB_TIMEOUT_SECONDS,
-                follow_redirects=False,
+            raise DatasourceProviderError(
+                "PLUGIN_HTTP_CLIENT_REQUIRED"
             )
         return self.client
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.owned:
-            self.client.close()
+        return False
 
 
 def _secret_value(value):

@@ -11,6 +11,7 @@ from .services import (
     LensNodeDispatchError,
     MultimodalPreprocessingError,
     analyze_multimodal_intent,
+    build_loaded_plugin_skills,
     build_loaded_plugins,
     build_loaded_skills,
     create_run_execution_snapshot,
@@ -159,8 +160,14 @@ def _lensnode_dispatch(state):
                 run.retry_of_run,
             ),
         )
-        execution.loaded_skills = build_loaded_skills(assistant)
         execution.loaded_plugins = build_loaded_plugins(assistant)
+        execution.loaded_skills = build_loaded_skills(assistant)
+        execution.loaded_skills.extend(
+            build_loaded_plugin_skills(
+                assistant,
+                loaded_plugins=execution.loaded_plugins,
+            )
+        )
         execution.save(update_fields=["loaded_skills", "loaded_plugins"])
         validate_run_dispatch(run)
         execution.status = RunExecution.Status.DISPATCHED

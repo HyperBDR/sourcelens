@@ -16,6 +16,12 @@ READ_MAX_BYTES = 200_000
 SEARCH_MAX_BYTES = 1_000_000
 
 
+def http_origins(endpoint):
+    """Return the validated GitLab API origin for connection pooling."""
+
+    return (_endpoint(endpoint),)
+
+
 def build_tool(definition, executor):
     """Create a fixed GitLab read-only tool."""
 

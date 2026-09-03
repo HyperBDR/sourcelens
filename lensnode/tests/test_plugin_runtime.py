@@ -249,6 +249,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://github.com",
+                "connection_scope": {"repositories": ["owner/repo"]},
                 "target_path": "/workspace/repo",
                 "datasource_config": {
                     "repository": "owner/repo",
@@ -383,6 +384,7 @@ def test_plugin_sync_reports_cancellation(monkeypatch):
             "plugin_version": "1.0.0",
             "resolved_config": {
                 "endpoint": "https://github.com",
+                "connection_scope": {"repositories": ["owner/repo"]},
                 "datasource_config": {"repository": "owner/repo"},
             },
         },
@@ -524,11 +526,23 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
         workspace_path="/workspace",
     )
     client.gateway_http_client = object()
+    provider_http_client = object()
+
+    class PluginHttpPool:
+        def __init__(self):
+            self.bindings = []
+
+        def bind(self, plugin_key, connection_uuid, origins):
+            self.bindings.append((plugin_key, connection_uuid, tuple(origins)))
+            return provider_http_client
+
+    client.plugin_http_pool = PluginHttpPool()
     monkeypatch.setattr(
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "jira",
-                "plugin_version": "1.0.0",
+            "plugin_version": "1.0.0",
+            "connection_uuid": "connection-1",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://company.atlassian.net",
@@ -547,7 +561,7 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
     )
     material = {
         "plugin_key": "jira",
-                "plugin_version": "1.0.0",
+        "plugin_version": "1.0.0",
         "endpoint": "https://company.atlassian.net",
         "value": "jira-api-token",
     }
@@ -572,4 +586,12 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
     assert seen["config"]["project"] == "SL"
     assert seen["config"]["email"] == "admin@example.com"
     assert seen["config"]["access_token"] == "jira-api-token"
+    assert seen["provider_http_client"] is provider_http_client
+    assert client.plugin_http_pool.bindings == [
+        (
+            "jira",
+            "connection-1",
+            ("https://company.atlassian.net",),
+        )
+    ]
     assert material["value"] == ""
