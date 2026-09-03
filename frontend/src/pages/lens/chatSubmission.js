@@ -43,6 +43,14 @@ function isSameSubmission(pending, candidate) {
   )
 }
 
+export function updateSessionSubmissionSet(current, sessionUuid, submitting) {
+  if (!sessionUuid) return new Set(current)
+  const next = new Set(current)
+  if (submitting) next.add(sessionUuid)
+  else next.delete(sessionUuid)
+  return next
+}
+
 export function prepareRunSubmission({
   sessionUuid,
   question,

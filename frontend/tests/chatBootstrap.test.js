@@ -263,14 +263,20 @@ test('creates the first session only when the user submits a prompt', async () =
     'const sessionAtSubmit = selectedSessionUuid.value',
     submit
   )
-  const submitGuard = source.indexOf('if (loading.value.run)', submit)
-  const markSubmitting = source.indexOf('loading.value.run = true', submit)
+  const submitGuard = source.indexOf(
+    'submittingSessionUuids.value.has(selectedSessionUuid.value)',
+    submit
+  )
+  const markCreating = source.indexOf(
+    'sessionCreationInProgress.value = true',
+    submit
+  )
 
   assert.notEqual(createFirstSession, -1)
   assert.notEqual(bindSession, -1)
   assert.notEqual(submitGuard, -1)
   assert.ok(submitGuard < createFirstSession)
-  assert.ok(markSubmitting < createFirstSession)
+  assert.ok(markCreating < createFirstSession)
   assert.ok(createFirstSession < bindSession)
 })
 
@@ -287,7 +293,7 @@ test('lets Smart Collaboration select assistants before its first session', asyn
     'allowed_assistant_uuids: allowedAssistantUuids'
   )
   const selectedScope = source.indexOf(
-    'await createNewSession(\n      false,\n      routingScopeAssistantUuids.value',
+    'await createNewSession(\n        false,\n        routingScopeAssistantUuids.value',
     scopeCandidates
   )
 

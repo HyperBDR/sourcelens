@@ -1,0 +1,10 @@
+type: fix
+audience: user
+en: >-
+  Fixed message submission being blocked in other conversations while a
+  response is still running.
+zh-CN: >-
+  修复一个会话正在运行时阻塞其他会话提交消息的问题。
+es: >-
+  Se corrigió el bloqueo del envío de mensajes en otras conversaciones
+  mientras una respuesta seguía ejecutándose.
