@@ -50,8 +50,6 @@ TOKEN_BUDGET_WARNING = (
     "necessary. If a deliverable is required, create and save it now; "
     "otherwise synthesize the final answer from evidence already found."
 )
-DEFAULT_AGENT_MAX_TOKENS = 8192
-FINAL_SYNTHESIS_MAX_TOKENS = 4096
 LOOP_WARNING = (
     "[LOOP DETECTED] Tool calls are repeating without a final answer. Stop "
     "calling tools and synthesize the result from evidence already collected."
@@ -440,35 +438,10 @@ class LensGatewayChatModel(BaseChatModel):
             )
 
     def _budgeted_max_tokens(self, requested, *, control_call, final):
-        """Clamp one model call to the budget still available for its phase."""
+        """Pass through provider defaults until flow behavior is validated."""
 
-        if not self.general_chat_execution_gates or control_call:
-            return requested
-        configured = (
-            requested
-            if requested is not None
-            else (
-                FINAL_SYNTHESIS_MAX_TOKENS
-                if final
-                else DEFAULT_AGENT_MAX_TOKENS
-            )
-        )
-        configured = max(int(configured or 0), 1)
-        with self._usage_lock:
-            limit = max(int(self.token_budget_max_tokens or 0), 0)
-            reserve = min(
-                max(int(self.token_budget_final_reserve_tokens or 0), 0),
-                limit,
-            )
-            used = self._run_token_usage["total_tokens"]
-        if not limit:
-            return configured
-        remaining = max(limit - used, 1)
-        if final:
-            available = min(remaining, reserve or remaining)
-        else:
-            available = max(limit - reserve - used, 1)
-        return min(configured, available)
+        del control_call, final
+        return requested
 
     def _generate(
         self,

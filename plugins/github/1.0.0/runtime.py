@@ -99,6 +99,7 @@ def execute_tool(key, client, arguments, secret, endpoint, config):
         )
     if key == "github_commit_list":
         params = _pagination(arguments)
+        _add_time_filters(params, arguments)
         if arguments.get("ref"):
             params["sha"] = arguments["ref"]
         if arguments.get("path"):
@@ -125,6 +126,8 @@ def execute_tool(key, client, arguments, secret, endpoint, config):
         return _commit_result(repository, payload)
     if key == "github_issue_list":
         params = _pagination(arguments)
+        if arguments.get("since"):
+            params["since"] = _bounded_text(arguments["since"], 64)
         params["state"] = str(arguments.get("state") or "open")
         if arguments.get("labels"):
             params["labels"] = arguments["labels"]
@@ -681,10 +684,17 @@ def _validate_runtime_arguments(key, arguments, config):
         if arguments.get("path"):
             _repository_path(arguments["path"])
     elif key == "github_commit_list":
+        for name in ("since", "until"):
+            if arguments.get(name):
+                _bounded_text(arguments[name], 64)
         if arguments.get("ref"):
             _bounded_text(arguments["ref"], 255)
         if arguments.get("path"):
             _repository_path(arguments["path"])
+    elif key == "github_issue_list":
+        for name in ("since", "until"):
+            if arguments.get(name):
+                _bounded_text(arguments[name], 64)
     elif key == "github_commit_get" and arguments.get("ref"):
         _bounded_text(arguments["ref"], 255)
     elif key in {
@@ -832,6 +842,15 @@ def _pagination(arguments):
         "page": _page_value(arguments, "page", 1, 1000, 1),
         "per_page": _page_value(arguments, "per_page", 1, 20, 10),
     }
+
+
+def _add_time_filters(params, arguments):
+    """Add optional ISO-8601 window filters supported by GitHub lists."""
+
+    for name in ("since", "until"):
+        value = arguments.get(name)
+        if value:
+            params[name] = _bounded_text(value, 64)
 
 
 def _page_value(arguments, name, minimum, maximum, default):

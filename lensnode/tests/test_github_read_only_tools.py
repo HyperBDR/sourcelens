@@ -163,6 +163,8 @@ def test_commit_list_and_get_return_stable_fields():
             "path": ["backend/lens"],
             "per_page": ["20"],
             "sha": ["main"],
+            "since": ["2026-09-01T16:00:00Z"],
+            "until": ["2026-09-02T15:59:59Z"],
         }
         return httpx.Response(
             200,
@@ -191,6 +193,8 @@ def test_commit_list_and_get_return_stable_fields():
             "path": "backend/lens",
             "page": 1,
             "per_page": 20,
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
         },
         list_handler,
     )

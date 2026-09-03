@@ -1,6 +1,7 @@
 """Model-facing tools backed by versioned Plugin runtime packages."""
 
 import json
+import threading
 import time
 
 import httpx
@@ -42,6 +43,8 @@ def build_plugin_tools(
         raise PluginToolError("PLUGIN_BINDINGS_INVALID")
     tools = []
     seen_keys = set()
+    result_cache = {}
+    result_cache_lock = threading.Lock()
     for binding in loaded_plugins:
         if not isinstance(binding, dict):
             raise PluginToolError("PLUGIN_BINDING_INVALID")
@@ -94,6 +97,8 @@ def build_plugin_tools(
                     emit_event,
                     plugin_http_pool=plugin_http_pool,
                     http_origins=_contract.http_origins,
+                    result_cache=result_cache,
+                    result_cache_lock=result_cache_lock,
                 )
 
             try:
@@ -129,10 +134,28 @@ def _execute_plugin_tool(
     emit_event,
     plugin_http_pool=None,
     http_origins=None,
+    result_cache=None,
+    result_cache_lock=None,
 ):
     """Authorize, lease, and execute one Tool without exposing secret."""
 
     call_id = str(getattr(runtime, "tool_call_id", "") or "")
+    cache_key = _plugin_result_cache_key(
+        plugin_key,
+        connection_uuid,
+        tool_key,
+        arguments,
+    )
+    if result_cache is not None and result_cache_lock is not None:
+        with result_cache_lock:
+            cached = result_cache.get(cache_key)
+        if cached is not None:
+            _emit(
+                emit_event,
+                "tool.plugin.cache_hit",
+                {"plugin": plugin_key, "tool": tool_key},
+            )
+            return cached
     started = time.monotonic()
     _emit(
         emit_event,
@@ -234,7 +257,31 @@ def _execute_plugin_tool(
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
-    return _json(result)
+    encoded = _json(result)
+    if (
+        error == ""
+        and result_cache is not None
+        and result_cache_lock is not None
+    ):
+        with result_cache_lock:
+            result_cache[cache_key] = encoded
+    return encoded
+
+
+def _plugin_result_cache_key(plugin_key, connection_uuid, tool_key, arguments):
+    """Build a stable per-run key for identical read-only Plugin calls."""
+
+    return (
+        str(plugin_key),
+        str(connection_uuid),
+        str(tool_key),
+        json.dumps(
+            arguments or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ),
+    )
 
 
 def _validate_snapshot(snapshot, run_uuid, plugin_key, tool_key, call_id):

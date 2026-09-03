@@ -626,6 +626,10 @@ class GitHubToolProvider:
                 normalized["ref"] = ref
             if path:
                 normalized["path"] = path
+            for name in ("since", "until"):
+                value = _tool_text(arguments.get(name), name, 64)
+                if value:
+                    normalized[name] = value
         elif tool_key == "github_commit_get":
             normalized["ref"] = _tool_text(
                 arguments.get("ref"),
@@ -643,6 +647,10 @@ class GitHubToolProvider:
             labels = _tool_text(arguments.get("labels"), "labels", 500)
             if labels:
                 normalized["labels"] = labels
+            for name in ("since", "until"):
+                value = _tool_text(arguments.get(name), name, 64)
+                if value:
+                    normalized[name] = value
         elif tool_key == "github_pull_request_list":
             normalized["state"] = _tool_choice(
                 arguments.get("state"),

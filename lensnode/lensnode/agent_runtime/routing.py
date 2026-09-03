@@ -15,8 +15,6 @@ from .capability_protocol import (
 from .messages import build_initial_messages as _build_initial_messages
 
 LOGGER = logging.getLogger("lensnode")
-ROUTE_CLASSIFICATION_MAX_TOKENS = 1024
-ROUTE_CLASSIFICATION_RETRY_MAX_TOKENS = 4096
 ROUTE_LENGTH_FINISH_REASONS = {
     "length",
     "max_completion_tokens",
@@ -248,13 +246,11 @@ def _select_general_chat_route(
             image_data_urls,
         ),
     ]
-    max_tokens = ROUTE_CLASSIFICATION_MAX_TOKENS
     for attempt in range(2):
         try:
             response = _invoke_route_classifier(
                 model,
                 messages,
-                max_tokens=max_tokens,
             )
         except RunCancelledError:
             raise
@@ -280,7 +276,6 @@ def _select_general_chat_route(
                     image_data_urls,
                 ),
             ]
-            max_tokens = ROUTE_CLASSIFICATION_RETRY_MAX_TOKENS
             continue
         decision = _parse_route_decision(
             getattr(response, "content", ""),
@@ -294,15 +289,14 @@ def _select_general_chat_route(
     return fallback
 
 
-def _invoke_route_classifier(model, messages, *, max_tokens):
-    """Invoke the route classifier with bounded deterministic settings."""
+def _invoke_route_classifier(model, messages):
+    """Invoke the route classifier with deterministic settings."""
 
     return model.invoke(
         messages,
         runtime_control_call=True,
         temperature=0,
         reasoning_effort="none",
-        max_tokens=max_tokens,
     )
 
 

@@ -814,7 +814,7 @@ def test_default_model_calls_are_clamped_to_remaining_work_budget(monkeypatch):
 
     model._generate([HumanMessage(content="investigate")])
 
-    assert requests[0]["max_tokens"] == 8192
+    assert "max_tokens" not in requests[0]
 
 
 def test_final_synthesis_is_clamped_to_remaining_budget(monkeypatch):
@@ -847,7 +847,7 @@ def test_final_synthesis_is_clamped_to_remaining_budget(monkeypatch):
         reasoning_effort="none",
     )
 
-    assert requests[0]["max_tokens"] == 2000
+    assert requests[0]["max_tokens"] == 4096
 
 
 def test_resume_restores_token_and_loop_guardrail_state(monkeypatch):

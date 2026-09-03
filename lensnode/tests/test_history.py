@@ -1385,7 +1385,7 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert model.options["temperature"] == 0
     # Route classification is a control call: light reasoning budget only.
     assert model.options["reasoning_effort"] == "none"
-    assert model.options["max_tokens"] == 1024
+    assert "max_tokens" not in model.options
 
 
 def test_route_selection_retries_truncated_reasoning_with_compact_prompt():
@@ -1451,8 +1451,8 @@ def test_route_selection_retries_truncated_reasoning_with_compact_prompt():
     assert len(model.calls) == 2
     first_messages, first_options = model.calls[0]
     retry_messages, retry_options = model.calls[1]
-    assert first_options["max_tokens"] == 1024
-    assert retry_options["max_tokens"] == 4096
+    assert "max_tokens" not in first_options
+    assert "max_tokens" not in retry_options
     assert len(retry_messages[0].content) < len(first_messages[0].content)
     assert len(retry_messages) == 2
     assert retry_messages[-1]["content"] == "整理这份工程材料"

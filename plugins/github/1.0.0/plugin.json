@@ -34,7 +34,7 @@
       {
         "key": "issues_and_pull_requests",
         "summary": "Inspect issue and pull request metadata, comments, files, and reviews.",
-        "details": "Use list tools before requesting a specific item when the number is unknown. Pull requests are separate from issues in list results. Responses are bounded and read-only.",
+        "details": "Use list tools before requesting a specific item when the number is unknown. For activity reports, pass an ISO-8601 since/until window to commit lists; pass since to issue lists and filter until locally. Pull requests do not support server-side time filters: request the smallest recent page, filter locally by the window, and stop when entries are older. Fetch pull request or issue details, comments, files, and reviews only for records that match the window and need clarification. Never repeat the same repository, tool, and arguments; parallelize independent repositories.",
         "tool_keys": [
           "github_issue_list",
           "github_issue_get",
@@ -238,7 +238,7 @@
     },
     {
       "key": "github_commit_list",
-      "description": "List commits in an approved GitHub repository. Optionally filter by branch, tag, or commit ref and by repository-relative path. Results are paginated and omit patches.",
+      "description": "List commits in an approved GitHub repository. Prefer since/until for a bounded time window; optionally filter by branch, tag, or path. Results are paginated and omit patches.",
       "capability": "repository.read",
       "side_effect": "none",
       "input_schema": {
@@ -255,6 +255,14 @@
           "path": {
             "type": "string",
             "description": "Optional repository-relative path filter."
+          },
+          "since": {
+            "type": "string",
+            "description": "Optional ISO-8601 lower bound for commit time."
+          },
+          "until": {
+            "type": "string",
+            "description": "Optional ISO-8601 upper bound for commit time."
           },
           "page": {
             "type": "integer",
@@ -296,7 +304,7 @@
     },
     {
       "key": "github_issue_list",
-      "description": "List issues, excluding pull requests, in an approved GitHub repository. Optionally filter by state and comma-separated labels. Results are paginated and contain bounded summaries.",
+      "description": "List issues, excluding pull requests, in an approved GitHub repository. Prefer since/until for a bounded time window; optionally filter by state and labels.",
       "capability": "repository.read",
       "side_effect": "none",
       "input_schema": {
@@ -313,6 +321,14 @@
           "labels": {
             "type": "string",
             "description": "Optional comma-separated label names."
+          },
+          "since": {
+            "type": "string",
+            "description": "Optional ISO-8601 lower bound for issue updates."
+          },
+          "until": {
+            "type": "string",
+            "description": "Optional ISO-8601 upper bound for local filtering of issue updates."
           },
           "page": {
             "type": "integer",

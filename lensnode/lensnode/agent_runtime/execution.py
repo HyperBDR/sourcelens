@@ -625,7 +625,6 @@ def _synthesize_wrapup_answer(
         response = model.invoke(
             wrapup_messages,
             runtime_final_synthesis=True,
-            max_tokens=4096,
             reasoning_effort="none",
         )
     except RunCancelledError:
