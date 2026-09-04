@@ -1181,6 +1181,9 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useUserStore } from '@/store/user'
+import {
+  pluginDisplayName as translatedPluginDisplayName
+} from '@/utils/pluginI18n'
 
 import EnvironmentSetValues from './components/EnvironmentSetValues.vue'
 
@@ -1221,7 +1224,7 @@ const props = defineProps({
 
 defineEmits(['close', 'save', 'refresh-dirs'])
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
 const isSmartMode = computed(() => props.form.mode === 'smart')
@@ -1550,7 +1553,10 @@ function pluginBinding(connectionUuid) {
 }
 
 function pluginDisplayName(pluginKey) {
-  return props.pluginManifests?.[pluginKey]?.display_name || pluginKey
+  return (
+    translatedPluginDisplayName(props.pluginManifests?.[pluginKey], t, te) ||
+    pluginKey
+  )
 }
 
 function connectionScope(connection) {

@@ -1247,6 +1247,133 @@
       "removeFilter": "Remove filter",
       "filterCount": "{count} filters added"
     },
+    "pluginForm": {
+      "selectOption": "Select an option",
+      "loadingOptions": "Loading options…",
+      "noResourcesLoaded": "No resources loaded.",
+      "searchResources": "Search resources",
+      "noMatchingResources": "No matching resources.",
+      "resources": "resources",
+      "selected": "selected",
+      "private": "Private"
+    },
+    "plugins": {
+      "feishu": {
+        "displayName": "Feishu",
+        "description": "Connect a Feishu custom app and sync accessible Drive folders, documents, sheets, slides, Bitable bases, and wiki pages into LensNode workspaces.",
+        "connectionFields": {
+          "app_id": {
+            "title": "App ID",
+            "description": "App ID from a published Feishu custom app with the required document permissions."
+          },
+          "app_secret": {
+            "title": "App Secret",
+            "description": "App Secret for the same Feishu custom app. It is encrypted after saving."
+          }
+        },
+        "datasourceFields": {
+          "resource_urls": {
+            "title": "Feishu resource URLs",
+            "description": "One HTTPS folder, document, sheet, slide, Bitable, or wiki URL per field."
+          },
+          "recursive": {
+            "title": "Include subfolders",
+            "description": "Recursively synchronize resources in nested folders."
+          },
+          "max_depth": {
+            "title": "Maximum folder depth",
+            "description": "Limit how many nested folder levels are synchronized."
+          },
+          "incremental": {
+            "title": "Skip unchanged files",
+            "description": "Reuse local files when the corresponding Feishu resource has not changed."
+          },
+          "delete_missing": {
+            "title": "Delete missing local files",
+            "description": "Delete local files when their Feishu resources are no longer present. Keep disabled to reduce accidental deletion risk."
+          }
+        }
+      },
+      "github": {
+        "displayName": "GitHub",
+        "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
+        "connectionFields": {
+          "secret_value": {
+            "title": "Personal access token",
+            "description": "A write-only token with read access to the approved repositories."
+          },
+          "repositories": {
+            "title": "Allowed repositories",
+            "description": "Explicit owner/repository values this connection may access."
+          }
+        },
+        "datasourceFields": {
+          "repository": {
+            "title": "Repository"
+          },
+          "branch": {
+            "title": "Branch"
+          },
+          "directory": {
+            "title": "Directory",
+            "description": "Optional repository-relative directory to sync."
+          }
+        }
+      },
+      "gitlab": {
+        "displayName": "GitLab",
+        "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
+        "connectionFields": {
+          "endpoint": {
+            "title": "GitLab endpoint",
+            "description": "Public or self-managed root HTTP(S) GitLab endpoint."
+          },
+          "secret_value": {
+            "title": "Personal access token",
+            "description": "A write-only token with read access to the approved projects."
+          },
+          "projects": {
+            "title": "Allowed projects",
+            "description": "Explicit namespace/project values this connection may access."
+          }
+        },
+        "datasourceFields": {
+          "project": {
+            "title": "Project"
+          },
+          "branch": {
+            "title": "Branch"
+          },
+          "directory": {
+            "title": "Directory",
+            "description": "Optional project-relative directory to sync."
+          }
+        }
+      },
+      "jira": {
+        "displayName": "Jira",
+        "description": "Connect approved Jira Cloud or self-hosted projects as read-only assistant tools.",
+        "connectionFields": {
+          "endpoint": {
+            "title": "Jira endpoint",
+            "description": "Root HTTP(S) endpoint for Jira Cloud or a self-hosted Jira instance."
+          },
+          "email": {
+            "title": "Account",
+            "description": "Non-secret account identifier paired with the Jira API Token."
+          },
+          "secret_value": {
+            "title": "API Token",
+            "description": "A write-only Jira API Token with read access."
+          },
+          "projects": {
+            "title": "Allowed projects",
+            "description": "Explicit Jira project keys this connection may access."
+          }
+        },
+        "datasourceFields": {}
+      }
+    },
     "connections": {
       "name": "Connection name",
       "pluginLabel": "Plugin",

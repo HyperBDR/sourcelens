@@ -56,7 +56,7 @@
             <BaseSelect v-model="connectionPluginFilter" class="sm:w-48">
               <option value="all">{{ t('lensAdmin.connections.allPlugins') }}</option>
               <option v-for="plugin in plugins" :key="plugin.key" :value="plugin.key">
-                {{ plugin.display_name }}
+                {{ pluginDisplayName(plugin.key) }}
               </option>
             </BaseSelect>
             <BaseSelect v-model="connectionStatusFilter" class="sm:w-36">
@@ -283,10 +283,10 @@
               {{ t('lensAdmin.connections.pluginLabel') }}
             </p>
             <h3 class="mt-0.5 truncate text-base font-semibold text-ink-900">
-              {{ manifest.display_name }}
+              {{ localizedManifest.display_name }}
             </h3>
             <p class="mt-1 text-sm leading-5 text-ink-600">
-              {{ manifest.description }}
+              {{ localizedManifest.description }}
             </p>
           </div>
         </div>
@@ -314,11 +314,11 @@
               @click="handlePluginChange(plugin.key)"
             >
               <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface">
-                <img v-if="pluginIconUrl(plugin.key)" :src="pluginIconUrl(plugin.key)" :alt="plugin.display_name" class="h-full w-full object-cover" />
+                <img v-if="pluginIconUrl(plugin.key)" :src="pluginIconUrl(plugin.key)" :alt="pluginDisplayName(plugin.key)" class="h-full w-full object-cover" />
                 <span v-else class="text-xs font-semibold uppercase text-brand-700">{{ plugin.key.slice(0, 2) }}</span>
               </span>
               <span class="min-w-0">
-                <span class="block truncate text-sm font-medium text-ink-900">{{ plugin.display_name }}</span>
+                <span class="block truncate text-sm font-medium text-ink-900">{{ pluginDisplayName(plugin.key) }}</span>
                 <span class="mt-0.5 block truncate text-xs text-ink-500">{{ plugin.version }}</span>
               </span>
             </button>
@@ -358,7 +358,9 @@
           <ManifestSchemaForm
             v-if="manifest?.connection_schema"
             :model-value="form"
-            :schema="manifest.connection_schema"
+            :schema="
+              localizedManifest.connection_schema || manifest.connection_schema
+            "
             :resources="connectionResourceOptions"
             control-class="connection-form-input"
             :password-placeholder="storedSecretPlaceholder"
@@ -368,6 +370,8 @@
             :resource-count-label="t('lensAdmin.connections.resourceCountLabel')"
             :selected-count-label="t('lensAdmin.connections.selectedCountLabel')"
             :private-resource-label="t('lensAdmin.connections.privateResource')"
+            :select-option-label="t('lensAdmin.pluginForm.selectOption')"
+            :loading-options-label="t('lensAdmin.pluginForm.loadingOptions')"
             @update:model-value="updateConnectionForm"
           >
             <template #field-actions="{ field }">
@@ -444,9 +448,13 @@ import {
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
+import {
+  localizePluginManifest,
+  pluginDisplayName as translatedPluginDisplayName
+} from '@/utils/pluginI18n'
 import { EMPTY_VALUE as emptyValue } from './adminHelpers'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { showError, showSuccess } = useToast()
 const connections = ref([])
 const plugins = ref([])
@@ -515,6 +523,9 @@ const filteredDetailScopeGroups = computed(() => {
 
 const manifest = computed(
   () => pluginManifests.value[form.value.plugin_key] || null
+)
+const localizedManifest = computed(() =>
+  localizePluginManifest(manifest.value, t, te)
 )
 const connectionResourceField = computed(() =>
   Object.entries(manifest.value?.connection_schema?.properties || {}).find(
@@ -605,8 +616,11 @@ function pluginIconUrl(pluginKey) {
 }
 
 function pluginDisplayName(pluginKey) {
+  const plugin =
+    pluginManifests.value[pluginKey] ||
+    plugins.value.find((item) => item.key === pluginKey)
   return (
-    pluginManifests.value[pluginKey]?.display_name ||
+    translatedPluginDisplayName(plugin, t, te) ||
     pluginKey ||
     t('lensAdmin.connections.unknownPlugin')
   )

@@ -1247,6 +1247,133 @@
       "removeFilter": "删除筛选条件",
       "filterCount": "已添加 {count} 个筛选条件"
     },
+    "pluginForm": {
+      "selectOption": "请选择",
+      "loadingOptions": "正在加载选项…",
+      "noResourcesLoaded": "尚未加载资源。",
+      "searchResources": "搜索资源",
+      "noMatchingResources": "没有匹配的资源。",
+      "resources": "个资源",
+      "selected": "已选择",
+      "private": "私有"
+    },
+    "plugins": {
+      "feishu": {
+        "displayName": "飞书",
+        "description": "连接飞书自建应用，将有权访问的云盘文件夹、文档、表格、幻灯片、多维表格和知识库页面同步到 LensNode 工作区。",
+        "connectionFields": {
+          "app_id": {
+            "title": "App ID",
+            "description": "已发布且拥有所需文档权限的飞书自建应用 App ID。"
+          },
+          "app_secret": {
+            "title": "App Secret",
+            "description": "同一飞书自建应用的 App Secret，保存后会加密存储。"
+          }
+        },
+        "datasourceFields": {
+          "resource_urls": {
+            "title": "飞书资源地址",
+            "description": "每项填写一个 HTTPS 文件夹、文档、表格、幻灯片、多维表格或知识库地址。"
+          },
+          "recursive": {
+            "title": "包含子文件夹",
+            "description": "递归同步嵌套文件夹中的资源。"
+          },
+          "max_depth": {
+            "title": "最大文件夹深度",
+            "description": "限制同步的嵌套文件夹层级。"
+          },
+          "incremental": {
+            "title": "跳过未变更文件",
+            "description": "飞书资源未发生变化时复用本地文件。"
+          },
+          "delete_missing": {
+            "title": "删除已缺失的本地文件",
+            "description": "飞书资源不再存在时删除对应的本地文件。建议保持关闭，以降低误删风险。"
+          }
+        }
+      },
+      "github": {
+        "displayName": "GitHub",
+        "description": "连接已授权的 GitHub 仓库，作为数据源和助手的只读工具。",
+        "connectionFields": {
+          "secret_value": {
+            "title": "个人访问令牌",
+            "description": "仅用于写入、且对已授权仓库具有读取权限的令牌。"
+          },
+          "repositories": {
+            "title": "允许访问的仓库",
+            "description": "明确指定此连接可以访问的 owner/repository。"
+          }
+        },
+        "datasourceFields": {
+          "repository": {
+            "title": "仓库"
+          },
+          "branch": {
+            "title": "分支"
+          },
+          "directory": {
+            "title": "目录",
+            "description": "可选。填写需要同步的仓库相对目录。"
+          }
+        }
+      },
+      "gitlab": {
+        "displayName": "GitLab",
+        "description": "连接已授权的 GitLab 项目，作为数据源和助手的只读工具。",
+        "connectionFields": {
+          "endpoint": {
+            "title": "GitLab 服务地址",
+            "description": "GitLab 公有云或私有部署实例的根 HTTP(S) 地址。"
+          },
+          "secret_value": {
+            "title": "个人访问令牌",
+            "description": "仅用于写入、且对已授权项目具有读取权限的令牌。"
+          },
+          "projects": {
+            "title": "允许访问的项目",
+            "description": "明确指定此连接可以访问的 namespace/project。"
+          }
+        },
+        "datasourceFields": {
+          "project": {
+            "title": "项目"
+          },
+          "branch": {
+            "title": "分支"
+          },
+          "directory": {
+            "title": "目录",
+            "description": "可选。填写需要同步的项目相对目录。"
+          }
+        }
+      },
+      "jira": {
+        "displayName": "Jira",
+        "description": "连接已授权的 Jira Cloud 或私有部署项目，作为助手的只读工具。",
+        "connectionFields": {
+          "endpoint": {
+            "title": "Jira 服务地址",
+            "description": "Jira Cloud 或私有部署实例的根 HTTP(S) 地址。"
+          },
+          "email": {
+            "title": "账号",
+            "description": "与 Jira API Token 配对使用的非密钥账号标识。"
+          },
+          "secret_value": {
+            "title": "API Token",
+            "description": "仅用于写入、且具有读取权限的 Jira API Token。"
+          },
+          "projects": {
+            "title": "允许访问的项目",
+            "description": "明确指定此连接可以访问的 Jira 项目 Key。"
+          }
+        },
+        "datasourceFields": {}
+      }
+    },
     "connections": {
       "name": "连接名称",
       "pluginLabel": "插件",

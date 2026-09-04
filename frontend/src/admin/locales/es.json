@@ -1247,6 +1247,133 @@
       "removeFilter": "Quitar filtro",
       "filterCount": "{count} filtros añadidos"
     },
+    "pluginForm": {
+      "selectOption": "Selecciona una opción",
+      "loadingOptions": "Cargando opciones…",
+      "noResourcesLoaded": "No hay recursos cargados.",
+      "searchResources": "Buscar recursos",
+      "noMatchingResources": "No hay recursos coincidentes.",
+      "resources": "recursos",
+      "selected": "seleccionados",
+      "private": "Privado"
+    },
+    "plugins": {
+      "feishu": {
+        "displayName": "Feishu",
+        "description": "Conecta una app personalizada de Feishu y sincroniza carpetas, documentos, hojas, presentaciones, bases Bitable y páginas wiki accesibles con espacios de trabajo de LensNode.",
+        "connectionFields": {
+          "app_id": {
+            "title": "App ID",
+            "description": "App ID de una app personalizada de Feishu publicada con los permisos de documentos necesarios."
+          },
+          "app_secret": {
+            "title": "App Secret",
+            "description": "App Secret de la misma app personalizada de Feishu. Se cifra después de guardarlo."
+          }
+        },
+        "datasourceFields": {
+          "resource_urls": {
+            "title": "URL de recursos de Feishu",
+            "description": "Introduce una URL HTTPS de carpeta, documento, hoja, presentación, Bitable o wiki en cada campo."
+          },
+          "recursive": {
+            "title": "Incluir subcarpetas",
+            "description": "Sincroniza recursivamente los recursos de las carpetas anidadas."
+          },
+          "max_depth": {
+            "title": "Profundidad máxima de carpetas",
+            "description": "Limita cuántos niveles de carpetas anidadas se sincronizan."
+          },
+          "incremental": {
+            "title": "Omitir archivos sin cambios",
+            "description": "Reutiliza los archivos locales cuando el recurso de Feishu correspondiente no ha cambiado."
+          },
+          "delete_missing": {
+            "title": "Eliminar archivos locales ausentes",
+            "description": "Elimina los archivos locales cuando sus recursos de Feishu ya no existan. Mantén esta opción desactivada para reducir el riesgo de eliminación accidental."
+          }
+        }
+      },
+      "github": {
+        "displayName": "GitHub",
+        "description": "Conecta repositorios de GitHub autorizados como fuentes de datos y herramientas de solo lectura para asistentes.",
+        "connectionFields": {
+          "secret_value": {
+            "title": "Token de acceso personal",
+            "description": "Token de solo escritura con acceso de lectura a los repositorios autorizados."
+          },
+          "repositories": {
+            "title": "Repositorios permitidos",
+            "description": "Valores owner/repository explícitos a los que puede acceder esta conexión."
+          }
+        },
+        "datasourceFields": {
+          "repository": {
+            "title": "Repositorio"
+          },
+          "branch": {
+            "title": "Rama"
+          },
+          "directory": {
+            "title": "Directorio",
+            "description": "Directorio opcional relativo al repositorio que se sincronizará."
+          }
+        }
+      },
+      "gitlab": {
+        "displayName": "GitLab",
+        "description": "Conecta proyectos de GitLab autorizados como fuentes de datos y herramientas de solo lectura para asistentes.",
+        "connectionFields": {
+          "endpoint": {
+            "title": "Endpoint de GitLab",
+            "description": "Endpoint HTTP(S) raíz de GitLab público o autogestionado."
+          },
+          "secret_value": {
+            "title": "Token de acceso personal",
+            "description": "Token de solo escritura con acceso de lectura a los proyectos autorizados."
+          },
+          "projects": {
+            "title": "Proyectos permitidos",
+            "description": "Valores namespace/project explícitos a los que puede acceder esta conexión."
+          }
+        },
+        "datasourceFields": {
+          "project": {
+            "title": "Proyecto"
+          },
+          "branch": {
+            "title": "Rama"
+          },
+          "directory": {
+            "title": "Directorio",
+            "description": "Directorio opcional relativo al proyecto que se sincronizará."
+          }
+        }
+      },
+      "jira": {
+        "displayName": "Jira",
+        "description": "Conecta proyectos autorizados de Jira Cloud o autohospedados como herramientas de solo lectura para asistentes.",
+        "connectionFields": {
+          "endpoint": {
+            "title": "Endpoint de Jira",
+            "description": "Endpoint HTTP(S) raíz de Jira Cloud o de una instancia autohospedada."
+          },
+          "email": {
+            "title": "Cuenta",
+            "description": "Identificador de cuenta no secreto asociado al API Token de Jira."
+          },
+          "secret_value": {
+            "title": "API Token",
+            "description": "API Token de Jira de solo escritura con acceso de lectura."
+          },
+          "projects": {
+            "title": "Proyectos permitidos",
+            "description": "Claves explícitas de proyectos de Jira a las que puede acceder esta conexión."
+          }
+        },
+        "datasourceFields": {}
+      }
+    },
     "connections": {
       "name": "Nombre de conexión",
       "pluginLabel": "Plugin",

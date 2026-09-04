@@ -7,7 +7,7 @@
   >
     <div
       class="mb-6 rounded-xl border border-line bg-surface-sunken px-4 py-3"
-      aria-label="Datasource creation progress"
+      :aria-label="t('lensAdmin.datasourceWizard.progressLabel')"
     >
       <div class="mb-3 flex items-center justify-between gap-3">
         <div>
@@ -183,6 +183,16 @@
           :schema="datasourceSchema"
           :add-array-item-label="t('common.add')"
           :remove-array-item-label="t('common.delete')"
+          :empty-resource-text="t('lensAdmin.pluginForm.noResourcesLoaded')"
+          :tree-search-placeholder="t('lensAdmin.pluginForm.searchResources')"
+          :resource-search-empty-text="
+            t('lensAdmin.pluginForm.noMatchingResources')
+          "
+          :resource-count-label="t('lensAdmin.pluginForm.resources')"
+          :selected-count-label="t('lensAdmin.pluginForm.selected')"
+          :private-resource-label="t('lensAdmin.pluginForm.private')"
+          :select-option-label="t('lensAdmin.pluginForm.selectOption')"
+          :loading-options-label="t('lensAdmin.pluginForm.loadingOptions')"
           @resource-options-request="$emit('request-resource-options', $event)"
           @update:model-value="updatePluginConfig"
         />
@@ -1339,6 +1349,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import ManifestSchemaForm from '@/components/lens/ManifestSchemaForm.vue'
+import { localizePluginManifest } from '@/utils/pluginI18n'
 
 import { formatLLMConfigLabel } from './adminHelpers'
 
@@ -1384,7 +1395,7 @@ const emit = defineEmits([
   'update:syncTimezone'
 ])
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const wizardStep = ref(1)
 const creatingDirectoryParent = ref(null)
 const expandedDirectories = ref(new Set())
@@ -1538,11 +1549,14 @@ const drawerSubtitle = computed(() =>
 
 const sourceTypes = computed(() => {
   const types = [
-    ...props.plugins.map((plugin) => ({
-      value: `plugin:${plugin.key}`,
-      label: plugin.display_name,
-      description: plugin.description || ''
-    })),
+    ...props.plugins.map((plugin) => {
+      const localized = localizePluginManifest(plugin, t, te)
+      return {
+        value: `plugin:${plugin.key}`,
+        label: localized.display_name,
+        description: localized.description || ''
+      }
+    }),
     {
       value: 'gitlab',
       label: 'GitLab',
@@ -1578,8 +1592,12 @@ const selectedSourceTypeLabel = computed(() => {
   return selected?.label || t('lensAdmin.datasourceWizard.summaryNotSelected')
 })
 
+const localizedPluginManifest = computed(() =>
+  localizePluginManifest(props.pluginManifest, t, te)
+)
+
 const datasourceSchema = computed(
-  () => props.pluginManifest?.datasource_schema || null
+  () => localizedPluginManifest.value?.datasource_schema || null
 )
 
 const pluginResources = computed(

@@ -323,6 +323,7 @@ import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { pluginDisplayName } from '@/utils/pluginI18n'
 
 import DataSourceDetailDrawer from './DataSourceDetailDrawer.vue'
 import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
@@ -346,7 +347,7 @@ import {
 } from './directoryRefresh'
 import { useShortDateTime } from './useShortDateTime'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { showSuccess, showError } = useToast()
 const route = useRoute()
 
@@ -669,7 +670,9 @@ function formatSourceType(sourceType) {
     const plugin = plugins.value.find(
       (item) => item.key === pluginKeyFromSourceType(sourceType)
     )
-    return plugin?.display_name || pluginKeyFromSourceType(sourceType)
+    return (
+      pluginDisplayName(plugin, t, te) || pluginKeyFromSourceType(sourceType)
+    )
   }
   if (isGitSourceType(sourceType)) {
     if (sourceType === 'github') return 'GitHub'

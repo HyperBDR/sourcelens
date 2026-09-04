@@ -243,7 +243,7 @@
         v-if="isResourceOptionLoading(field)"
         class="text-xs leading-5 text-ink-500"
       >
-        Loading options…
+        {{ loadingOptionsLabel }}
       </p>
       <p
         v-if="
@@ -277,6 +277,8 @@ const props = defineProps({
   privateResourceLabel: { type: String, default: 'Private' },
   addArrayItemLabel: { type: String, default: 'Add' },
   removeArrayItemLabel: { type: String, default: 'Remove' },
+  selectOptionLabel: { type: String, default: 'Select an option' },
+  loadingOptionsLabel: { type: String, default: 'Loading options…' },
   controlClass: { type: String, default: 'form-input' }
 })
 
@@ -533,7 +535,7 @@ function optionLabel(option) {
 }
 
 function placeholder(field) {
-  return field.placeholder || 'Select an option'
+  return field.placeholder || props.selectOptionLabel
 }
 
 function inputType(field) {
