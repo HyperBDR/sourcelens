@@ -967,6 +967,10 @@
         "label": "凭证",
         "action": "新建凭证"
       },
+      "pluginReleases": {
+        "title": "Plugin 版本",
+        "description": "发布已安装的 Plugin 版本，并独立指定候选版本与生产版本。"
+      },
       "environmentVariables": {
         "title": "环境变量",
         "description": "管理可被 Skill 复用的加密运行时配置集。",
@@ -996,6 +1000,38 @@
         "description": "配置节点默认超时、Run 保留天数、健康检查阈值，以及默认定时任务启用状态。",
         "label": "配置项",
         "action": "新建配置"
+      }
+    },
+    "pluginReleases": {
+      "reconcile": "扫描已安装版本",
+      "empty": "未发现已安装的 Plugin 版本",
+      "installation": "安装状态",
+      "installed": "已安装",
+      "missing": "文件缺失",
+      "integrity": "完整性",
+      "publishedAt": "发布时间",
+      "publish": "发布",
+      "setCandidate": "设为候选版本",
+      "setActive": "设为生产版本",
+      "clearRole": "移除部署角色",
+      "retire": "退役",
+      "loadFailed": "加载 Plugin 版本失败",
+      "reconcileSuccess": "已扫描并登记安装目录中的 Plugin 版本",
+      "reconcileFailed": "扫描 Plugin 版本失败",
+      "actionSuccess": "Plugin 版本状态已更新",
+      "actionFailed": "更新 Plugin 版本状态失败",
+      "retireConfirm": "确认退役这个 Plugin 版本？退役后不能再分配部署角色。",
+      "integrityValid": "校验通过",
+      "integrityInvalid": "内容已变化",
+      "integrityMutable": "调试版本可变",
+      "status": {
+        "debugging": "调试中",
+        "published": "已发布",
+        "retired": "已退役"
+      },
+      "role": {
+        "active": "生产版本",
+        "candidate": "候选版本"
       }
     },
     "mcp": {
@@ -1296,7 +1332,7 @@
       },
       "github": {
         "displayName": "GitHub",
-        "description": "连接已授权的 GitHub 仓库，作为数据源和助手的只读工具。",
+        "description": "连接 GitHub.com 仓库，用于文件同步和助手只读查询。",
         "connectionFields": {
           "secret_value": {
             "title": "个人访问令牌",
@@ -1322,7 +1358,7 @@
       },
       "gitlab": {
         "displayName": "GitLab",
-        "description": "连接已授权的 GitLab 项目，作为数据源和助手的只读工具。",
+        "description": "使用个人访问令牌连接已授权的 GitLab.com 或私有部署项目；数据源同步仓库文件，助手可只读查看代码、提交、Merge Request 和 Issue。",
         "connectionFields": {
           "endpoint": {
             "title": "GitLab 服务地址",
@@ -1330,7 +1366,7 @@
           },
           "secret_value": {
             "title": "个人访问令牌",
-            "description": "仅用于写入、且对已授权项目具有读取权限的令牌。"
+            "description": "仅用于写入、且对已授权项目具有 read_api 和 read_repository 权限的令牌。"
           },
           "projects": {
             "title": "允许访问的项目",
@@ -1352,7 +1388,7 @@
       },
       "jira": {
         "displayName": "Jira",
-        "description": "连接已授权的 Jira Cloud 或私有部署项目，作为助手的只读工具。",
+        "description": "使用账号和 API Token 连接已授权的 Jira Cloud 或私有部署项目，通过助手只读搜索 Issue、读取详情并汇总活动。",
         "connectionFields": {
           "endpoint": {
             "title": "Jira 服务地址",
@@ -1396,6 +1432,52 @@
       "feishuGuideDataPermissionLink": "应用数据权限说明",
       "feishuGuideApiPermissionLink": "API 权限列表",
       "feishuGuideLinksLabel": "飞书配置文档",
+      "githubGuideTitle": "GitHub 连接配置指引",
+      "githubGuideSummary": "创建最小权限的 Token，并只授权需要使用的仓库。",
+      "githubGuideCreateTitle": "创建细粒度个人访问令牌",
+      "githubGuideCreateHint": "GitHub 目前建议优先使用细粒度个人访问令牌。SourceLens 当前仅支持 GitHub.com Personal Access Token，不支持 OAuth 或 GitHub Enterprise。",
+      "githubGuideRepositoryTitle": "限制仓库访问范围",
+      "githubGuideRepositoryHint": "在 Repository access 中选择 Only select repositories，并只勾选需要同步或供助手查询的仓库。",
+      "githubGuidePermissionTitle": "授予只读仓库权限",
+      "githubGuidePermissionHint": "Contents 只读是同步文件和读取代码所必需的；其他权限仅在需要对应助手工具时开启。Metadata 读取权限由 GitHub 自动授予。",
+      "githubGuideContentsPermission": "只读 · 数据源与代码读取必需",
+      "githubGuideIssuesPermission": "只读 · 使用 Issue 工具时需要",
+      "githubGuidePullsPermission": "只读 · 使用 PR 工具时需要",
+      "githubGuideActionsPermission": "只读 · 查看工作流运行时需要",
+      "githubGuideConnectTitle": "验证并保存允许范围",
+      "githubGuideConnectHint": "填写 Token 后获取可访问仓库，只选择要授权的仓库。数据源只同步仓库文件；Issue、PR、Release 和 Actions 不进入知识库，仍通过只读助手工具按需查询。",
+      "githubGuideCreateLink": "创建细粒度 Token",
+      "githubGuideTokenDocsLink": "GitHub Token 配置文档",
+      "githubGuidePermissionDocsLink": "细粒度 Token 权限说明",
+      "githubGuideLinksLabel": "GitHub 配置文档",
+      "gitlabGuideTitle": "GitLab 连接配置指引",
+      "gitlabGuideSummary": "创建最小权限的 Token，并只授权需要使用的项目。",
+      "gitlabGuideEndpointTitle": "确认 GitLab 服务地址",
+      "gitlabGuideEndpointHint": "GitLab.com 填写 https://gitlab.com；私有部署填写实例根 HTTP(S) 地址，不附加 /api/v4。建议使用 HTTPS，并确认 SourceLens 可以访问该地址。",
+      "gitlabGuideTokenTitle": "创建个人访问令牌",
+      "gitlabGuideTokenHint": "在 GitLab 的 Access → Personal access tokens 中创建 Token、设置有效期并立即保存。SourceLens 当前仅支持个人访问令牌，不支持 OAuth。",
+      "gitlabGuideApiScope": "项目发现与只读 API/Tool 必需",
+      "gitlabGuideRepositoryScope": "数据源同步仓库文件必需",
+      "gitlabGuideProjectTitle": "获取并限制允许项目",
+      "gitlabGuideProjectHint": "填写服务地址和 Token 后获取该账号加入的项目，并只选择需要同步或供助手查询的 namespace/project。账号本身必须拥有项目读取权限；SourceLens 的允许项目范围不会授予 GitLab 权限。",
+      "gitlabGuideBoundaryTitle": "确认数据源与只读 Tool 边界",
+      "gitlabGuideBoundaryHint": "数据源只同步所选项目、分支和目录中的仓库文件；提交、Merge Request 和 Issue 不进入知识库，仍由助手通过只读 Tool 查询。SourceLens 不创建、修改或删除 GitLab 资源。",
+      "gitlabGuideTokenDocsLink": "GitLab 个人访问令牌文档",
+      "gitlabGuideScopeDocsLink": "GitLab Token Scope 说明",
+      "gitlabGuideAuthDocsLink": "GitLab REST API 认证文档",
+      "gitlabGuideLinksLabel": "GitLab 配置文档",
+      "jiraGuideTitle": "Jira 连接配置指引",
+      "jiraGuideSummary": "配置账号与 Token，并只开放需要查询的项目。",
+      "jiraGuideEndpointTitle": "确认部署类型和服务地址",
+      "jiraGuideEndpointHint": "Jira Cloud 填写 https://your-domain.atlassian.net；私有部署填写实例根 HTTP(S) 地址，不附加 REST API 路径。",
+      "jiraGuideCredentialTitle": "准备账号和 API Token",
+      "jiraGuideCredentialHint": "Jira Cloud 使用 Atlassian 账号邮箱和在账号安全页创建的 API Token；私有部署使用实例接受的账号与 Token。SourceLens 通过 Basic Auth 验证，密钥只写入并加密保存。",
+      "jiraGuideProjectHint": "填写凭证后获取可访问项目，并只选择允许助手查询的 Project Key。账号本身必须在 Jira 中拥有 Browse projects 和 Issue 查看权限；SourceLens 的允许项目范围不会授予 Jira 权限。",
+      "jiraGuideBoundaryTitle": "确认只读 Tool 边界",
+      "jiraGuideBoundaryHint": "Jira 目前仅作为助手的只读 Tool，可读取 Issue、按项目搜索并汇总活动；不作为数据源，也不创建、修改或删除 Issue、Project 或 Board。",
+      "jiraGuideCreateTokenLink": "创建 Jira Cloud API Token",
+      "jiraGuideAuthDocsLink": "Jira Cloud Basic Auth 文档",
+      "jiraGuideLinksLabel": "Jira 配置文档",
       "lifecycleSection": "生命周期",
       "lifecycleSectionHint": "停用连接后，绑定的数据源和助手将无法继续访问外部服务。",
       "total": "连接总数",

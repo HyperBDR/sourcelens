@@ -802,9 +802,6 @@
           <div
             class="space-y-3 rounded-md border border-line bg-surface-sunken p-3"
           >
-            <p class="text-xs leading-5 text-ink-500">
-              {{ t('lensAdmin.wizard.pluginSectionHint') }}
-            </p>
             <p
               v-if="missingSkillPluginRequirements.length"
               class="text-xs leading-5 text-warning-700"
@@ -820,48 +817,40 @@
               :key="connection.uuid"
               class="rounded-md border border-line bg-surface p-3"
             >
-              <label class="flex cursor-pointer items-start gap-3">
+              <label class="flex cursor-pointer items-center gap-3">
                 <input
                   type="checkbox"
-                  class="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+                  class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
                   :checked="Boolean(pluginBinding(connection.uuid))"
                   @change="
                     togglePluginConnection(connection, $event.target.checked)
                   "
                 />
-                <span class="min-w-0">
-                  <span class="block text-sm font-medium text-ink-900">
-                    {{ connection.name }} ·
-                    {{ pluginDisplayName(connection.plugin_key) }}
-                  </span>
+                <span
+                  class="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken"
+                >
+                  <img
+                    v-if="pluginIconUrl(connection.plugin_key)"
+                    :src="pluginIconUrl(connection.plugin_key)"
+                    :alt="pluginDisplayName(connection.plugin_key)"
+                    class="h-full w-full object-cover"
+                  />
                   <span
-                    class="mt-1 block break-all font-mono text-xs text-ink-500"
+                    v-else
+                    class="text-xs font-semibold uppercase text-brand-700"
                   >
-                    {{ connectionScope(connection) }}
+                    {{ connection.plugin_key.slice(0, 2) }}
+                  </span>
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-medium text-ink-900">
+                    {{ connection.name }}
+                  </span>
+                  <span class="mt-0.5 block truncate text-xs text-ink-500">
+                    {{ pluginDisplayName(connection.plugin_key) }}
                   </span>
                 </span>
               </label>
-              <div
-                v-if="pluginBinding(connection.uuid)"
-                class="mt-3 ml-7 flex items-center gap-2 text-xs text-success-700"
-                role="status"
-              >
-                <svg
-                  class="h-4 w-4 flex-shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                {{ t('lensAdmin.wizard.pluginAllTools') }}
-              </div>
             </div>
             <p
               v-if="!activePluginConnections.length"
@@ -1216,6 +1205,7 @@ const props = defineProps({
   mcps: { type: Array, default: () => [] },
   pluginConnections: { type: Array, default: () => [] },
   pluginManifests: { type: Object, default: () => ({}) },
+  pluginIconUrls: { type: Object, default: () => ({}) },
   llmConfigOptions: { type: Array, default: () => [] },
   saving: Boolean,
   formError: { type: String, default: '' },
@@ -1559,8 +1549,8 @@ function pluginDisplayName(pluginKey) {
   )
 }
 
-function connectionScope(connection) {
-  return JSON.stringify(connection.allowed_scope || {})
+function pluginIconUrl(pluginKey) {
+  return props.pluginIconUrls?.[pluginKey] || ''
 }
 
 function selectedPluginCapabilities(pluginKey) {

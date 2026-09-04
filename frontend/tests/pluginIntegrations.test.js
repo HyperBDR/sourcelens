@@ -34,10 +34,7 @@ test('Tool-only Plugins stay out of datasource creation', async () => {
   const page = await source('pages/lens/DataSources.vue')
 
   assert.match(page, /const datasourcePlugins = computed/)
-  assert.match(
-    page,
-    /plugin\.datasource && plugin\.datasource_source_type/
-  )
+  assert.match(page, /plugin\.datasource && plugin\.datasource_source_type/)
   assert.match(page, /:plugins="datasourcePlugins"/)
 })
 
@@ -75,17 +72,17 @@ test('Feishu Connection keeps setup guidance beside editable fields', async () =
     source('components/ui/BaseDrawer.vue'),
     source('admin/locales/zh-CN.json'),
     readFile(
-      new URL('../../plugins/feishu/plugin.json', import.meta.url),
+      new URL('../../plugins/feishu/1.0.0/plugin.json', import.meta.url),
       'utf8'
     )
   ])
   const manifest = JSON.parse(manifestText)
 
   assert.match(page, /v-if="form\.plugin_key === 'feishu'"/)
-  assert.match(page, /width="5xl"/)
+  assert.match(page, /width="6xl"/)
   assert.match(
     page,
-    /class="connection-form-layout grid gap-5 md:grid-cols-\[minmax\(0,1fr\)_18rem\]/
+    /class="connection-form-layout grid gap-5 md:grid-cols-\[minmax\(0,1fr\)_20rem\]/
   )
   assert.doesNotMatch(page, /form\.plugin_key === 'feishu'\s*\? 'grid gap-5/)
   assert.match(page, /<FeishuConnectionGuide/)
@@ -99,7 +96,7 @@ test('Feishu Connection keeps setup guidance beside editable fields', async () =
   assert.match(guide, /configure-app-data-permissions/)
   assert.match(guide, /application-scope/)
   assert.match(guide, /scope-list/)
-  assert.match(drawer, /'5xl': 'max-w-5xl'/)
+  assert.match(drawer, /'6xl': 'max-w-6xl'/)
   assert.match(chinese, /仅配置 API 权限并不会自动开放全部文档/)
   assert.match(chinese, /保存数据源时会验证每个地址是否可访问/)
   assert.match(manifest.description, /Feishu custom app/)
@@ -107,6 +104,138 @@ test('Feishu Connection keeps setup guidance beside editable fields', async () =
     manifest.datasource_schema.properties.resource_urls.description,
     /One HTTPS folder/
   )
+})
+
+test('GitHub Connection explains PAT permissions and datasource boundaries', async () => {
+  const [page, guide, chinese, manifestText] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/GitHubConnectionGuide.vue'),
+    source('admin/locales/zh-CN.json'),
+    readFile(
+      new URL('../../plugins/github/1.0.0/plugin.json', import.meta.url),
+      'utf8'
+    )
+  ])
+  const manifest = JSON.parse(manifestText)
+
+  assert.match(page, /form\.plugin_key === 'github'/)
+  assert.match(page, /<GitHubConnectionGuide/)
+  assert.match(guide, /github\.com\/settings\/personal-access-tokens/)
+  assert.match(guide, /managing-your-personal-access-tokens/)
+  assert.match(guide, /Contents/)
+  assert.match(guide, /Issues/)
+  assert.match(guide, /Pull requests/)
+  assert.match(guide, /Actions/)
+  assert.match(chinese, /GitHub 目前建议优先使用细粒度个人访问令牌/)
+  assert.equal(
+    manifest.description,
+    'Connect GitHub.com repositories for file sync and read-only assistant queries.'
+  )
+  assert.match(manifest.datasource.description, /repository files/)
+  assert.match(
+    manifest.datasource.description,
+    /Issues and pull requests remain available through read-only tools/
+  )
+})
+
+test('Connection Plugin summary stays one line with concise GitHub copy', async () => {
+  const [page, drawer, chineseText, manifestText] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/ui/BaseDrawer.vue'),
+    source('admin/locales/zh-CN.json'),
+    readFile(
+      new URL('../../plugins/github/1.0.0/plugin.json', import.meta.url),
+      'utf8'
+    )
+  ])
+  const chinese = JSON.parse(chineseText)
+  const manifest = JSON.parse(manifestText)
+
+  assert.match(
+    page,
+    /class="mt-1 truncate text-sm leading-5 text-ink-600"[\s\S]*:title="localizedManifest\.description"/
+  )
+  assert.match(page, /:show="drawerOpen"[\s\S]*width="6xl"/)
+  assert.match(
+    page,
+    /md:grid-cols-\[minmax\(0,1fr\)_20rem\][\s\S]*xl:grid-cols-\[minmax\(0,1fr\)_22rem\]/
+  )
+  assert.match(drawer, /'6xl': 'max-w-6xl'/)
+  assert.equal(
+    chinese.lensAdmin.plugins.github.description,
+    '连接 GitHub.com 仓库，用于文件同步和助手只读查询。'
+  )
+  assert.equal(
+    manifest.description,
+    'Connect GitHub.com repositories for file sync and read-only assistant queries.'
+  )
+})
+
+test('GitLab Connection explains PAT scopes and datasource boundaries', async () => {
+  const [page, guide, chinese, manifestText] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/GitLabConnectionGuide.vue'),
+    source('admin/locales/zh-CN.json'),
+    readFile(
+      new URL('../../plugins/gitlab/1.0.0/plugin.json', import.meta.url),
+      'utf8'
+    )
+  ])
+  const manifest = JSON.parse(manifestText)
+
+  assert.match(page, /form\.plugin_key === 'gitlab'/)
+  assert.match(page, /<GitLabConnectionGuide/)
+  assert.match(
+    guide,
+    /docs\.gitlab\.com\/user\/profile\/personal_access_tokens/
+  )
+  assert.match(
+    guide,
+    /docs\.gitlab\.com\/security\/tokens\/access_token_scopes/
+  )
+  assert.match(guide, /read_api/)
+  assert.match(guide, /read_repository/)
+  assert.match(guide, /GitLab\.com/)
+  assert.match(guide, /self-managed GitLab/)
+  assert.match(chinese, /SourceLens 当前仅支持个人访问令牌，不支持 OAuth/)
+  assert.match(chinese, /允许项目范围不会授予 GitLab 权限/)
+  assert.match(manifest.description, /GitLab\.com or self-managed/)
+  assert.match(manifest.description, /commits, merge requests, and issues/)
+  assert.match(manifest.datasource.description, /repository files/)
+  assert.match(
+    manifest.datasource.description,
+    /Issues and merge requests remain available through read-only tools/
+  )
+})
+
+test('Jira Connection explains Cloud and self-hosted read-only setup', async () => {
+  const [page, guide, chinese, manifestText] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/JiraConnectionGuide.vue'),
+    source('admin/locales/zh-CN.json'),
+    readFile(
+      new URL('../../plugins/jira/1.0.0/plugin.json', import.meta.url),
+      'utf8'
+    )
+  ])
+  const manifest = JSON.parse(manifestText)
+
+  assert.match(page, /form\.plugin_key === 'jira'/)
+  assert.match(page, /<JiraConnectionGuide/)
+  assert.match(
+    guide,
+    /id\.atlassian\.com\/manage-profile\/security\/api-tokens/
+  )
+  assert.match(guide, /basic-auth-for-rest-apis/)
+  assert.match(guide, /Jira Cloud/)
+  assert.match(guide, /self-hosted/)
+  assert.match(guide, /Browse projects/)
+  assert.match(chinese, /Jira 目前仅作为助手的只读 Tool/)
+  assert.match(chinese, /允许项目范围不会授予 Jira 权限/)
+  assert.match(manifest.description, /Jira Cloud or self-hosted/)
+  assert.match(manifest.description, /search issues/)
+  assert.match(manifest.description, /read-only assistant tools/)
+  assert.equal(manifest.datasource, undefined)
 })
 
 test('Feishu datasource creation uses the Plugin while legacy rows remain editable', async () => {
@@ -145,13 +274,29 @@ test('Direct Assistants bind installed Plugin tools without provider branches', 
   assert.match(drawer, /togglePluginConnection/)
   assert.match(drawer, /missingSkillPluginRequirements/)
   assert.match(drawer, /hasGeneralChatExecutionTool/)
-  assert.match(drawer, /pluginAllTools/)
+  assert.doesNotMatch(drawer, /pluginAllTools/)
   assert.doesNotMatch(drawer, /togglePluginTool/)
   assert.doesNotMatch(drawer, /pluginTools\(/)
   assert.doesNotMatch(page, /tools:\s*\[\.\.\.\(binding\.tools/)
   assert.doesNotMatch(drawer, /githubConnections/)
   assert.doesNotMatch(drawer, /githubPluginTools/)
   assert.doesNotMatch(drawer, /githubPluginManifest/)
+})
+
+test('Assistant Plugin choices only show icon, name and Plugin type', async () => {
+  const [page, drawer] = await Promise.all([
+    source('pages/lens/Assistants.vue'),
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue')
+  ])
+
+  assert.match(page, /getPluginIcon/)
+  assert.match(page, /:plugin-icon-urls="pluginIconUrls"/)
+  assert.match(drawer, /pluginIconUrl\(connection\.plugin_key\)/)
+  assert.match(drawer, /\{\{ connection\.name \}\}/)
+  assert.match(drawer, /pluginDisplayName\(connection\.plugin_key\)/)
+  assert.doesNotMatch(drawer, /connectionScope\(connection\)/)
+  assert.doesNotMatch(drawer, /lensAdmin\.wizard\.pluginSectionHint/)
+  assert.doesNotMatch(drawer, /lensAdmin\.wizard\.pluginAllTools/)
 })
 
 test('General Chat treats Skills as optional when Plugin tools are enabled', async () => {
@@ -370,7 +515,10 @@ test('MCP Plugin adapters select dynamic Connections and manifest tools', async 
 })
 
 test('connection management uses compact cards with summarized scope', async () => {
-  const page = await source('pages/lens/Connections.vue')
+  const [page, renderer] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/ManifestSchemaForm.vue')
+  ])
 
   assert.match(page, /connections-toolbar/)
   assert.match(page, /connection-card/)
@@ -379,11 +527,29 @@ test('connection management uses compact cards with summarized scope', async () 
   assert.match(page, /toolLabel/)
   assert.match(page, /pluginIconUrl/)
   assert.match(page, /connection-usage-summary/)
+  assert.match(page, /class="connection-card group relative/)
+  assert.match(
+    page,
+    /:aria-label="`\$\{t\('common\.viewDetails'\)\}: \$\{row\.name\}`"[\s\S]*@click="openConnectionDetail\(row\)"/
+  )
+  assert.doesNotMatch(
+    page,
+    /<BaseButton[^>]*@click="openConnectionDetail\(row\)"/
+  )
+  assert.match(
+    page,
+    /variant="danger"[\s\S]*@click\.stop="removeRow\(row\)"/
+  )
+  assert.match(page, /@click\.stop="startEdit\(row\)"/)
   assert.match(page, /connectionDetailOpen/)
-  assert.match(page, /connection-detail-scope/)
-  assert.match(page, /filteredDetailScopeGroups/)
-  assert.match(page, /toggleDetailScopeGroup/)
-  assert.match(page, /detailScopeSearch/)
+  assert.match(page, /:schema="detailScopeSchema"/)
+  assert.match(page, /:model-value="detailScopeModel"/)
+  assert.match(page, /:resources="detailScopeResourceOptions"/)
+  assert.match(page, /:read-only="true"/)
+  assert.doesNotMatch(page, /connection-detail-scope/)
+  assert.doesNotMatch(page, /toggleDetailScopeGroup/)
+  assert.match(renderer, /readOnly: \{ type: Boolean, default: false \}/)
+  assert.match(renderer, /:disabled="readOnly"/)
   assert.match(page, /detailConnection\.secret_hint/)
 })
 
@@ -419,5 +585,8 @@ test('datasource wizard presents an explicit configuration summary', async () =>
 
   assert.match(drawer, /datasource-wizard-summary/)
   assert.match(drawer, /selectedConnectionScopeSummary/)
-  assert.doesNotMatch(drawer, /JSON\.stringify\(selectedConnection\.allowed_scope\)/)
+  assert.doesNotMatch(
+    drawer,
+    /JSON\.stringify\(selectedConnection\.allowed_scope\)/
+  )
 })

@@ -967,6 +967,10 @@
         "label": "Credential",
         "action": "Create Credential"
       },
+      "pluginReleases": {
+        "title": "Plugin Versions",
+        "description": "Publish installed Plugin versions and assign candidate and production roles independently."
+      },
       "environmentVariables": {
         "title": "Environment",
         "description": "Store encrypted environment variable values and reuse them across Skills and Assistants.",
@@ -996,6 +1000,38 @@
         "description": "Configure node defaults, Run retention, health-check thresholds, and default task enablement.",
         "label": "Setting",
         "action": "Create Setting"
+      }
+    },
+    "pluginReleases": {
+      "reconcile": "Scan installed versions",
+      "empty": "No installed Plugin versions found",
+      "installation": "Installation",
+      "installed": "Installed",
+      "missing": "Files missing",
+      "integrity": "Integrity",
+      "publishedAt": "Published at",
+      "publish": "Publish",
+      "setCandidate": "Set as candidate",
+      "setActive": "Set as production",
+      "clearRole": "Clear deployment role",
+      "retire": "Retire",
+      "loadFailed": "Failed to load Plugin versions",
+      "reconcileSuccess": "Installed Plugin versions scanned and registered",
+      "reconcileFailed": "Failed to scan Plugin versions",
+      "actionSuccess": "Plugin version updated",
+      "actionFailed": "Failed to update Plugin version",
+      "retireConfirm": "Retire this Plugin version? A retired version cannot be assigned a deployment role.",
+      "integrityValid": "Verified",
+      "integrityInvalid": "Content changed",
+      "integrityMutable": "Mutable while debugging",
+      "status": {
+        "debugging": "Debugging",
+        "published": "Published",
+        "retired": "Retired"
+      },
+      "role": {
+        "active": "Production",
+        "candidate": "Candidate"
       }
     },
     "mcp": {
@@ -1296,7 +1332,7 @@
       },
       "github": {
         "displayName": "GitHub",
-        "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
+        "description": "Connect GitHub.com repositories for file sync and read-only assistant queries.",
         "connectionFields": {
           "secret_value": {
             "title": "Personal access token",
@@ -1322,7 +1358,7 @@
       },
       "gitlab": {
         "displayName": "GitLab",
-        "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
+        "description": "Connect approved GitLab.com or self-managed projects with a personal access token to synchronize repository files and inspect code, commits, merge requests, and issues through read-only assistant tools.",
         "connectionFields": {
           "endpoint": {
             "title": "GitLab endpoint",
@@ -1330,7 +1366,7 @@
           },
           "secret_value": {
             "title": "Personal access token",
-            "description": "A write-only token with read access to the approved projects."
+            "description": "A write-only token with read_api and read_repository access to the approved projects."
           },
           "projects": {
             "title": "Allowed projects",
@@ -1352,7 +1388,7 @@
       },
       "jira": {
         "displayName": "Jira",
-        "description": "Connect approved Jira Cloud or self-hosted projects as read-only assistant tools.",
+        "description": "Connect approved Jira Cloud or self-hosted projects with account and API token credentials to search issues, read issue details, and summarize activity through read-only assistant tools.",
         "connectionFields": {
           "endpoint": {
             "title": "Jira endpoint",
@@ -1396,6 +1432,52 @@
       "feishuGuideDataPermissionLink": "App data permissions",
       "feishuGuideApiPermissionLink": "API permission list",
       "feishuGuideLinksLabel": "Feishu setup documentation",
+      "githubGuideTitle": "GitHub connection setup",
+      "githubGuideSummary": "Create a least-privilege token and authorize only the repositories you need.",
+      "githubGuideCreateTitle": "Create a fine-grained personal access token",
+      "githubGuideCreateHint": "GitHub recommends fine-grained personal access tokens. SourceLens currently supports GitHub.com personal access tokens only, not OAuth or GitHub Enterprise.",
+      "githubGuideRepositoryTitle": "Limit repository access",
+      "githubGuideRepositoryHint": "Choose Only select repositories under Repository access, then select only repositories used for synchronization or Assistant queries.",
+      "githubGuidePermissionTitle": "Grant read-only repository permissions",
+      "githubGuidePermissionHint": "Read-only Contents access is required for file synchronization and code reads. Enable the other permissions only for the corresponding Assistant tools. GitHub grants Metadata read access automatically.",
+      "githubGuideContentsPermission": "Read-only · required for data sources and code",
+      "githubGuideIssuesPermission": "Read-only · required for Issue tools",
+      "githubGuidePullsPermission": "Read-only · required for pull request tools",
+      "githubGuideActionsPermission": "Read-only · required for workflow runs",
+      "githubGuideConnectTitle": "Validate and save the allowed scope",
+      "githubGuideConnectHint": "Enter the token, discover accessible repositories, and select only those to authorize. Data sources synchronize repository files only; Issues, pull requests, releases, and Actions stay available through read-only Assistant tools.",
+      "githubGuideCreateLink": "Create a fine-grained token",
+      "githubGuideTokenDocsLink": "GitHub token documentation",
+      "githubGuidePermissionDocsLink": "Fine-grained token permissions",
+      "githubGuideLinksLabel": "GitHub setup documentation",
+      "gitlabGuideTitle": "GitLab connection setup",
+      "gitlabGuideSummary": "Create a least-privilege token and approve only the projects you need.",
+      "gitlabGuideEndpointTitle": "Confirm the GitLab endpoint",
+      "gitlabGuideEndpointHint": "Use https://gitlab.com for GitLab.com. For self-managed GitLab, enter the root HTTP(S) endpoint without /api/v4. Prefer HTTPS and make sure SourceLens can reach the endpoint.",
+      "gitlabGuideTokenTitle": "Create a personal access token",
+      "gitlabGuideTokenHint": "In GitLab, open Access → Personal access tokens, create a token with an expiration date, and save it immediately. SourceLens currently supports personal access tokens, not OAuth.",
+      "gitlabGuideApiScope": "Required for project discovery and read-only APIs/tools",
+      "gitlabGuideRepositoryScope": "Required to synchronize repository files",
+      "gitlabGuideProjectTitle": "Discover and limit approved projects",
+      "gitlabGuideProjectHint": "After entering the endpoint and token, discover projects the account has joined and select only the namespace/project values used for synchronization or assistant queries. The account still needs project read access; the SourceLens allowlist does not grant GitLab permissions.",
+      "gitlabGuideBoundaryTitle": "Confirm datasource and read-only tool boundaries",
+      "gitlabGuideBoundaryHint": "Data sources synchronize only repository files from the selected project, branch, and directory. Commits, merge requests, and issues are not indexed and remain available through read-only assistant tools. SourceLens does not create, modify, or delete GitLab resources.",
+      "gitlabGuideTokenDocsLink": "GitLab personal access token documentation",
+      "gitlabGuideScopeDocsLink": "GitLab token scope reference",
+      "gitlabGuideAuthDocsLink": "GitLab REST API authentication",
+      "gitlabGuideLinksLabel": "GitLab setup documentation",
+      "jiraGuideTitle": "Jira connection setup",
+      "jiraGuideSummary": "Configure an account and token, then allow only the projects you need to query.",
+      "jiraGuideEndpointTitle": "Confirm the deployment and endpoint",
+      "jiraGuideEndpointHint": "For Jira Cloud, enter https://your-domain.atlassian.net. For self-hosted Jira, enter the root HTTP(S) endpoint without a REST API path.",
+      "jiraGuideCredentialTitle": "Prepare the account and API token",
+      "jiraGuideCredentialHint": "For Jira Cloud, use the Atlassian account email and an API token created in account security. For self-hosted Jira, use credentials accepted by the instance. SourceLens validates them with Basic Auth and stores the token as an encrypted write-only secret.",
+      "jiraGuideProjectHint": "Discover accessible projects after entering the credentials, then select only the Project keys the Assistant may query. The account still needs Browse projects and issue-view permissions in Jira; the SourceLens allowlist does not grant Jira permissions.",
+      "jiraGuideBoundaryTitle": "Confirm the read-only Tool boundary",
+      "jiraGuideBoundaryHint": "Jira is currently available only as read-only Assistant tools for issue reads, project-scoped search, and activity summaries. It is not a data source and cannot create, update, or delete issues, projects, or boards.",
+      "jiraGuideCreateTokenLink": "Create a Jira Cloud API token",
+      "jiraGuideAuthDocsLink": "Jira Cloud Basic Auth documentation",
+      "jiraGuideLinksLabel": "Jira setup documentation",
       "lifecycleSection": "Lifecycle",
       "lifecycleSectionHint": "Disabled connections cannot be used by bound data sources or assistants.",
       "total": "Total connections",

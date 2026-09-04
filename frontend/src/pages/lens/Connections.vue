@@ -81,9 +81,15 @@
             <article
               v-for="row in filteredConnections"
               :key="row.uuid"
-              class="connection-card group flex flex-col rounded-xl border border-line bg-surface p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md"
+              class="connection-card group relative flex flex-col rounded-xl border border-line bg-surface p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md"
             >
-              <div class="flex items-start gap-3">
+              <button
+                type="button"
+                class="absolute inset-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
+                :aria-label="`${t('common.viewDetails')}: ${row.name}`"
+                @click="openConnectionDetail(row)"
+              />
+              <div class="pointer-events-none relative z-10 flex items-start gap-3">
                 <div class="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-line bg-surface-sunken">
                   <img v-if="pluginIconUrl(row.plugin_key)" :src="pluginIconUrl(row.plugin_key)" :alt="pluginDisplayName(row.plugin_key)" class="h-full w-full object-cover" />
                   <span v-else class="text-xs font-semibold uppercase text-brand-700">{{ row.plugin_key.slice(0, 2) }}</span>
@@ -111,21 +117,37 @@
                 </div>
               </div>
 
-              <div v-if="!row.has_secret" class="mt-3">
+              <div
+                v-if="!row.has_secret"
+                class="pointer-events-none relative z-10 mt-3"
+              >
                 <p class="inline-flex items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800">
                   <span class="h-2 w-2 rounded-full bg-warning-500" />
                   {{ t('lensAdmin.connections.secretMissing') }}
                 </p>
               </div>
 
-              <div class="connection-usage-summary mt-4 flex items-center justify-between border-t border-line pt-3">
+              <div class="connection-usage-summary pointer-events-none relative z-10 mt-4 flex items-center justify-between border-t border-line pt-3">
                 <p class="text-xs text-ink-500">
                   {{ row.datasource_count || 0 }} {{ t('lensAdmin.connections.datasources') }} ·
                   {{ row.assistant_count || 0 }} {{ t('lensAdmin.connections.assistants') }}
                 </p>
-                <div class="flex gap-2">
-                  <BaseButton size="sm" variant="outline" @click="openConnectionDetail(row)">{{ t('common.viewDetails') }}</BaseButton>
-                  <BaseButton size="sm" variant="outline" @click="startEdit(row)">{{ t('common.edit') }}</BaseButton>
+                <div class="pointer-events-auto flex gap-2">
+                  <BaseButton
+                    size="sm"
+                    variant="danger"
+                    :disabled="row.datasource_count > 0 || row.assistant_count > 0"
+                    @click.stop="removeRow(row)"
+                  >
+                    {{ t('common.delete') }}
+                  </BaseButton>
+                  <BaseButton
+                    size="sm"
+                    variant="outline"
+                    @click.stop="startEdit(row)"
+                  >
+                    {{ t('common.edit') }}
+                  </BaseButton>
                 </div>
               </div>
             </article>
@@ -184,55 +206,18 @@
           </dl>
         </section>
 
-        <section class="connection-detail-scope overflow-hidden rounded-xl border border-line bg-surface">
-          <div class="border-b border-line bg-surface-sunken p-3">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <h3 class="text-sm font-semibold text-ink-900">{{ t('lensAdmin.connections.scope') }}</h3>
-                <p class="mt-0.5 text-xs text-ink-500">
-                  {{ t('lensAdmin.connections.repositoryTotal', { count: detailScopeValues.length }) }}
-                </p>
-              </div>
-            </div>
-            <div v-if="detailScopeValues.length" class="relative mt-3">
-              <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                <circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.5" />
-                <path d="m13 13 4 4" stroke="currentColor" stroke-linecap="round" stroke-width="1.5" />
-              </svg>
-              <input
-                v-model="detailScopeSearch"
-                type="search"
-                class="connection-toolbar-input py-2 pl-9"
-                :placeholder="t('lensAdmin.connections.resourceSearchPlaceholder')"
-              />
-            </div>
-          </div>
-          <div v-if="filteredDetailScopeGroups.length" class="max-h-80 space-y-2 overflow-y-auto p-2">
-            <div v-for="group in filteredDetailScopeGroups" :key="group.owner" class="overflow-hidden rounded-lg border border-line">
-              <button
-                type="button"
-                class="flex w-full items-center gap-2.5 bg-surface-sunken px-3 py-2.5 text-left hover:bg-line-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30"
-                :aria-expanded="!isDetailScopeGroupCollapsed(group)"
-                @click="toggleDetailScopeGroup(group)"
-              >
-                <svg class="h-4 w-4 shrink-0 text-ink-400 transition-transform" :class="{ '-rotate-90': isDetailScopeGroupCollapsed(group) }" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                  <path d="m6 8 4 4 4-4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" />
-                </svg>
-                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-[10px] font-semibold uppercase text-ink-500">{{ group.owner.slice(0, 2) }}</span>
-                <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">{{ group.owner }}</span>
-                <span class="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-500">{{ group.items.length }}</span>
-              </button>
-              <div v-show="!isDetailScopeGroupCollapsed(group)" class="divide-y divide-line border-t border-line px-3">
-                <div v-for="item in group.items" :key="item" class="flex items-center gap-2 py-2.5 pl-6">
-                  <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-                  <span class="min-w-0 truncate font-mono text-xs text-ink-700">{{ detailRepositoryName(item) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <p v-else class="px-4 py-8 text-center text-sm text-ink-500">
-            {{ detailScopeValues.length ? t('lensAdmin.connections.resourceSearchEmpty') : emptyValue }}
-          </p>
+        <section>
+          <ManifestSchemaForm
+            :schema="detailScopeSchema"
+            :model-value="detailScopeModel"
+            :resources="detailScopeResourceOptions"
+            :read-only="true"
+            :empty-resource-text="emptyValue"
+            :tree-search-placeholder="t('lensAdmin.connections.resourceSearchPlaceholder')"
+            :resource-search-empty-text="t('lensAdmin.connections.resourceSearchEmpty')"
+            :resource-count-label="t('lensAdmin.connections.resourceCountLabel')"
+            :selected-count-label="t('lensAdmin.connections.selectedCountLabel')"
+          />
         </section>
         <p v-if="!detailConnection.has_secret" class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">
           {{ t('lensAdmin.connections.secretMissing') }}
@@ -257,7 +242,7 @@
 
     <BaseDrawer
       :show="drawerOpen"
-      width="5xl"
+      width="6xl"
       :title="
         mode === 'create'
           ? t('lensAdmin.connections.createTitle')
@@ -285,14 +270,17 @@
             <h3 class="mt-0.5 truncate text-base font-semibold text-ink-900">
               {{ localizedManifest.display_name }}
             </h3>
-            <p class="mt-1 text-sm leading-5 text-ink-600">
+            <p
+              class="mt-1 truncate text-sm leading-5 text-ink-600"
+              :title="localizedManifest.description"
+            >
               {{ localizedManifest.description }}
             </p>
           </div>
         </div>
 
         <div
-          class="connection-form-layout grid gap-5 md:grid-cols-[minmax(0,1fr)_18rem] md:items-start xl:grid-cols-[minmax(0,1fr)_20rem]"
+          class="connection-form-layout grid gap-5 md:grid-cols-[minmax(0,1fr)_20rem] md:items-start xl:grid-cols-[minmax(0,1fr)_22rem]"
         >
           <div class="space-y-5">
             <section class="rounded-xl border border-line bg-surface p-4">
@@ -399,6 +387,11 @@
           <FeishuConnectionGuide
             v-if="form.plugin_key === 'feishu'"
           />
+          <GitHubConnectionGuide
+            v-if="form.plugin_key === 'github'"
+          />
+          <GitLabConnectionGuide v-if="form.plugin_key === 'gitlab'" />
+          <JiraConnectionGuide v-if="form.plugin_key === 'jira'" />
         </div>
 
         <p v-if="formError" class="text-sm text-danger-700">{{ formError }}</p>
@@ -432,6 +425,9 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import FeishuConnectionGuide from '@/components/lens/FeishuConnectionGuide.vue'
+import GitHubConnectionGuide from '@/components/lens/GitHubConnectionGuide.vue'
+import GitLabConnectionGuide from '@/components/lens/GitLabConnectionGuide.vue'
+import JiraConnectionGuide from '@/components/lens/JiraConnectionGuide.vue'
 import ManifestSchemaForm from '@/components/lens/ManifestSchemaForm.vue'
 import {
   createConnection,
@@ -475,8 +471,6 @@ const connectionStatusFilter = ref('all')
 const pluginIconUrls = ref({})
 const connectionDetailOpen = ref(false)
 const detailConnection = ref(null)
-const detailScopeSearch = ref('')
-const collapsedDetailScopeGroups = ref({})
 const connectionResourceOptions = computed(() => ({
   [connectionResourceField.value?.[1]?.resource || '']: {
     items: connectionResourceCandidates.value
@@ -510,16 +504,21 @@ const filteredConnections = computed(() => {
 const detailScopeValues = computed(() =>
   detailConnection.value ? scopeValues(detailConnection.value) : []
 )
-const detailScopeGroups = computed(() => groupScopeValues(detailScopeValues.value))
-const filteredDetailScopeGroups = computed(() => {
-  const query = detailScopeSearch.value.trim().toLowerCase()
-  if (!query) return detailScopeGroups.value
-  return detailScopeGroups.value.flatMap((group) => {
-    if (group.owner.toLowerCase().includes(query)) return [group]
-    const items = group.items.filter((item) => item.toLowerCase().includes(query))
-    return items.length ? [{ ...group, items }] : []
-  })
-})
+const detailScopeSchema = computed(() => ({
+  type: 'object',
+  properties: {
+    scope: {
+      type: 'array',
+      format: 'provider-resource',
+      resource: 'detail-scope',
+      title: t('lensAdmin.connections.scope')
+    }
+  }
+}))
+const detailScopeModel = computed(() => ({ scope: detailScopeValues.value }))
+const detailScopeResourceOptions = computed(() => ({
+  'detail-scope': { items: detailScopeValues.value }
+}))
 
 const manifest = computed(
   () => pluginManifests.value[form.value.plugin_key] || null
@@ -582,33 +581,6 @@ function scopeValues(row) {
     if (value === undefined || value === null || value === '') return []
     return [`${key}: ${value}`]
   })
-}
-
-function groupScopeValues(values) {
-  const groups = new Map()
-  values.forEach((item) => {
-    const owner = item.includes('/') ? item.split('/')[0] : t('lensAdmin.connections.otherResources')
-    if (!groups.has(owner)) groups.set(owner, [])
-    groups.get(owner).push(item)
-  })
-  return [...groups.entries()].map(([owner, items]) => ({ owner, items }))
-}
-
-function detailRepositoryName(value) {
-  const parts = value.split('/')
-  return parts.length > 1 ? parts.slice(1).join('/') : value
-}
-
-function isDetailScopeGroupCollapsed(group) {
-  if (detailScopeSearch.value.trim()) return false
-  return Boolean(collapsedDetailScopeGroups.value[group.owner])
-}
-
-function toggleDetailScopeGroup(group) {
-  collapsedDetailScopeGroups.value = {
-    ...collapsedDetailScopeGroups.value,
-    [group.owner]: !collapsedDetailScopeGroups.value[group.owner]
-  }
 }
 
 function pluginIconUrl(pluginKey) {
@@ -699,16 +671,12 @@ function revokePluginIconUrls() {
 
 function openConnectionDetail(row) {
   detailConnection.value = row
-  detailScopeSearch.value = ''
-  collapsedDetailScopeGroups.value = {}
   connectionDetailOpen.value = true
 }
 
 function closeConnectionDetail() {
   connectionDetailOpen.value = false
   detailConnection.value = null
-  detailScopeSearch.value = ''
-  collapsedDetailScopeGroups.value = {}
 }
 
 function editDetailConnection() {

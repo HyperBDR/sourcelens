@@ -288,6 +288,7 @@
         :mcps="mcps"
         :plugin-connections="pluginConnections"
         :plugin-manifests="pluginManifests"
+        :plugin-icon-urls="pluginIconUrls"
         :llm-config-options="llmConfigOptions"
         :saving="saving"
         :form-error="formError"
@@ -340,7 +341,7 @@ import {
   Lock as LockIcon,
   Server
 } from '@lucide/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
@@ -352,6 +353,7 @@ import {
   archiveAssistant,
   createAssistant,
   getAssistant,
+  getPluginIcon,
   getPluginManifest,
   listAssistants,
   listConnections,
@@ -411,6 +413,7 @@ const environmentVariableSets = ref([])
 const mcps = ref([])
 const pluginConnections = ref([])
 const pluginManifests = ref({})
+const pluginIconUrls = ref({})
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
 let formResourcesPromise = null
@@ -561,11 +564,11 @@ async function loadFormResources() {
         mcps.value = normalizeList(mcpRows)
         pluginConnections.value = normalizeList(connectionRows)
         llmConfigOptions.value = normalizeList(llmRows)
-        return Promise.all(
-          normalizeList(installedPlugins).map((plugin) =>
-            getPluginManifest(plugin.key)
-          )
-        ).then((manifests) => {
+        const plugins = normalizeList(installedPlugins)
+        return Promise.all([
+          Promise.all(plugins.map((plugin) => getPluginManifest(plugin.key))),
+          loadPluginIcons(plugins)
+        ]).then(([manifests]) => {
           pluginManifests.value = Object.fromEntries(
             manifests.map((manifest) => [manifest.key, manifest])
           )
@@ -576,6 +579,29 @@ async function loadFormResources() {
       formResourcesPromise = null
     })
   await formResourcesPromise
+}
+
+async function loadPluginIcons(plugins) {
+  revokePluginIconUrls()
+  const entries = await Promise.all(
+    plugins.map(async (plugin) => {
+      if (!plugin.icon_url) return [plugin.key, '']
+      try {
+        const blob = await getPluginIcon(plugin.key)
+        return [plugin.key, URL.createObjectURL(blob)]
+      } catch {
+        return [plugin.key, '']
+      }
+    })
+  )
+  pluginIconUrls.value = Object.fromEntries(entries)
+}
+
+function revokePluginIconUrls() {
+  Object.values(pluginIconUrls.value).forEach((url) => {
+    if (url) URL.revokeObjectURL(url)
+  })
+  pluginIconUrls.value = {}
 }
 
 async function switchArchiveView(archived) {
@@ -971,6 +997,7 @@ async function restore(row) {
 }
 
 onMounted(load)
+onBeforeUnmount(revokePluginIconUrls)
 </script>
 
 <style scoped>

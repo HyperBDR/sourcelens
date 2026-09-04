@@ -967,6 +967,10 @@
         "label": "Credencial",
         "action": "Crear Credencial"
       },
+      "pluginReleases": {
+        "title": "Versiones de Plugin",
+        "description": "Publicar versiones instaladas de Plugins y asignar por separado las funciones de candidata y producción."
+      },
       "environmentVariables": {
         "title": "Medio ambiente",
         "description": "Almacenar valores de variables de entorno cifradas y reutilizarlos en Skills y Assistants.",
@@ -996,6 +1000,38 @@
         "description": "Configurar valores predeterminados de nodos, retención de ejecución, umbrales de verificación de salud y habilitación de tareas por defecto.",
         "label": "Configuración",
         "action": "Crear configuración"
+      }
+    },
+    "pluginReleases": {
+      "reconcile": "Buscar versiones instaladas",
+      "empty": "No se encontraron versiones de Plugins instaladas",
+      "installation": "Instalación",
+      "installed": "Instalado",
+      "missing": "Faltan archivos",
+      "integrity": "Integridad",
+      "publishedAt": "Publicado el",
+      "publish": "Publicar",
+      "setCandidate": "Marcar como candidata",
+      "setActive": "Marcar como producción",
+      "clearRole": "Quitar función de despliegue",
+      "retire": "Retirar",
+      "loadFailed": "No se pudieron cargar las versiones de Plugins",
+      "reconcileSuccess": "Las versiones de Plugins instaladas se registraron correctamente",
+      "reconcileFailed": "No se pudieron buscar las versiones de Plugins",
+      "actionSuccess": "Versión del Plugin actualizada",
+      "actionFailed": "No se pudo actualizar la versión del Plugin",
+      "retireConfirm": "¿Retirar esta versión del Plugin? Una versión retirada no puede tener una función de despliegue.",
+      "integrityValid": "Verificada",
+      "integrityInvalid": "Contenido modificado",
+      "integrityMutable": "Modificable durante la depuración",
+      "status": {
+        "debugging": "En depuración",
+        "published": "Publicada",
+        "retired": "Retirada"
+      },
+      "role": {
+        "active": "Producción",
+        "candidate": "Candidata"
       }
     },
     "mcp": {
@@ -1296,7 +1332,7 @@
       },
       "github": {
         "displayName": "GitHub",
-        "description": "Conecta repositorios de GitHub autorizados como fuentes de datos y herramientas de solo lectura para asistentes.",
+        "description": "Conecta repositorios de GitHub.com para sincronizar archivos y realizar consultas de solo lectura.",
         "connectionFields": {
           "secret_value": {
             "title": "Token de acceso personal",
@@ -1322,7 +1358,7 @@
       },
       "gitlab": {
         "displayName": "GitLab",
-        "description": "Conecta proyectos de GitLab autorizados como fuentes de datos y herramientas de solo lectura para asistentes.",
+        "description": "Conecta proyectos autorizados de GitLab.com o autogestionados con un token de acceso personal; las fuentes sincronizan archivos y los asistentes consultan código, commits, merge requests e issues mediante herramientas de solo lectura.",
         "connectionFields": {
           "endpoint": {
             "title": "Endpoint de GitLab",
@@ -1330,7 +1366,7 @@
           },
           "secret_value": {
             "title": "Token de acceso personal",
-            "description": "Token de solo escritura con acceso de lectura a los proyectos autorizados."
+            "description": "Token de solo escritura con acceso read_api y read_repository a los proyectos autorizados."
           },
           "projects": {
             "title": "Proyectos permitidos",
@@ -1352,7 +1388,7 @@
       },
       "jira": {
         "displayName": "Jira",
-        "description": "Conecta proyectos autorizados de Jira Cloud o autohospedados como herramientas de solo lectura para asistentes.",
+        "description": "Conecta proyectos autorizados de Jira Cloud o autohospedados con una cuenta y un API Token para buscar issues, leer detalles y resumir actividad mediante herramientas de solo lectura.",
         "connectionFields": {
           "endpoint": {
             "title": "Endpoint de Jira",
@@ -1396,6 +1432,52 @@
       "feishuGuideDataPermissionLink": "Permisos de datos de la app",
       "feishuGuideApiPermissionLink": "Lista de permisos de API",
       "feishuGuideLinksLabel": "Documentación de configuración de Feishu",
+      "githubGuideTitle": "Configuración de la conexión de GitHub",
+      "githubGuideSummary": "Crea un token con privilegios mínimos y autoriza solo los repositorios necesarios.",
+      "githubGuideCreateTitle": "Crear un token de acceso personal detallado",
+      "githubGuideCreateHint": "GitHub recomienda los tokens de acceso personal detallados. SourceLens solo admite tokens de GitHub.com; no admite OAuth ni GitHub Enterprise.",
+      "githubGuideRepositoryTitle": "Limitar el acceso a repositorios",
+      "githubGuideRepositoryHint": "Elige Only select repositories en Repository access y selecciona solo los repositorios usados para sincronización o consultas del asistente.",
+      "githubGuidePermissionTitle": "Conceder permisos de repositorio de solo lectura",
+      "githubGuidePermissionHint": "Contents de solo lectura es obligatorio para sincronizar archivos y leer código. Habilita los demás permisos solo para las herramientas correspondientes. GitHub concede Metadata de lectura automáticamente.",
+      "githubGuideContentsPermission": "Solo lectura · requerido para fuentes y código",
+      "githubGuideIssuesPermission": "Solo lectura · requerido para herramientas de Issues",
+      "githubGuidePullsPermission": "Solo lectura · requerido para pull requests",
+      "githubGuideActionsPermission": "Solo lectura · requerido para ejecuciones de workflow",
+      "githubGuideConnectTitle": "Validar y guardar el alcance permitido",
+      "githubGuideConnectHint": "Introduce el token, descubre los repositorios accesibles y autoriza solo los necesarios. Las fuentes sincronizan únicamente archivos; Issues, pull requests, releases y Actions se consultan mediante herramientas de solo lectura.",
+      "githubGuideCreateLink": "Crear un token detallado",
+      "githubGuideTokenDocsLink": "Documentación de tokens de GitHub",
+      "githubGuidePermissionDocsLink": "Permisos de tokens detallados",
+      "githubGuideLinksLabel": "Documentación de configuración de GitHub",
+      "gitlabGuideTitle": "Configuración de la conexión de GitLab",
+      "gitlabGuideSummary": "Crea un token con privilegios mínimos y autoriza solo los proyectos necesarios.",
+      "gitlabGuideEndpointTitle": "Confirmar el endpoint de GitLab",
+      "gitlabGuideEndpointHint": "Usa https://gitlab.com para GitLab.com. Para GitLab autogestionado, introduce el endpoint HTTP(S) raíz sin /api/v4. Se recomienda HTTPS y el endpoint debe ser accesible desde SourceLens.",
+      "gitlabGuideTokenTitle": "Crear un token de acceso personal",
+      "gitlabGuideTokenHint": "En GitLab, abre Access → Personal access tokens, crea un token con fecha de caducidad y guárdalo inmediatamente. SourceLens solo admite tokens de acceso personal, no OAuth.",
+      "gitlabGuideApiScope": "Necesario para descubrir proyectos y usar APIs/herramientas de solo lectura",
+      "gitlabGuideRepositoryScope": "Necesario para sincronizar archivos del repositorio",
+      "gitlabGuideProjectTitle": "Descubrir y limitar los proyectos permitidos",
+      "gitlabGuideProjectHint": "Después de introducir el endpoint y el token, descubre los proyectos a los que pertenece la cuenta y selecciona solo los namespace/project usados para sincronización o consultas del asistente. La cuenta necesita acceso de lectura; la lista de SourceLens no concede permisos de GitLab.",
+      "gitlabGuideBoundaryTitle": "Confirmar los límites de la fuente y las herramientas de solo lectura",
+      "gitlabGuideBoundaryHint": "Las fuentes sincronizan únicamente archivos del repositorio del proyecto, rama y directorio seleccionados. Commits, merge requests e issues no se indexan y se consultan mediante herramientas de solo lectura. SourceLens no crea, modifica ni elimina recursos de GitLab.",
+      "gitlabGuideTokenDocsLink": "Documentación de tokens personales de GitLab",
+      "gitlabGuideScopeDocsLink": "Referencia de scopes de GitLab",
+      "gitlabGuideAuthDocsLink": "Autenticación de la API REST de GitLab",
+      "gitlabGuideLinksLabel": "Documentación de configuración de GitLab",
+      "jiraGuideTitle": "Configuración de la conexión de Jira",
+      "jiraGuideSummary": "Configura una cuenta y un token, y permite solo los proyectos necesarios.",
+      "jiraGuideEndpointTitle": "Confirmar el despliegue y el endpoint",
+      "jiraGuideEndpointHint": "Para Jira Cloud, introduce https://your-domain.atlassian.net. Para Jira autohospedado, introduce el endpoint HTTP(S) raíz sin una ruta de API REST.",
+      "jiraGuideCredentialTitle": "Preparar la cuenta y el API Token",
+      "jiraGuideCredentialHint": "Para Jira Cloud, usa el correo de la cuenta de Atlassian y un API Token creado en la página de seguridad. Para Jira autohospedado, usa credenciales aceptadas por la instancia. SourceLens las valida con Basic Auth y guarda el token cifrado y de solo escritura.",
+      "jiraGuideProjectHint": "Descubre los proyectos accesibles después de introducir las credenciales y selecciona solo los Project Key permitidos. La cuenta necesita permisos Browse projects y de lectura de issues en Jira; la lista de SourceLens no concede permisos de Jira.",
+      "jiraGuideBoundaryTitle": "Confirmar el límite de herramientas de solo lectura",
+      "jiraGuideBoundaryHint": "Jira solo está disponible como herramientas de solo lectura para consultar issues, buscar por proyecto y resumir actividad. No es una fuente de datos y no crea, modifica ni elimina issues, proyectos o tableros.",
+      "jiraGuideCreateTokenLink": "Crear un API Token de Jira Cloud",
+      "jiraGuideAuthDocsLink": "Documentación de Basic Auth de Jira Cloud",
+      "jiraGuideLinksLabel": "Documentación de configuración de Jira",
       "lifecycleSection": "Ciclo de vida",
       "lifecycleSectionHint": "Las conexiones desactivadas no pueden ser usadas por fuentes ni asistentes vinculados.",
       "total": "Conexiones totales",

@@ -75,6 +75,7 @@
                 :checked="groupSelected(field, group)"
                 :indeterminate="groupPartial(field, group)"
                 :aria-label="group.owner"
+                :disabled="readOnly"
                 @change="toggleGroup(field, group, $event.target.checked)"
               />
               <button
@@ -121,12 +122,14 @@
               <label
                 v-for="item in group.items"
                 :key="optionValue(item)"
-                class="flex cursor-pointer items-center gap-2.5 rounded px-2 py-2.5 text-sm hover:bg-surface-sunken"
+                class="flex items-center gap-2.5 rounded px-2 py-2.5 text-sm hover:bg-surface-sunken"
+                :class="readOnly ? 'cursor-default' : 'cursor-pointer'"
               >
                 <input
                   type="checkbox"
                   class="resource-checkbox"
                   :checked="arrayValue(field).includes(optionValue(item))"
+                  :disabled="readOnly"
                   @change="
                     toggleArrayItem(
                       field,
@@ -176,6 +179,7 @@
             :type="arrayInputType(field)"
             :aria-label="`${field.title || field.key} ${index + 1}`"
             :placeholder="field.description || ''"
+            :readonly="readOnly"
             @input="updateArrayItem(field, index, $event.target.value)"
           />
           <button
@@ -183,7 +187,7 @@
             class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line text-ink-500 transition hover:border-danger-200 hover:bg-danger-50 hover:text-danger-700 disabled:cursor-not-allowed disabled:opacity-40"
             :aria-label="`${removeArrayItemLabel} ${index + 1}`"
             :title="removeArrayItemLabel"
-            :disabled="arrayRows(field).length === 1"
+            :disabled="readOnly || arrayRows(field).length === 1"
             @click="removeArrayItem(field, index)"
           >
             <XIcon class="h-4 w-4" aria-hidden="true" />
@@ -192,7 +196,7 @@
         <button
           type="button"
           class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-line px-3 py-2 text-sm font-medium text-ink-600 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-          :disabled="!canAddArrayItem(field)"
+          :disabled="readOnly || !canAddArrayItem(field)"
           @click="addArrayItem(field)"
         >
           <PlusIcon class="h-4 w-4" aria-hidden="true" />
@@ -204,7 +208,7 @@
         :id="fieldId(field)"
         :model-value="fieldValue(field)"
         :required="isRequired(field)"
-        :disabled="isResourceOptionDisabled(field)"
+        :disabled="readOnly || isResourceOptionDisabled(field)"
         @update:model-value="setField(field, $event)"
       >
         <option value="">{{ placeholder(field) }}</option>
@@ -222,6 +226,7 @@
         class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
         type="checkbox"
         :checked="Boolean(fieldValue(field))"
+        :disabled="readOnly"
         @change="setField(field, $event.target.checked)"
       />
       <input
@@ -233,7 +238,7 @@
         :min="field.minimum"
         :max="field.maximum"
         :step="field.type === 'integer' ? 1 : undefined"
-        :readonly="isReadOnly(field)"
+        :readonly="readOnly || isReadOnly(field)"
         :required="isRequired(field)"
         :autocomplete="field.format === 'password' ? 'new-password' : undefined"
         :placeholder="inputPlaceholder(field)"
@@ -279,7 +284,8 @@ const props = defineProps({
   removeArrayItemLabel: { type: String, default: 'Remove' },
   selectOptionLabel: { type: String, default: 'Select an option' },
   loadingOptionsLabel: { type: String, default: 'Loading options…' },
-  controlClass: { type: String, default: 'form-input' }
+  controlClass: { type: String, default: 'form-input' },
+  readOnly: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['resource-options-request', 'update:modelValue'])
@@ -451,6 +457,7 @@ function groupPartial(field, group) {
 }
 
 function toggleGroup(field, group, checked) {
+  if (props.readOnly) return
   const selected = new Set(arrayValue(field))
   group.items.forEach((item) => {
     if (checked) selected.add(optionValue(item))
@@ -460,6 +467,7 @@ function toggleGroup(field, group, checked) {
 }
 
 function toggleArrayItem(field, value, checked) {
+  if (props.readOnly) return
   const selected = new Set(arrayValue(field))
   if (checked) selected.add(value)
   else selected.delete(value)
@@ -565,6 +573,7 @@ function normalizeInput(field, value) {
 }
 
 function setField(field, value) {
+  if (props.readOnly) return
   const nextValue = { ...props.modelValue, [field.key]: value }
   fields.value.forEach((candidate) => {
     if (candidate.depends_on !== field.key) return

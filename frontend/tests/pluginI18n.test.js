@@ -116,7 +116,7 @@ test('Plugin manifest localization falls back to its English copy', async () => 
   assert.equal(pluginDisplayName(manifest, t, te), 'GitHub')
   assert.equal(
     localized.description,
-    '连接已授权的 GitHub 仓库，作为数据源和助手的只读工具。'
+    '连接 GitHub.com 仓库，用于文件同步和助手只读查询。'
   )
   assert.equal(
     localized.connection_schema.properties.secret_value.title,
