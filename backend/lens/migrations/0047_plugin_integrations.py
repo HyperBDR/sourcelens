@@ -6,6 +6,26 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+TOKEN_BUDGET_PROFILE_BY_AGENT_ROUNDS = {
+    "flash": "standard",
+    "fast": "standard",
+    "balanced": "standard",
+    "deep": "deep",
+    "max": "unlimited",
+}
+
+
+def bind_token_budget_to_agent_rounds(apps, schema_editor):
+    """Align existing Assistants with the execution strategy mapping."""
+
+    assistant_model = apps.get_model("lens", "Assistant")
+    profiles = TOKEN_BUDGET_PROFILE_BY_AGENT_ROUNDS.items()
+    for agent_rounds, token_budget_profile in profiles:
+        assistant_model.objects.filter(agent_rounds=agent_rounds).update(
+            token_budget_profile=token_budget_profile
+        )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -561,5 +581,9 @@ class Migration(migrations.Migration):
                 default="direct",
                 max_length=16,
             ),
+        ),
+        migrations.RunPython(
+            bind_token_budget_to_agent_rounds,
+            migrations.RunPython.noop,
         ),
     ]
