@@ -1283,6 +1283,10 @@
       "removeFilter": "删除筛选条件",
       "filterCount": "已添加 {count} 个筛选条件"
     },
+    "datasourceCard": {
+      "resource": "源地址",
+      "target": "目标路径"
+    },
     "pluginForm": {
       "selectOption": "请选择",
       "loadingOptions": "正在加载选项…",
@@ -1593,18 +1597,27 @@
       "basicInfo": "基本信息",
       "tabs": {
         "basic": "基本信息",
-        "details": "详情信息"
+        "details": "同步记录"
       },
       "connection": "连接信息",
+      "resourceAndTarget": "资源与目标",
+      "connectionManaged": "由 Connection 托管",
+      "legacyConnection": "旧版配置",
       "repositories": "仓库列表",
       "sync": "同步信息",
       "retrieval": "检索增强",
       "unknownModel": "未知模型（{id}）",
       "credential": "凭证状态",
       "lastSyncedAt": "最近同步",
+      "lastStatus": "最近结果",
       "lastError": "最近错误",
       "createdAt": "创建时间",
       "updatedAt": "更新时间",
+      "processing": {
+        "document": "文档处理",
+        "image": "图片处理",
+        "pdf": "PDF 高级处理"
+      },
       "details": {
         "colStartedAt": "触发时间",
         "colStatus": "状态",

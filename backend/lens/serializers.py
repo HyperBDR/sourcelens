@@ -1873,6 +1873,14 @@ class DataSourceSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     connection = serializers.UUIDField(source="connection.uuid", read_only=True)
+    connection_name = serializers.CharField(
+        source="connection.name",
+        read_only=True,
+    )
+    connection_endpoint = serializers.CharField(
+        source="connection.endpoint",
+        read_only=True,
+    )
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
     lensnode_name = serializers.CharField(
         source="lensnode.name",
@@ -2268,6 +2276,8 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "credential_uuid",
             "connection",
             "connection_uuid",
+            "connection_name",
+            "connection_endpoint",
             "plugin_key",
             "datasource_config",
             "config",

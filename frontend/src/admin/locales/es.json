@@ -1224,7 +1224,7 @@
       "repository": "Repositorio / Documento",
       "branch": "Rama",
       "targetPath": "Ruta de destino",
-      "sync": "Sincronizar",
+      "sync": "Sincronización",
       "policy": "Política",
       "credential": "Credencial",
       "authScheme": "Esquema de autenticación",
@@ -1282,6 +1282,10 @@
       "enterToAdd": "Presiona Enter para agregar",
       "removeFilter": "Quitar filtro",
       "filterCount": "{count} filtros añadidos"
+    },
+    "datasourceCard": {
+      "resource": "Recurso",
+      "target": "Destino"
     },
     "pluginForm": {
       "selectOption": "Selecciona una opción",
@@ -1593,18 +1597,27 @@
       "basicInfo": "Información básica",
       "tabs": {
         "basic": "Información básica",
-        "details": "Detalles"
+        "details": "Historial de sincronización"
       },
       "connection": "Conexión",
+      "resourceAndTarget": "Recurso y destino",
+      "connectionManaged": "Gestionado por la conexión",
+      "legacyConnection": "Configuración heredada",
       "repositories": "Repositorios",
       "sync": "Sincronizar",
       "retrieval": "Mejora de recuperación",
       "unknownModel": "Modelo desconocido ({id})",
       "credential": "Estado de la credencial",
       "lastSyncedAt": "Última vez sincronizado",
+      "lastStatus": "Último resultado",
       "lastError": "Último error",
       "createdAt": "Creado",
       "updatedAt": "Actualizado",
+      "processing": {
+        "document": "Documentos",
+        "image": "Imágenes",
+        "pdf": "Procesamiento avanzado de PDF"
+      },
       "details": {
         "colStartedAt": "Comenzado",
         "colStatus": "Estado",

@@ -141,6 +141,11 @@ class PluginModelTests(TestCase):
             response.data["connection"],
             str(self.connection.uuid),
         )
+        self.assertEqual(response.data["connection_name"], "GitHub readonly")
+        self.assertEqual(
+            response.data["connection_endpoint"],
+            "https://github.com",
+        )
         self.assertNotIn("credential_uuid", response.data)
 
     def test_serializer_rejects_plugin_config_without_connection(self):

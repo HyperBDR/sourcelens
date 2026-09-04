@@ -1283,6 +1283,10 @@
       "removeFilter": "Remove filter",
       "filterCount": "{count} filters added"
     },
+    "datasourceCard": {
+      "resource": "Resource",
+      "target": "Target"
+    },
     "pluginForm": {
       "selectOption": "Select an option",
       "loadingOptions": "Loading options…",
@@ -1593,18 +1597,27 @@
       "basicInfo": "Basic Information",
       "tabs": {
         "basic": "Basic Information",
-        "details": "Details"
+        "details": "Sync history"
       },
       "connection": "Connection",
+      "resourceAndTarget": "Resource and target",
+      "connectionManaged": "Managed by Connection",
+      "legacyConnection": "Legacy configuration",
       "repositories": "Repositories",
       "sync": "Sync",
       "retrieval": "Retrieval enhancement",
       "unknownModel": "Unknown model ({id})",
       "credential": "Credential status",
       "lastSyncedAt": "Last synced",
+      "lastStatus": "Last result",
       "lastError": "Last error",
       "createdAt": "Created",
       "updatedAt": "Updated",
+      "processing": {
+        "document": "Documents",
+        "image": "Images",
+        "pdf": "PDF advanced processing"
+      },
       "details": {
         "colStartedAt": "Started",
         "colStatus": "Status",

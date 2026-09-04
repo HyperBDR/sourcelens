@@ -158,17 +158,6 @@
           </p>
         </FormRow>
         <div
-          v-if="selectedConnection"
-          class="rounded-md border border-line bg-surface-sunken p-3 text-xs text-ink-600"
-        >
-          <div class="font-medium text-ink-900">
-            {{ selectedConnection.name }} · {{ selectedConnection.plugin_key }}
-          </div>
-          <div class="mt-1 text-xs text-ink-500">
-            {{ selectedConnectionScopeSummary }}
-          </div>
-        </div>
-        <div
           v-if="testingConnection"
           class="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
         >

@@ -143,7 +143,10 @@
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-3 text-xs text-ink-500">
-              <span>{{ enabledDataSourceCount }} {{ t('common.status.active') }}</span>
+              <span
+                >{{ enabledDataSourceCount }}
+                {{ t('common.status.active') }}</span
+              >
               <span v-if="searchFilters.length">
                 {{
                   t('lensAdmin.datasourceSearch.filterCount', {
@@ -165,54 +168,161 @@
             </p>
           </div>
 
-          <div v-else class="grid min-h-0 gap-3 overflow-auto md:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-else
+            class="grid min-h-0 grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto md:grid-cols-2 xl:grid-cols-3"
+          >
             <article
               v-for="row in dataSources"
               :key="row.uuid"
-              class="datasource-card flex min-h-64 cursor-pointer flex-col rounded-xl border border-line bg-surface p-4 shadow-sm transition hover:border-brand-200 hover:shadow-md"
+              class="datasource-card flex min-w-0 cursor-pointer flex-col rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-brand-200 hover:shadow-md"
               @click="selectDataSource(row)"
             >
               <div class="flex items-start gap-3">
-                <div class="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-line bg-surface-sunken">
-                  <img v-if="pluginIconUrl(row.plugin_key)" :src="pluginIconUrl(row.plugin_key)" :alt="formatSourceType(row.source_type)" class="h-full w-full object-cover" />
-                  <span v-else class="text-xs font-semibold uppercase text-brand-700">{{ sourceTypeInitials(row) }}</span>
+                <div
+                  class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken"
+                >
+                  <img
+                    v-if="pluginIconUrl(row.plugin_key)"
+                    :src="pluginIconUrl(row.plugin_key)"
+                    :alt="formatSourceType(row.source_type)"
+                    class="h-full w-full object-cover"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-semibold uppercase text-brand-700"
+                    >{{ sourceTypeInitials(row) }}</span
+                  >
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
-                      <h2 class="truncate text-sm font-semibold text-ink-900">{{ row.name }}</h2>
+                      <h2 class="truncate text-sm font-semibold text-ink-900">
+                        {{ row.name }}
+                      </h2>
                       <p class="mt-0.5 truncate text-xs text-ink-500">
                         {{ formatSourceType(row.source_type) }}
-                        <template v-if="row.connection_name || row.connection?.name"> · {{ row.connection_name || row.connection?.name }}</template>
+                        <template v-if="connectionName(row)">
+                          · {{ connectionName(row) }}</template
+                        >
                       </p>
                     </div>
-                    <span v-for="tag in datasourceSyncTags(row).slice(0, 1)" :key="tag.key" :class="tag.class" class="shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium">{{ tag.label }}</span>
+                    <span
+                      v-for="tag in datasourceSyncTags(row).slice(0, 1)"
+                      :key="tag.key"
+                      :class="tag.class"
+                      class="shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium"
+                      >{{ tag.label }}</span
+                    >
                   </div>
                 </div>
               </div>
 
-              <div class="datasource-source-summary mt-4 min-w-0">
-                <p class="text-xs font-medium text-ink-500">{{ t('lensAdmin.datasourceTable.resource') }}</p>
-                <p class="mt-1 truncate text-sm font-medium text-ink-800" :title="dataSourceRepository(row)">{{ dataSourceRepository(row) }}</p>
-                <p v-if="row.source_type === 'git' && !isOrganizationDataSource(row)" class="mt-1 truncate font-mono text-xs text-ink-500">{{ dataSourceBranch(row) }}</p>
-                <p v-else-if="isOrganizationDataSource(row)" class="mt-1 text-xs text-ink-500">{{ dataSourceRepositories(row).length }} {{ t('lensAdmin.datasourceTable.resources') }}</p>
+              <div class="mt-3 min-w-0 rounded-lg bg-surface-sunken px-3">
+                <div
+                  class="datasource-source-summary flex min-w-0 items-center gap-2 py-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-ink-500">{{
+                    t('lensAdmin.datasourceCard.resource')
+                  }}</span>
+                  <p
+                    class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-ink-800"
+                    :title="
+                      dataSourceRepositoryUrl(row, connectionEndpoint(row))
+                    "
+                  >
+                    {{ dataSourceRepositoryUrl(row, connectionEndpoint(row)) }}
+                  </p>
+                  <span
+                    v-if="
+                      row.source_type === 'git' &&
+                      !isOrganizationDataSource(row)
+                    "
+                    class="max-w-24 shrink-0 truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
+                    :title="dataSourceBranch(row)"
+                    >{{ dataSourceBranch(row) }}</span
+                  >
+                  <span
+                    v-else-if="isOrganizationDataSource(row)"
+                    class="shrink-0 text-xs text-ink-500"
+                    >{{ dataSourceRepositories(row).length }}
+                    {{ t('lensAdmin.pluginForm.resources') }}</span
+                  >
+                </div>
+                <div
+                  class="datasource-target-summary flex min-w-0 items-center gap-2 border-t border-line py-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-ink-500">{{
+                    t('lensAdmin.datasourceCard.target')
+                  }}</span>
+                  <p
+                    class="min-w-0 flex-1 truncate font-mono text-xs text-ink-700"
+                    :title="row.target_path || emptyValue"
+                  >
+                    {{ row.target_path || emptyValue }}
+                  </p>
+                  <span
+                    class="max-w-28 shrink-0 truncate text-xs text-ink-500"
+                    :title="row.lensnode_name || lensNodeName(row.lensnode)"
+                    >{{ row.lensnode_name || lensNodeName(row.lensnode) }}</span
+                  >
+                </div>
               </div>
 
-              <div class="datasource-target-summary mt-4 min-w-0 rounded-lg bg-surface-sunken px-3 py-2">
-                <p class="truncate text-xs font-medium text-ink-700">{{ row.lensnode_name || lensNodeName(row.lensnode) }}</p>
-                <p class="mt-1 truncate font-mono text-xs text-ink-500" :title="row.target_path || emptyValue">{{ row.target_path || emptyValue }}</p>
-              </div>
-
-              <div class="datasource-run-summary mt-4 flex flex-1 items-end justify-between gap-3 border-t border-line pt-3" @click.stop>
+              <div
+                class="datasource-run-summary mt-3 flex flex-1 items-center justify-between gap-3 border-t border-line pt-2"
+                @click.stop
+              >
                 <div class="min-w-0 text-xs text-ink-500">
-                  <p v-if="isDataSourceSyncing(row)" class="truncate">{{ row.current_sync?.progress_message || row.current_sync?.progress_step || t('lensAdmin.table.syncRunning') }}</p>
-                  <p v-else-if="row.source_type !== 'managed_workspace'">{{ t('lensAdmin.table.lastSync') }}: {{ formatDateTime(row.last_synced_at) }}</p>
-                  <p v-else>{{ t('lensAdmin.availability.title') }}: {{ formatDateTime(row.availability_checked_at) }}</p>
+                  <p v-if="isDataSourceSyncing(row)" class="truncate">
+                    {{
+                      row.current_sync?.progress_message ||
+                      row.current_sync?.progress_step ||
+                      t('lensAdmin.table.syncRunning')
+                    }}
+                  </p>
+                  <p v-else-if="row.source_type !== 'managed_workspace'">
+                    {{ t('lensAdmin.table.lastSync') }}:
+                    {{ formatDateTime(row.last_synced_at) }}
+                  </p>
+                  <p v-else>
+                    {{ t('lensAdmin.availability.title') }}:
+                    {{ formatDateTime(row.availability_checked_at) }}
+                  </p>
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
-                  <BaseButton v-if="row.source_type !== 'managed_workspace' && !isDataSourceSyncing(row)" size="sm" variant="outline" :disabled="!isDataSourceEnabled(row)" @click="sync(row)">{{ t('lensAdmin.actions.sync') }}</BaseButton>
-                  <BaseButton v-else-if="isDataSourceSyncing(row)" size="sm" variant="danger" @click="cancelSync(row)">{{ t('lensAdmin.actions.cancelSync') }}</BaseButton>
-                  <BaseButton v-else size="sm" variant="outline" @click="refreshAvailability(row)">{{ t('lensAdmin.actions.refreshAvailability') }}</BaseButton>
+                  <BaseButton
+                    v-if="
+                      row.source_type !== 'managed_workspace' &&
+                      !isDataSourceSyncing(row)
+                    "
+                    size="sm"
+                    variant="outline"
+                    :disabled="!isDataSourceEnabled(row)"
+                    @click="sync(row)"
+                    >{{ t('lensAdmin.actions.sync') }}</BaseButton
+                  >
+                  <BaseButton
+                    v-else-if="isDataSourceSyncing(row)"
+                    size="sm"
+                    variant="danger"
+                    :title="t('lensAdmin.actions.cancelSync')"
+                    @click="cancelSync(row)"
+                  >
+                    <span class="sm:hidden">{{ t('common.cancel') }}</span>
+                    <span class="hidden sm:inline">{{
+                      t('lensAdmin.actions.cancelSync')
+                    }}</span>
+                  </BaseButton>
+                  <BaseButton
+                    v-else
+                    size="sm"
+                    variant="outline"
+                    @click="refreshAvailability(row)"
+                    >{{
+                      t('lensAdmin.actions.refreshAvailability')
+                    }}</BaseButton
+                  >
                   <RowActions :row="row" @edit="startEdit" @delete="remove" />
                 </div>
               </div>
@@ -328,14 +438,11 @@ import { pluginDisplayName } from '@/utils/pluginI18n'
 import DataSourceDetailDrawer from './DataSourceDetailDrawer.vue'
 import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
 import RowActions from './components/RowActions.vue'
-import {
-  EMPTY_VALUE as emptyValue,
-  normalizeList
-} from './adminHelpers'
+import { EMPTY_VALUE as emptyValue, normalizeList } from './adminHelpers'
 import {
   dataSourceBranch,
   dataSourceRepositories,
-  dataSourceRepository,
+  dataSourceRepositoryUrl,
   isDataSourceEnabled,
   isOrganizationDataSource,
   isDataSourceSyncing,
@@ -750,6 +857,32 @@ function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
+}
+
+function dataSourceConnection(row) {
+  const connectionUuid =
+    typeof row.connection === 'object' ? row.connection?.uuid : row.connection
+  return connections.value.find(
+    (connection) => connection.uuid === connectionUuid
+  )
+}
+
+function connectionName(row) {
+  return (
+    row.connection_name ||
+    (typeof row.connection === 'object' ? row.connection?.name : '') ||
+    dataSourceConnection(row)?.name ||
+    ''
+  )
+}
+
+function connectionEndpoint(row) {
+  return (
+    row.connection_endpoint ||
+    (typeof row.connection === 'object' ? row.connection?.endpoint : '') ||
+    dataSourceConnection(row)?.endpoint ||
+    ''
+  )
 }
 
 async function load() {
@@ -1479,9 +1612,7 @@ async function testDatasourceConnection() {
         )
         datasourceConnectionResult.value = {
           status: 'success',
-          message: t(
-            'lensAdmin.datasourceWizard.feishuResourcesAccessible'
-          ),
+          message: t('lensAdmin.datasourceWizard.feishuResourcesAccessible'),
           details: {
             ...result,
             connection_uuid: form.value.connection_uuid
@@ -1537,9 +1668,7 @@ function feishuDatasourceAccessError(error) {
   if (form.value.plugin_key !== 'feishu') return ''
   const payload = error.response?.data
   const data =
-    payload?.data && typeof payload.data === 'object'
-      ? payload.data
-      : payload
+    payload?.data && typeof payload.data === 'object' ? payload.data : payload
   const failures = Array.isArray(data?.resources)
     ? data.resources.filter((item) => item?.accessible === false)
     : []
@@ -1974,5 +2103,4 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style scoped>
-</style>
+<style scoped></style>

@@ -191,6 +191,7 @@
                   <div class="flex shrink-0 items-center gap-1">
                     <RowActions
                       :row="row"
+                      show-download
                       @download="download"
                       @edit="startEdit"
                       @delete="remove"

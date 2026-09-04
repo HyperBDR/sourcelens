@@ -284,7 +284,7 @@ const props = defineProps({
   removeArrayItemLabel: { type: String, default: 'Remove' },
   selectOptionLabel: { type: String, default: 'Select an option' },
   loadingOptionsLabel: { type: String, default: 'Loading options…' },
-  controlClass: { type: String, default: 'form-input' },
+  controlClass: { type: String, default: 'manifest-schema-control' },
   readOnly: { type: Boolean, default: false }
 })
 
@@ -590,6 +590,12 @@ function setField(field, value) {
 </script>
 
 <style scoped>
+.manifest-schema-control {
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm
+    text-ink-900 placeholder:text-ink-400 focus:border-brand-500
+    focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
 .resource-checkbox {
   @apply h-4 w-4 shrink-0 appearance-none rounded-[3px] border-2
     border-ink-300 bg-surface transition checked:border-brand-600

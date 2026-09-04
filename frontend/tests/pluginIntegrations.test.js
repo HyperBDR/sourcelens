@@ -499,6 +499,31 @@ test('Plugin datasource fields use only the generic manifest resource contract',
   assert.doesNotMatch(drawer, /selectedPluginRepository/)
 })
 
+test('Plugin datasource setup avoids redundant Connection identity', async () => {
+  const drawer = await source('pages/lens/DataSourceFormDrawer.vue')
+
+  assert.doesNotMatch(
+    drawer,
+    /selectedConnection\.name }} · {{ selectedConnection\.plugin_key/
+  )
+})
+
+test('Manifest datasource inputs use a local compact control style', async () => {
+  const renderer = await source('components/lens/ManifestSchemaForm.vue')
+  const controlStyle = renderer.match(
+    /\.manifest-schema-control \{[\s\S]*?\n\}/
+  )?.[0]
+
+  assert.match(
+    renderer,
+    /controlClass: \{ type: String, default: 'manifest-schema-control' \}/
+  )
+  assert.ok(controlStyle)
+  assert.match(controlStyle, /text-sm/)
+  assert.match(controlStyle, /px-3/)
+  assert.match(controlStyle, /py-2/)
+})
+
 test('MCP Plugin adapters select dynamic Connections and manifest tools', async () => {
   const page = await source('pages/lens/Mcp.vue')
 
@@ -536,10 +561,7 @@ test('connection management uses compact cards with summarized scope', async () 
     page,
     /<BaseButton[^>]*@click="openConnectionDetail\(row\)"/
   )
-  assert.match(
-    page,
-    /variant="danger"[\s\S]*@click\.stop="removeRow\(row\)"/
-  )
+  assert.match(page, /variant="danger"[\s\S]*@click\.stop="removeRow\(row\)"/)
   assert.match(page, /@click\.stop="startEdit\(row\)"/)
   assert.match(page, /connectionDetailOpen/)
   assert.match(page, /:schema="detailScopeSchema"/)
@@ -554,7 +576,11 @@ test('connection management uses compact cards with summarized scope', async () 
 })
 
 test('datasource management groups source, target and run information', async () => {
-  const page = await source('pages/lens/DataSources.vue')
+  const [page, rowActions, skills] = await Promise.all([
+    source('pages/lens/DataSources.vue'),
+    source('pages/lens/components/RowActions.vue'),
+    source('pages/lens/Skills.vue')
+  ])
 
   assert.match(page, /datasource-toolbar/)
   assert.match(page, /datasource-card/)
@@ -562,7 +588,28 @@ test('datasource management groups source, target and run information', async ()
   assert.match(page, /datasource-source-summary/)
   assert.match(page, /datasource-target-summary/)
   assert.match(page, /datasource-run-summary/)
+  assert.match(
+    page,
+    /dataSourceRepositoryUrl\(row, connectionEndpoint\(row\)\)/
+  )
+  assert.doesNotMatch(page, /min-h-64/)
+  assert.match(page, /grid-cols-1/)
+  assert.match(page, /datasource-card flex min-w-0/)
+  assert.match(rowActions, /showDownload/)
+  assert.match(skills, /show-download/)
   assert.doesNotMatch(page, /<table/)
+})
+
+test('datasource detail organizes metadata into focused data blocks', async () => {
+  const drawer = await source('pages/lens/DataSourceDetailDrawer.vue')
+
+  assert.match(drawer, /datasource-overview-block/)
+  assert.match(drawer, /datasource-resource-block/)
+  assert.match(drawer, /datasource-sync-block/)
+  assert.match(drawer, /datasource-retrieval-block/)
+  assert.match(drawer, /datasourceRetrievalGroups/)
+  assert.match(drawer, /dataSourceRepositoryUrl/)
+  assert.match(drawer, /connection_name/)
 })
 
 test('creation forms do not expose generic active or disabled selectors', async () => {
