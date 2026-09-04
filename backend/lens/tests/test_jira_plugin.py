@@ -1,6 +1,6 @@
 import httpx
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
     Assistant,
@@ -43,11 +43,11 @@ class JiraPluginManifestTests(TestCase):
         )
 
 
-class JiraConnectionProviderTests(SimpleTestCase):
+class JiraConnectionProviderTests(TestCase):
     """Verify Jira implements the Connection Provider contract."""
 
     def setUp(self):
-        self.provider = get_datasource_provider("jira")
+        self.provider = get_datasource_provider("jira", "1.0.0")
         self.config = {"email": "admin@example.com"}
         self.scope = {"projects": ["SL", "OPS"]}
 
@@ -208,11 +208,11 @@ class JiraConnectionProviderTests(SimpleTestCase):
         self.assertEqual(resources["next_cursor"], "")
 
 
-class JiraToolProviderTests(SimpleTestCase):
+class JiraToolProviderTests(TestCase):
     """Verify Jira model Tool requests remain within Connection scope."""
 
     def setUp(self):
-        self.provider = get_tool_provider("jira")
+        self.provider = get_tool_provider("jira", "1.0.0")
         self.scope = {"projects": ["SL"]}
 
     def test_accepts_issue_from_allowed_project(self):

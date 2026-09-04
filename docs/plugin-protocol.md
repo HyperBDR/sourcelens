@@ -10,15 +10,28 @@ Datasource 同步或面向大模型的 Tool；声明的能力都必须由宿主�
 宿主只从受控目录发现 Plugin，目录身份必须与 Manifest 一致：
 
 ```text
-/opt/sourcelens/plugins/<key>/
+/opt/plugins/<key>/<version>/
   plugin.json
   control.py
   runtime.py
   assets/
 ```
 
-`key` 使用小写字母开头的短标识。Plugin 项目可以独立维护源码、测试、文档和
-发布流程；宿主不从 Manifest 加载任意 Python 模块、Shell 命令或远程前端代码。
+`key` 使用小写字母开头的短标识，`version` 使用三段式 SemVer，且两层目录身份
+必须分别与 Manifest 的 `key` 和 `version` 一致。Plugin 项目可以独立维护源码、
+测试、文档和发布流程；宿主不从 Manifest 加载任意 Python 模块、Shell 命令或
+远程前端代码。
+
+目录发现只登记安装事实，不决定生产版本。每个已安装版本由控制面维护独立的发布
+状态与部署角色：新发现版本默认为 `debugging` 且没有角色；管理员显式发布后才成为
+`published`，并可独立设为 `candidate` 或 `active`。首次引导现有安装时，每个 Plugin
+的最高已安装版本会初始化为 `published + active`，此后安装更高版本不会自动切换
+生产流量。
+
+发布会冻结整个版本目录的 SHA-256 摘要。`published` 和 `retired` 版本的内容不可
+原地覆盖；摘要不一致时，Registry 必须拒绝正常加载并返回稳定冲突错误。需要修改
+内容时必须使用新的 SemVer 目录。退役只停止新绑定和部署角色分配，不删除目录；
+历史执行快照仍可按精确 `plugin_key + plugin_version` 解析该版本。
 
 ## 2. Manifest 身份与能力族
 
@@ -253,10 +266,13 @@ Provider 的并发、超时、deadline、取消、Retry-After 和部分失败处
 
 - `protocol_version` 只代表宿主与 Plugin 的接口版本，不代表业务 capability 版本；
 - `plugin_version` 是 SemVer 业务发布版本，当前四个内置 Plugin 均为 `1.0.0`；
-- 当前安装布局每个 `key` 只激活一个包，目录固定为 `plugins/<key>/`，但 Manifest、
-  Runtime、API 和执行快照必须保留 `plugin_version`；
-- 内容哈希用于识别同一版本目录中的精确代码内容，不取代 `plugin_version`；
-- 后续多版本管理可以扩展安装索引和 active/candidate 指针，无需修改执行快照身份；
+- 安装布局为 `plugins/<key>/<version>/`，允许同一 `key` 的多个版本共存；新发现
+  版本保持 `debugging`，不会因为 SemVer 更高而自动用于生产；
+- 正常 Connection、Datasource、Assistant 和新执行快照只解析
+  `published + active` 版本；候选验证显式解析 `published + candidate` 版本；
+- Manifest、Runtime、API 和执行快照必须保留 `plugin_version`；
+- 发布时冻结的包摘要用于保证同一版本内容不可变，不取代 `plugin_version`；
+- `retired` 版本不能再获得部署角色，但仍保留给记录了精确版本的历史快照；
 - 不兼容的入口、Manifest 或安全语义必须提升 `protocol_version`；
 - 新增字段优先采用可选字段和默认值，不能删除既有字段或改变其含义；
 - 宿主、Control Runtime、LensNode Runtime 必须拒绝未协商的协议版本。

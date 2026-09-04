@@ -6,11 +6,14 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from lens.models import PluginRelease
 from lens.plugins.registry import (
     PluginRegistryError,
     discover_plugins,
     installed_plugin,
+    latest_plugin,
 )
+from lens.plugins.releases import reconcile_plugin_releases
 from rest_framework.test import APIClient
 
 User = get_user_model()
@@ -19,7 +22,7 @@ User = get_user_model()
 class PluginRegistryTests(TestCase):
     """Verify trusted plugin manifest discovery."""
 
-    def test_discovers_versioned_plugin_without_a_version_directory(self):
+    def test_discovers_plugin_from_version_directory(self):
         manifest = {
             "key": "github",
             "version": "1.0.0",
@@ -30,7 +33,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            plugin_dir = Path(root) / "github"
+            plugin_dir = Path(root) / "github" / "1.0.0"
             plugin_dir.mkdir(parents=True)
             (plugin_dir / "plugin.json").write_text(json.dumps(manifest))
             (plugin_dir / "control.py").write_text("# test entrypoint\n")
@@ -43,7 +46,7 @@ class PluginRegistryTests(TestCase):
 
     def test_duplicate_configured_root_is_scanned_once(self):
         with tempfile.TemporaryDirectory() as root:
-            plugin_dir = Path(root) / "github"
+            plugin_dir = Path(root) / "github" / "1.0.0"
             plugin_dir.mkdir(parents=True)
             with override_settings(LENS_PLUGIN_ROOTS=[root, root]):
                 with patch(
@@ -60,11 +63,63 @@ class PluginRegistryTests(TestCase):
 
     def _write_manifest(self, root, manifest):
         manifest.setdefault("version", "1.0.0")
-        path = Path(root) / "github"
+        path = Path(root) / "github" / manifest["version"]
         path.mkdir(parents=True)
         (path / "plugin.json").write_text(json.dumps(manifest))
         (path / "control.py").write_text("# test entrypoint\n")
         (path / "runtime.py").write_text("# test entrypoint\n")
+
+    def test_discovers_multiple_versions_and_resolves_exact_or_latest(self):
+        with tempfile.TemporaryDirectory() as root:
+            for version in ("1.0.0", "1.1.0"):
+                self._write_manifest(
+                    root,
+                    {
+                        "key": "github",
+                        "version": version,
+                        "protocol_version": 1,
+                        "handlers": {
+                            "runtime": "python_v1",
+                            "datasource": "python_v1",
+                        },
+                    },
+                )
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                PluginRelease.objects.filter(plugin_key="github").delete()
+                reconcile_plugin_releases()
+                plugins = discover_plugins()
+                exact = installed_plugin("github", "1.0.0")
+                latest = latest_plugin("github")
+
+        self.assertEqual(
+            [(plugin.key, plugin.version) for plugin in plugins],
+            [("github", "1.0.0"), ("github", "1.1.0")],
+        )
+        self.assertEqual(exact.version, "1.0.0")
+        self.assertEqual(latest.version, "1.1.0")
+
+    def test_rejects_manifest_version_that_differs_from_directory(self):
+        manifest = {
+            "key": "github",
+            "version": "1.1.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "github" / "1.0.0"
+            path.mkdir(parents=True)
+            (path / "plugin.json").write_text(json.dumps(manifest))
+            (path / "control.py").write_text("# test entrypoint\n")
+            (path / "runtime.py").write_text("# test entrypoint\n")
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(
+                    PluginRegistryError,
+                    "version directory",
+                ):
+                    discover_plugins()
 
     def test_bundled_github_plugin_is_discoverable(self):
         plugin = installed_plugin("github")
@@ -336,6 +391,8 @@ class PluginRegistryTests(TestCase):
         with tempfile.TemporaryDirectory() as root:
             self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                PluginRelease.objects.filter(plugin_key="github").delete()
+                reconcile_plugin_releases()
                 response = client.get("/api/lens/admin/plugins/")
 
         self.assertEqual(response.status_code, 200)
@@ -411,6 +468,8 @@ class PluginRegistryTests(TestCase):
         with tempfile.TemporaryDirectory() as root:
             self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                PluginRelease.objects.filter(plugin_key="github").delete()
+                reconcile_plugin_releases()
                 response = client.get("/api/lens/admin/plugins/github/tools/")
 
         self.assertEqual(response.status_code, 200)

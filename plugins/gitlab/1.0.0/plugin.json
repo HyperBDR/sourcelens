@@ -5,7 +5,7 @@
   "capability_family": "plugin",
   "display_name": "GitLab",
   "icon": "assets/icon.svg",
-  "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
+  "description": "Connect approved GitLab.com or self-managed projects with a personal access token to synchronize repository files and inspect code, commits, merge requests, and issues through read-only assistant tools.",
   "assistant_guidance": {
     "summary": "Use GitLab tools to inspect approved projects, repository files, and time-bounded engineering activity.",
     "when_to_use": [
@@ -29,6 +29,28 @@
     ]
   },
   "datasource_source_type": "git",
+  "datasource": {
+    "key": "gitlab_project",
+    "display_name": "GitLab project",
+    "description": "Synchronize repository files from an explicitly authorized GitLab.com or self-managed project into a LensNode workspace. Issues and merge requests remain available through read-only tools and are not synchronized as datasource content.",
+    "source_type": "git",
+    "resources": [
+      {
+        "key": "projects",
+        "display_name": "Projects"
+      },
+      {
+        "key": "branches",
+        "display_name": "Branches",
+        "depends_on": "projects"
+      }
+    ],
+    "runtime": {
+      "supports_incremental": true,
+      "supports_cancel": true,
+      "output": "workspace"
+    }
+  },
   "handlers": {
     "control": "python_v1",
     "runtime": "python_v1"
@@ -48,7 +70,7 @@
         "type": "string",
         "format": "password",
         "title": "Personal access token",
-        "description": "A write-only token with read access to the approved projects.",
+        "description": "A write-only token with read_api and read_repository access to the approved projects.",
         "write_to": "secret_value"
       },
       "projects": {

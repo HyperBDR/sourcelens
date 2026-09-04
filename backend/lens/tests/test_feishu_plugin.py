@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import httpx
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase
+from django.test import TestCase
 from rest_framework.test import APIClient
 
 from lens.models import (
@@ -46,11 +46,11 @@ class FeishuPluginManifestTests(TestCase):
         self.assertEqual(resource_urls["items"]["format"], "uri")
 
 
-class FeishuDatasourceProviderTests(SimpleTestCase):
+class FeishuDatasourceProviderTests(TestCase):
     """Verify Feishu application and mixed resource validation."""
 
     def setUp(self):
-        self.provider = get_datasource_provider("feishu")
+        self.provider = get_datasource_provider("feishu", "1.0.0")
 
     def test_connection_uses_fixed_endpoint_without_resource_scope(self):
         endpoint = self.provider.validate_connection(
@@ -391,7 +391,7 @@ class FeishuDatasourceAccessAPITests(TestCase):
             status=LensNode.Status.ONLINE,
             enrollment_status=LensNode.EnrollmentStatus.APPROVED,
         )
-        self.provider = get_datasource_provider("feishu")
+        self.provider = get_datasource_provider("feishu", "1.0.0")
         self.url = "https://tenant.feishu.cn/docx/doc_denied"
 
     def test_connection_endpoint_returns_each_failed_url(self):

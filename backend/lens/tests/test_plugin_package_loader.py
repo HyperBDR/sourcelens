@@ -2,7 +2,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from lens.plugins.package_loader import (
     PluginPackageLoadError,
@@ -17,11 +17,11 @@ from lens.plugins.registry import (
 from lens.plugins.tool_providers import get_tool_provider
 
 
-class PluginPackageLoaderTests(SimpleTestCase):
+class PluginPackageLoaderTests(TestCase):
     """Verify fixed Python entrypoints for trusted packages."""
 
     def _write_plugin(self, root, *, control_source=None, runtime_source=None):
-        path = Path(root) / "example"
+        path = Path(root) / "example" / "1.0.0"
         path.mkdir(parents=True)
         manifest = {
             "key": "example",
@@ -82,7 +82,7 @@ TOOL_PROVIDER = Provider()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example")
+                plugin = installed_plugin("example", "1.0.0")
                 contract = load_control_contract(plugin)
 
         self.assertEqual(plugin.control_handler, "python_v1")
@@ -118,7 +118,7 @@ TOOL_PROVIDER = object()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example")
+                plugin = installed_plugin("example", "1.0.0")
                 with self.assertRaisesMessage(
                     PluginPackageLoadError,
                     "identity",
@@ -140,7 +140,7 @@ TOOL_PROVIDER = object()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example")
+                plugin = installed_plugin("example", "1.0.0")
                 with self.assertRaisesMessage(
                     PluginPackageLoadError,
                     "identity",
@@ -192,8 +192,8 @@ TOOL_PROVIDER = Provider()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                datasource = get_datasource_provider("example")
-                tools = get_tool_provider("example")
+                datasource = get_datasource_provider("example", "1.0.0")
+                tools = get_tool_provider("example", "1.0.0")
 
         self.assertEqual(datasource.key, "example")
         self.assertEqual(tools.key, "example")
@@ -226,7 +226,7 @@ TOOL_PROVIDER = Provider()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example")
+                plugin = installed_plugin("example", "1.0.0")
                 first = load_control_contract(plugin)
                 (path / "control.py").write_text(
                     source.replace('key = "before"', 'key = "after"')

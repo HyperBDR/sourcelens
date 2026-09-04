@@ -59,6 +59,7 @@ def test_every_bundled_manifest_tool_builds_with_its_declared_schema():
         Path(__file__).resolve().parents[2]
         / "plugins"
         / "github"
+        / "1.0.0"
         / "plugin.json"
     )
     definitions = json.loads(manifest_path.read_text())["tools"]

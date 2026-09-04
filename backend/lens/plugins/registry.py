@@ -106,14 +106,19 @@ def discover_plugins():
         for key_dir in sorted(root.iterdir()):
             if not key_dir.is_dir() or key_dir.is_symlink():
                 continue
-            plugin = _load_plugin(root, key_dir)
-            identity = (plugin.key, plugin.version)
-            if identity in identities:
-                raise PluginRegistryError(
-                    "duplicate plugin key and version"
-                )
-            identities.add(identity)
-            plugins.append(plugin)
+            for version_dir in sorted(key_dir.iterdir()):
+                if not version_dir.is_dir() or version_dir.is_symlink():
+                    continue
+                if version_dir.name == "__pycache__":
+                    continue
+                plugin = _load_plugin(root, key_dir, version_dir)
+                identity = (plugin.key, plugin.version)
+                if identity in identities:
+                    raise PluginRegistryError(
+                        "duplicate plugin key and version"
+                    )
+                identities.add(identity)
+                plugins.append(plugin)
     return plugins
 
 
@@ -134,18 +139,33 @@ def latest_plugin(plugin_key):
 
 
 def installed_plugin(plugin_key, version=None):
-    """Return an exact release, or the latest release when omitted."""
+    """Return an exact release, or the active published release when omitted."""
 
+    release = None
     if version is None:
-        return latest_plugin(plugin_key)
+        from .releases import active_plugin_release
+
+        release = active_plugin_release(plugin_key)
+        version = release.version
+    else:
+        from lens.models import PluginRelease
+
+        release = PluginRelease.objects.filter(
+            plugin_key=plugin_key,
+            version=version,
+        ).first()
 
     for plugin in discover_plugins():
         if plugin.key == plugin_key and plugin.version == version:
+            if release is not None and release.release_status != "debugging":
+                from .releases import assert_plugin_release_integrity
+
+                assert_plugin_release_integrity(plugin, release)
             return plugin
     raise PluginNotFoundError("installed plugin version is required")
 
 
-def _load_plugin(root, plugin_dir):
+def _load_plugin(root, key_dir, plugin_dir):
     """Load one manifest after validating its controlled directory identity."""
 
     manifest_path = plugin_dir / "plugin.json"
@@ -173,9 +193,13 @@ def _load_plugin(root, plugin_dir):
         version
     ):
         raise PluginRegistryError("plugin version is invalid")
-    if key != plugin_dir.name:
+    if key != key_dir.name:
         raise PluginRegistryError(
             "plugin manifest does not match directory identity"
+        )
+    if version != plugin_dir.name:
+        raise PluginRegistryError(
+            "plugin manifest does not match version directory"
         )
     if protocol_version != SUPPORTED_PROTOCOL_VERSION:
         raise PluginRegistryError("plugin protocol version is unsupported")

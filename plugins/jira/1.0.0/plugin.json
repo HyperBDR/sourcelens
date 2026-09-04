@@ -5,7 +5,7 @@
   "capability_family": "plugin",
   "display_name": "Jira",
   "icon": "assets/icon.svg",
-  "description": "Connect approved Jira Cloud or self-hosted projects as read-only assistant tools.",
+  "description": "Connect approved Jira Cloud or self-hosted projects with account and API token credentials to search issues, read issue details, and summarize activity through read-only assistant tools.",
   "assistant_guidance": {
     "summary": "Use Jira tools to search, inspect, and summarize activity in approved Jira projects.",
     "when_to_use": [

@@ -1,4 +1,4 @@
-from django.test import SimpleTestCase, TestCase
+from django.test import TestCase
 from lens.plugins.registry import installed_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 
@@ -43,11 +43,11 @@ class GitHubPluginManifestTests(TestCase):
         )
 
 
-class GitHubToolProviderTests(SimpleTestCase):
+class GitHubToolProviderTests(TestCase):
     """Verify every GitHub Tool remains within the Connection allowlist."""
 
     def setUp(self):
-        self.provider = get_tool_provider("github")
+        self.provider = get_tool_provider("github", "1.0.0")
         self.scope = {"repositories": ["HyperBDR/sourcelens"]}
 
     def test_normalizes_paginated_list_request(self):

@@ -42,7 +42,12 @@ def load_runtime_contract(plugin_key, plugin_version, roots=None):
         raise PluginPackageLoadError("plugin runtime identity is invalid")
     for root_value in roots or _configured_roots():
         root = Path(root_value).resolve()
-        package = root / plugin_key
+        key_dir = root / plugin_key
+        if not key_dir.exists():
+            continue
+        if key_dir.is_symlink() or not key_dir.is_dir():
+            raise PluginPackageLoadError("plugin package is invalid")
+        package = key_dir / plugin_version
         if not package.exists():
             continue
         if package.is_symlink() or not package.is_dir():

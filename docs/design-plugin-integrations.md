@@ -85,8 +85,11 @@ ExecutionSnapshot
 ```text
 /opt/sourcelens/plugins/
   github/
+    1.0.0/
   gitlab/
+    1.0.0/
   jira/
+    1.0.0/
 ```
 
 平台启动或显式刷新时扫描目录，读取 manifest，并通过 Registry 注册
@@ -95,9 +98,13 @@ ExecutionSnapshot
 Registry 只加载平台允许的内置 handler，不允许 manifest 指定任意 Python import、
 shell command、远程组件或前端代码。
 
-当前安装布局为每个 key 激活一个目录，并通过内容哈希刷新模块缓存。控制端与
-LensNode 在调度/启动时校验 Plugin key、业务发布版本和协议兼容性；执行快照保留
-业务版本，为后续候选验证、灰度、回滚和多版本安装索引提供稳定扩展点。
+当前安装布局按 `plugin_key/plugin_version` 保存发布目录，允许同一个 key 的多个
+版本共存。目录扫描只登记安装事实：新版本默认为 `debugging`，不会因 SemVer 更高
+而自动切换生产流量。管理员发布后，控制面冻结目录的 SHA-256 摘要，并独立分配
+`candidate` 或 `active` 部署角色；正常新执行只选择 `published + active`。控制端与
+LensNode 在调度/启动时校验 Plugin key、业务发布版本、包摘要和协议兼容性；执行
+快照保留精确业务版本，因此 active 切换不影响运行中或历史执行，已退役版本也会
+保留用于回放和诊断。
 
 ### SecretMaterial
 
@@ -720,7 +727,7 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 每个受信任的企业内置 Plugin 是可单独构建、测试、安装的目录项目：
 
 ```text
-plugins/<plugin-key>/
+plugins/<plugin-key>/<plugin-version>/
   plugin.json
   control.py
   runtime.py
@@ -728,7 +735,7 @@ plugins/<plugin-key>/
 
 `plugin.json` 只声明固定的 `python_v1` control/runtime handler，不能指定任意
 import、命令、前端代码或远程 URL。控制面和 LensNode 都仅按冻结的
-`plugin_key` 找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
+`plugin_key + plugin_version` 精确找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
 entrypoint、超限文件及导出身份不一致的包。
 
 `control.py` 导出 Connection Provider 和 Tool Provider；Connection Provider 声明

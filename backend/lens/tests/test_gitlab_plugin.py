@@ -1,6 +1,6 @@
 import httpx
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
     Assistant,
@@ -40,11 +40,11 @@ class GitLabPluginManifestTests(TestCase):
         )
 
 
-class GitLabDatasourceProviderTests(SimpleTestCase):
+class GitLabDatasourceProviderTests(TestCase):
     """Verify GitLab implements the datasource Provider contract."""
 
     def setUp(self):
-        self.provider = get_datasource_provider("gitlab")
+        self.provider = get_datasource_provider("gitlab", "1.0.0")
         self.scope = {"projects": ["platform/sourcelens"]}
 
     def test_accepts_nested_project_within_connection_scope(self):
@@ -215,11 +215,11 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
         )
 
 
-class GitLabToolProviderTests(SimpleTestCase):
+class GitLabToolProviderTests(TestCase):
     """Verify GitLab model Tool requests remain within Connection scope."""
 
     def setUp(self):
-        self.provider = get_tool_provider("gitlab")
+        self.provider = get_tool_provider("gitlab", "1.0.0")
         self.scope = {"projects": ["platform/backend/sourcelens"]}
 
     def test_normalizes_read_file_request(self):

@@ -5,7 +5,7 @@
   "capability_family": "plugin",
   "display_name": "GitHub",
   "icon": "assets/icon.svg",
-  "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
+  "description": "Connect GitHub.com repositories for file sync and read-only assistant queries.",
   "assistant_guidance": {
     "summary": "Use GitHub tools to inspect approved repositories, code, issues, pull requests, releases, and Actions metadata.",
     "when_to_use": [
@@ -62,7 +62,7 @@
   "datasource": {
     "key": "github_repository",
     "display_name": "GitHub repository",
-    "description": "Synchronize an explicitly authorized GitHub repository into a LensNode workspace.",
+    "description": "Synchronize repository files from an explicitly authorized GitHub.com repository into a LensNode workspace. Issues and pull requests remain available through read-only tools and are not synchronized as datasource content.",
     "source_type": "git",
     "resources": [
       {
