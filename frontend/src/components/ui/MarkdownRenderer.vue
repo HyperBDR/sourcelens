@@ -1,11 +1,17 @@
 <template>
-  <div class="markdown-content prose max-w-none" v-html="renderedContent"></div>
+  <div
+    class="markdown-content prose max-w-none"
+    v-html="renderedContent"
+    @click="handleMarkdownClick"
+  ></div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
+import { useI18n } from 'vue-i18n'
+import { copyToClipboard } from '@/utils/clipboard'
 import { sanitizeHtml, escapeHtml } from '@/utils/sanitize'
 
 // Import common languages for syntax highlighting
@@ -33,14 +39,37 @@ const props = defineProps({
   }
 })
 
+const { t } = useI18n()
+const copyResetTimers = new WeakMap()
+
+const languageLabels = {
+  bash: 'Bash',
+  javascript: 'JavaScript',
+  js: 'JavaScript',
+  json: 'JSON',
+  python: 'Python',
+  py: 'Python',
+  sh: 'Bash',
+  shell: 'Bash',
+  xml: 'XML'
+}
+
 // Configure marked. marked v16 removed the `highlight` option, so syntax
 // highlighting runs in a custom code renderer instead. Emitting the
 // `hljs` class lets the global highlight.js theme style the block (dark
 // background + token colors) even when the language is unknown.
 const renderer = new marked.Renderer()
 renderer.code = ({ text, lang }) => {
+  const declaredLanguage = typeof lang === 'string' ? lang.trim() : ''
   const language =
-    props.enableHighlight && lang && hljs.getLanguage(lang) ? lang : ''
+    props.enableHighlight &&
+    declaredLanguage &&
+    hljs.getLanguage(declaredLanguage)
+      ? declaredLanguage
+      : ''
+  const label = declaredLanguage
+    ? languageLabels[declaredLanguage.toLowerCase()] || declaredLanguage
+    : ''
   let body
   try {
     body = language
@@ -49,7 +78,21 @@ renderer.code = ({ text, lang }) => {
   } catch (err) {
     body = escapeHtml(text)
   }
-  return `<pre><code class="hljs language-${language}">${body}</code></pre>`
+  const languageClass = language ? ` language-${escapeHtml(language)}` : ''
+  const languageLabel = label
+    ? `<span class="markdown-code-language">${escapeHtml(label)}</span>`
+    : ''
+  return (
+    '<div class="markdown-code-block">' +
+    '<div class="markdown-code-header">' +
+    languageLabel +
+    `<button type="button" class="markdown-code-copy" ` +
+    `data-markdown-code-copy aria-label="${escapeHtml(t('common.copy'))}" ` +
+    `title="${escapeHtml(t('common.copy'))}"></button>` +
+    '</div>' +
+    `<pre><code class="hljs${languageClass}">${body}</code></pre>` +
+    '</div>'
+  )
 }
 
 const renderTable = renderer.table.bind(renderer)
@@ -234,6 +277,35 @@ const renderedContent = computed(() => {
     return `<pre class="text-theme-secondary">${escapeHtml(props.content || '')}</pre>`
   }
 })
+
+async function handleMarkdownClick(event) {
+  const button = event.target.closest('[data-markdown-code-copy]')
+  if (!button) return
+
+  const code = button.closest('.markdown-code-block')?.querySelector('code')
+  if (!code) return
+
+  const copied = await copyToClipboard(code.textContent || '')
+  if (!copied) return
+
+  const copiedLabel = t('common.copied')
+  button.title = copiedLabel
+  button.setAttribute('aria-label', copiedLabel)
+  button.setAttribute('data-markdown-code-copied', '')
+
+  const existingTimer = copyResetTimers.get(button)
+  if (existingTimer) clearTimeout(existingTimer)
+  copyResetTimers.set(
+    button,
+    setTimeout(() => {
+      const copyLabel = t('common.copy')
+      button.title = copyLabel
+      button.setAttribute('aria-label', copyLabel)
+      button.removeAttribute('data-markdown-code-copied')
+      copyResetTimers.delete(button)
+    }, 1800)
+  )
+}
 </script>
 
 <style scoped>
@@ -290,22 +362,215 @@ const renderedContent = computed(() => {
 }
 
 .markdown-content :deep(pre) {
-  @apply my-4 overflow-x-auto rounded-lg border border-ink-700 bg-ink-900 p-4 text-sm;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  word-break: break-all;
+  @apply m-0 max-w-full overflow-x-auto border-0 p-4 text-sm;
+  background: #f3f3f3;
+  white-space: pre;
+  tab-size: 4;
 }
 
 .markdown-content :deep(pre code) {
-  @apply bg-transparent p-0 text-gray-100;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  word-break: break-all;
+  @apply block min-w-full w-max bg-transparent p-0 font-mono;
+  color: #18181b;
+  white-space: pre;
+  word-break: normal;
+}
+
+.markdown-content :deep(.markdown-code-block) {
+  @apply my-4 w-full min-w-0 max-w-full overflow-hidden rounded-lg border;
+  border-color: transparent;
+  background: #f3f3f3;
+}
+
+.markdown-content :deep(.markdown-code-header) {
+  @apply flex min-h-12 items-center border-b px-3.5 py-2;
+  border-color: transparent;
+  background: #f3f3f3;
+}
+
+.markdown-content :deep(.markdown-code-language) {
+  @apply font-mono text-sm font-medium;
+  color: #27272a;
+}
+
+.markdown-content :deep(.markdown-code-copy) {
+  @apply ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors;
+  --markdown-copy-bg: transparent;
+  border-color: transparent;
+  background: var(--markdown-copy-bg);
+  color: #27272a;
+}
+
+.markdown-content :deep(.markdown-code-copy::before) {
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  box-shadow:
+    -3px -3px 0 -1px var(--markdown-copy-bg),
+    -3px -3px 0 0 currentColor;
+  content: '';
+}
+
+.markdown-content :deep(.markdown-code-copy[data-markdown-code-copied]::before) {
+  width: 0.8rem;
+  height: 0.45rem;
+  border-width: 0 0 1.75px 1.75px;
+  border-radius: 0;
+  box-shadow: none;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.markdown-content :deep(.markdown-code-copy:hover) {
+  --markdown-copy-bg: #e4e4e7;
+  border-color: #d4d4d8;
+}
+
+.markdown-content :deep(.markdown-code-copy:active) {
+  --markdown-copy-bg: #d4d4d8;
+  transform: translateY(1px);
+}
+
+.markdown-content :deep(.markdown-code-copy:focus-visible) {
+  @apply outline-none ring-2 ring-primary-500 ring-offset-2;
+  --tw-ring-offset-color: #f3f3f3;
 }
 
 /* Custom styles for code highlighting - terminal theme */
 .markdown-content :deep(.hljs) {
-  @apply bg-gray-900;
+  background: #f3f3f3;
+}
+
+.markdown-content :deep(.hljs-comment),
+.markdown-content :deep(.hljs-quote) {
+  color: #6e7781;
+}
+
+.markdown-content :deep(.hljs-keyword),
+.markdown-content :deep(.hljs-selector-tag),
+.markdown-content :deep(.hljs-subst) {
+  color: #a626a4;
+}
+
+.markdown-content :deep(.hljs-title),
+.markdown-content :deep(.hljs-section),
+.markdown-content :deep(.hljs-built_in),
+.markdown-content :deep(.hljs-type) {
+  color: #6f42c1;
+}
+
+.markdown-content :deep(.hljs-string),
+.markdown-content :deep(.hljs-doctag),
+.markdown-content :deep(.hljs-attr),
+.markdown-content :deep(.hljs-template-tag),
+.markdown-content :deep(.hljs-template-variable) {
+  color: #17813b;
+}
+
+.markdown-content :deep(.hljs-number),
+.markdown-content :deep(.hljs-literal),
+.markdown-content :deep(.hljs-symbol),
+.markdown-content :deep(.hljs-bullet) {
+  color: #b54708;
+}
+
+.markdown-content :deep(.hljs-variable),
+.markdown-content :deep(.hljs-params),
+.markdown-content :deep(.hljs-property) {
+  color: #0550ae;
+}
+
+:global(:root[data-theme='dark'] .markdown-content pre),
+:global(:root[data-theme='dark'] .markdown-content .hljs),
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-block) {
+  background: #19191b;
+}
+
+:global(:root[data-theme='dark'] .markdown-content pre code) {
+  color: #f4f4f5;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-comment),
+:global(:root[data-theme='dark'] .markdown-content .hljs-quote) {
+  color: #88846f;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-keyword),
+:global(:root[data-theme='dark'] .markdown-content .hljs-selector-tag),
+:global(:root[data-theme='dark'] .markdown-content .hljs-subst) {
+  color: #f92672;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-title),
+:global(:root[data-theme='dark'] .markdown-content .hljs-section),
+:global(:root[data-theme='dark'] .markdown-content .hljs-built_in),
+:global(:root[data-theme='dark'] .markdown-content .hljs-type) {
+  color: #a6e22e;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-string),
+:global(:root[data-theme='dark'] .markdown-content .hljs-doctag),
+:global(:root[data-theme='dark'] .markdown-content .hljs-attr),
+:global(:root[data-theme='dark'] .markdown-content .hljs-template-tag),
+:global(:root[data-theme='dark'] .markdown-content .hljs-template-variable) {
+  color: #e6db74;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-number),
+:global(:root[data-theme='dark'] .markdown-content .hljs-literal),
+:global(:root[data-theme='dark'] .markdown-content .hljs-symbol),
+:global(:root[data-theme='dark'] .markdown-content .hljs-bullet) {
+  color: #ae81ff;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .hljs-variable),
+:global(:root[data-theme='dark'] .markdown-content .hljs-params),
+:global(:root[data-theme='dark'] .markdown-content .hljs-property) {
+  color: #f8f8f2;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-block),
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-header) {
+  border-color: #505054;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-header) {
+  min-height: 3.5rem;
+  padding: 0.75rem 1rem;
+  background: #363638;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-language) {
+  font-size: 1rem;
+  color: #d4d4d8;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-copy) {
+  --markdown-copy-bg: #454548;
+  border-color: #5c5c61;
+  color: #f4f4f5;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-copy:hover) {
+  --markdown-copy-bg: #505055;
+  border-color: #74747a;
+}
+
+:global(:root[data-theme='dark'] .markdown-content .markdown-code-copy:active) {
+  --markdown-copy-bg: #303034;
+}
+
+:global(
+  :root[data-theme='dark'] .markdown-content .markdown-code-copy:focus-visible
+) {
+  --tw-ring-offset-color: #363638;
+}
+
+:global(:root[data-theme='dark'] .markdown-content pre) {
+  padding: 1.5rem 2rem;
+}
+
+:global(:root[data-theme='dark'] .markdown-content pre code) {
+  line-height: 1.75;
 }
 
 .markdown-content :deep(.markdown-table-scroll) {

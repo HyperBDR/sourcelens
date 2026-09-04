@@ -234,11 +234,21 @@ class SharedQAApiTests(TestCase):
         share = SharedQA.objects.get(token=resp.data["token"])
         self.assertEqual(share.question, "What is X?")
         self.assertEqual(share.answer, "X is a thing.")
+        self.assertEqual(share.content_language, "zh-CN")
         self.assertEqual(share.assistant_slug, "data-helper")
         self.assertEqual(share.assistant_name, "Data Helper")
         self.assertEqual(share.published_by, self.owner)
         self.assertIsNotNone(share.published_at)
         self.assertTrue(share.title)
+
+    def test_public_share_returns_content_language(self):
+        token = self._share().data["token"]
+        self.client.force_authenticate(self.other)
+
+        response = self.client.get(f"/api/lens/public/qa/{token}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["content_language"], "zh-CN")
 
     def test_share_snapshots_input_and_output_file_bytes(self):
         _, _, attachment_bytes, output_bytes = self._add_run_files()
@@ -602,11 +612,57 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(patch.status_code, 200)
 
         self.client.force_authenticate(self.other)
-        after = self.client.get(url)
+        after = self.client.get(url, HTTP_ACCEPT_LANGUAGE="zh-CN")
         self.assertEqual(after.status_code, 200)
         self.assertEqual(after.data["total"], 1)
         self.assertEqual(after.data["results"][0]["token"], token)
+        self.assertEqual(
+            after.data["results"][0]["content_language"], "zh-CN"
+        )
         self.assertIn("answer_snippet", after.data["results"][0])
+
+    def test_public_list_only_shows_viewer_language(self):
+        chinese = self._legacy_share("chinese-share")
+        chinese.content_language = "zh-CN"
+        chinese.is_listed = True
+        chinese.save(update_fields=["content_language", "is_listed"])
+        english = self._legacy_share("english-share")
+        english.content_language = "en-US"
+        english.is_listed = True
+        english.save(update_fields=["content_language", "is_listed"])
+        unknown = self._legacy_share("unknown-share")
+        unknown.is_listed = True
+        unknown.save(update_fields=["is_listed"])
+        url = "/api/lens/public/assistants/data-helper/qa/"
+        self.client.force_authenticate(self.other)
+
+        chinese_response = self.client.get(
+            url,
+            HTTP_ACCEPT_LANGUAGE="zh-CN",
+        )
+        english_response = self.client.get(
+            url,
+            HTTP_ACCEPT_LANGUAGE="en-US",
+        )
+
+        self.assertEqual(chinese_response.data["total"], 1)
+        self.assertEqual(
+            chinese_response.data["content_language"],
+            "zh-CN",
+        )
+        self.assertEqual(
+            chinese_response.data["results"][0]["token"],
+            chinese.token,
+        )
+        self.assertEqual(english_response.data["total"], 1)
+        self.assertEqual(
+            english_response.data["content_language"],
+            "en-US",
+        )
+        self.assertEqual(
+            english_response.data["results"][0]["token"],
+            english.token,
+        )
 
     def test_public_list_does_not_leak_listed_private_assistant_share(self):
         token = self._private_share_token()
@@ -628,7 +684,8 @@ class SharedQAApiTests(TestCase):
 
         self.client.force_authenticate(self.admin)
         authorized = self.client.get(
-            "/api/lens/public/assistants/private-helper/qa/"
+            "/api/lens/public/assistants/private-helper/qa/",
+            HTTP_ACCEPT_LANGUAGE="zh-CN",
         )
         self.assertEqual(authorized.status_code, 200)
         self.assertEqual(authorized.data["total"], 1)

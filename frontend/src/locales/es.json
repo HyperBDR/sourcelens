@@ -165,6 +165,8 @@
       "ctaTitle": "¿Tienes una pregunta similar?",
       "ctaAction": "Chatear con {name}",
       "viewCount": "{count} vistas",
+      "contentLanguageNotice": "Esta pregunta y respuesta está en {language}.",
+      "originalLanguageNotice": "Esta pregunta y respuesta se muestra en su idioma original.",
       "notFound": "Este Q&A no existe o ha sido compartido de forma privada.",
       "loginRequiredTitle": "Inicie sesión para ver estas preguntas y respuestas",
       "loginRequiredDescription": "Estas preguntas y respuestas compartidas pueden estar limitadas a usuarios específicos o miembros de la organización. Inicie sesión y vuelva a intentarlo.",

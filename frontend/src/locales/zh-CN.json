@@ -165,6 +165,8 @@
       "ctaTitle": "想问类似问题？",
       "ctaAction": "去和「{name}」对话",
       "viewCount": "{count} 次查看",
+      "contentLanguageNotice": "该问答使用{language}。",
+      "originalLanguageNotice": "该问答按原始语言显示。",
       "notFound": "该问答不存在或已被取消分享。",
       "loginRequiredTitle": "需要登录后查看",
       "loginRequiredDescription": "这个共享问答可能仅对特定用户或组织成员开放。请登录后再试。",

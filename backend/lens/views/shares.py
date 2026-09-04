@@ -10,6 +10,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import normalize_answer_language
 from lens.models import Assistant, SharedQA, SharedQAFile
 from lens.qa_pdf import build_qa_pdf_filename, render_qa_pdf
 from lens.serializers import (
@@ -238,7 +239,7 @@ def _shared_qa_access_error(assistant, user):
 
 
 class PublicSharedQAListView(APIView):
-    """Public list of an assistant's curated shared Q&As (anonymous)."""
+    """Language-matched list of an assistant's curated shared Q&As."""
 
     permission_classes = [permissions.AllowAny]
 
@@ -260,8 +261,12 @@ class PublicSharedQAListView(APIView):
         params = request.query_params
         limit = _admin_safe_int(params.get("limit"), 20, maximum=50)
         offset = _admin_safe_int(params.get("offset"), 0, minimum=0)
+        content_language = normalize_answer_language(
+            getattr(request, "LANGUAGE_CODE", "en")
+        )
         queryset = SharedQA.objects.filter(
             assistant=assistant,
+            content_language=content_language,
             is_listed=True,
             status=SharedQA.Status.PUBLISHED,
         ).order_by("-published_at", "-created_at")
@@ -273,6 +278,7 @@ class PublicSharedQAListView(APIView):
         has_more = offset + limit < total
         return Response({
             "assistant": {"name": assistant.name, "slug": assistant.slug},
+            "content_language": content_language,
             "results": rows,
             "total": total,
             "next_offset": offset + limit if has_more else None,

@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { prepareRunSubmission } from '../src/pages/lens/chatSubmission.js'
+import {
+  prepareRunSubmission,
+  updateSessionSubmissionSet
+} from '../src/pages/lens/chatSubmission.js'
+
+test('isolates submission locks by session', () => {
+  const first = updateSessionSubmissionSet(new Set(), 'session-1', true)
+  const both = updateSessionSubmissionSet(first, 'session-2', true)
+  const secondOnly = updateSessionSubmissionSet(both, 'session-1', false)
+
+  assert.deepEqual([...both], ['session-1', 'session-2'])
+  assert.deepEqual([...secondOnly], ['session-2'])
+  assert.equal(secondOnly.has('session-1'), false)
+  assert.equal(secondOnly.has('session-2'), true)
+})
 
 test('reuses the idempotency key for the same unknown-result replay', () => {
   const first = prepareRunSubmission({

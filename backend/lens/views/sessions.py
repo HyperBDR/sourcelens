@@ -22,6 +22,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import normalize_answer_language
 from lens.assistant_lifecycle import AssistantNotRunnableError
 from lens.attachments import AttachmentError, store_message_attachment
 from lens.citations import citation_source_payload, sanitize_run_citations
@@ -732,6 +733,15 @@ class RunViewSet(BaseAuthenticatedViewSet):
         question = run.input_message.content if run.input_message else ""
         answer = run.output_message.content or ""
         assistant = run.session.assistant
+        runtime_snapshot = getattr(
+            getattr(run, "execution", None), "runtime_snapshot", {}
+        ) or {}
+        content_language = normalize_answer_language(
+            runtime_snapshot.get("answer_language")
+            or getattr(
+                getattr(request.user, "profile", None), "language", None
+            )
+        )
         title = (request.data.get("title") or "").strip()[:200]
         if not title:
             title = _shared_qa_default_title(question)
@@ -744,6 +754,7 @@ class RunViewSet(BaseAuthenticatedViewSet):
                 assistant_slug=assistant.slug if assistant else "",
                 question=question,
                 answer=answer,
+                content_language=content_language,
                 title=title,
                 published_by=request.user,
                 published_at=timezone.now(),

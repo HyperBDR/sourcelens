@@ -1,0 +1,13 @@
+type: fix
+audience: user
+en: >-
+  Public Q&A galleries now show entries in the viewer's selected language,
+  while direct shared links preserve and clearly identify original-language
+  content.
+zh-CN: >-
+  公开问答列表现在只展示与查看者所选语言一致的条目；直接分享链接仍保留原文，
+  并清楚标注内容所使用的语言。
+es: >-
+  Las galerías públicas de preguntas y respuestas ahora muestran entradas en
+  el idioma elegido por el visitante; los enlaces directos conservan el
+  contenido original e indican claramente su idioma.
