@@ -65,7 +65,7 @@ from .models import (
     assistant_mode_for,
 )
 from .plugins.providers import DatasourceProviderError, get_datasource_provider
-from .plugins.registry import PluginRegistryError, latest_plugin
+from .plugins.registry import PluginRegistryError, installed_plugin
 from .plugins.skill_requirements import (
     SkillPluginRequirementError,
     validate_required_plugins,
@@ -569,7 +569,7 @@ class PluginBindingsField(serializers.Field):
                     "Plugin Connection secret is unavailable."
                 )
             try:
-                plugin = latest_plugin(connection.plugin_key)
+                plugin = installed_plugin(connection.plugin_key)
             except PluginRegistryError as exc:
                 raise serializers.ValidationError(str(exc)) from exc
             available = {tool.key for tool in plugin.tools}
@@ -1199,14 +1199,14 @@ class AssistantSerializer(serializers.ModelSerializer):
             if not binding.get("enabled", True):
                 continue
             connection = binding["connection"]
-            plugin = latest_plugin(connection.plugin_key)
+            plugin = installed_plugin(connection.plugin_key)
             capabilities_by_plugin.setdefault(plugin.key, set()).update(
                 tool.capability
                 for tool in plugin.tools
             )
         for adapter in self._plugin_mcp_adapters(attrs):
             connection = adapter.connection
-            plugin = latest_plugin(connection.plugin_key)
+            plugin = installed_plugin(connection.plugin_key)
             selected_tools = set(adapter.tools or [])
             capabilities_by_plugin.setdefault(plugin.key, set()).update(
                 tool.capability
@@ -1267,7 +1267,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             connection = binding.get("connection")
             if connection is None:
                 continue
-            plugin = latest_plugin(connection.plugin_key)
+            plugin = installed_plugin(connection.plugin_key)
             tool_keys.extend(tool.key for tool in plugin.tools)
         tool_keys.extend(
             key
@@ -1747,7 +1747,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
         _validate_plugin_json(config, "config")
         _validate_plugin_json(allowed_scope, "allowed_scope")
         try:
-            latest_plugin(plugin_key)
+            installed_plugin(plugin_key)
             provider = get_datasource_provider(plugin_key)
         except PluginRegistryError as exc:
             raise serializers.ValidationError({"plugin_key": str(exc)})
@@ -2018,7 +2018,15 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 )
             plugin_key = connection.plugin_key
             try:
-                latest_plugin(plugin_key)
+                plugin = installed_plugin(plugin_key)
+                if plugin.datasource is None:
+                    raise serializers.ValidationError(
+                        {
+                            "plugin_key": (
+                                "Plugin does not support datasources"
+                            )
+                        }
+                    )
                 provider = get_datasource_provider(plugin_key)
             except (DatasourceProviderError, PluginRegistryError) as exc:
                 raise serializers.ValidationError({"plugin_key": str(exc)})
@@ -3260,7 +3268,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
         if errors or connection is None:
             raise serializers.ValidationError(errors)
         try:
-            plugin = latest_plugin(connection.plugin_key)
+            plugin = installed_plugin(connection.plugin_key)
         except PluginRegistryError as exc:
             raise serializers.ValidationError(
                 {"connection_uuid": str(exc)}

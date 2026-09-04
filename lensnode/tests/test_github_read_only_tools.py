@@ -59,7 +59,6 @@ def test_every_bundled_manifest_tool_builds_with_its_declared_schema():
         Path(__file__).resolve().parents[2]
         / "plugins"
         / "github"
-        / "1.0.0"
         / "plugin.json"
     )
     definitions = json.loads(manifest_path.read_text())["tools"]
@@ -247,6 +246,257 @@ def test_commit_list_and_get_return_stable_fields():
         }
     ]
     assert "patch" not in str(commit)
+
+
+def test_activity_summary_batches_and_filters_repository_activity():
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        if request.url.path.endswith("/commits"):
+            assert parse_qs(request.url.query.decode()) == {
+                "page": ["1"],
+                "per_page": ["2"],
+                "since": ["2026-09-01T16:00:00Z"],
+                "until": ["2026-09-02T15:59:59Z"],
+            }
+            payload = [
+                {
+                    "sha": "abc",
+                    "html_url": "https://github.com/c/abc",
+                    "commit": {
+                        "message": "feat: useful work",
+                        "author": {
+                            "name": "Developer",
+                            "date": "2026-09-02T08:00:00Z",
+                        },
+                    },
+                    "author": {"login": "developer"},
+                }
+            ]
+        elif request.url.path.endswith("/pulls"):
+            assert parse_qs(request.url.query.decode()) == {
+                "direction": ["desc"],
+                "page": ["1"],
+                "per_page": ["2"],
+                "sort": ["updated"],
+                "state": ["all"],
+            }
+            payload = [
+                {
+                    "number": 10,
+                    "title": "In window",
+                    "state": "closed",
+                    "user": {"login": "developer"},
+                    "created_at": "2026-09-01T10:00:00Z",
+                    "updated_at": "2026-09-02T08:00:00Z",
+                    "html_url": "https://github.com/pull/10",
+                },
+                {
+                    "number": 9,
+                    "title": "Too old",
+                    "state": "closed",
+                    "user": {"login": "developer"},
+                    "created_at": "2026-08-01T10:00:00Z",
+                    "updated_at": "2026-08-02T08:00:00Z",
+                    "html_url": "https://github.com/pull/9",
+                },
+            ]
+        else:
+            assert parse_qs(request.url.query.decode()) == {
+                "direction": ["desc"],
+                "page": ["1"],
+                "per_page": ["2"],
+                "q": [
+                    "repo:HyperBDR/sourcelens is:issue "
+                    "updated:2026-09-01T16:00:00Z.."
+                    "2026-09-02T15:59:59Z"
+                ],
+                "sort": ["updated"],
+            }
+            payload = {
+                "total_count": 1,
+                "incomplete_results": False,
+                "items": [
+                    {
+                        "number": 20,
+                        "title": "Issue in window",
+                        "state": "open",
+                        "user": {"login": "reporter"},
+                        "created_at": "2026-09-02T07:00:00Z",
+                        "updated_at": "2026-09-02T09:00:00Z",
+                        "html_url": "https://github.com/issues/20",
+                    }
+                ],
+            }
+        return httpx.Response(200, json=payload, request=request)
+
+    result = _execute(
+        "github_activity_summary",
+        {
+            "repositories": ["HyperBDR/sourcelens"],
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
+            "per_page": 2,
+        },
+        handler,
+    )
+
+    repository = result["repositories"][0]
+    assert len(requests) == 3
+    assert repository["commits"][0]["sha"] == "abc"
+    assert [item["number"] for item in repository["pull_requests"]] == [10]
+    assert [item["number"] for item in repository["issues"]] == [20]
+    assert repository["possibly_truncated"] == {
+        "commits": False,
+        "pull_requests": False,
+        "issues": False,
+    }
+    assert "body" not in json.dumps(result)
+
+
+def test_activity_summary_applies_safe_resource_specific_limits():
+    def handler(request):
+        query = parse_qs(request.url.query.decode())
+        expected = "50" if request.url.path.endswith("/commits") else "10"
+        assert query["per_page"] == [expected]
+        if request.url.path == "/search/issues":
+            return httpx.Response(
+                200,
+                json={
+                    "total_count": 0,
+                    "incomplete_results": False,
+                    "items": [],
+                },
+                request=request,
+            )
+        return httpx.Response(200, json=[], request=request)
+
+    result = _execute(
+        "github_activity_summary",
+        {
+            "repositories": ["HyperBDR/sourcelens"],
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
+        },
+        handler,
+    )
+
+    assert result["limits"] == {
+        "commits": 50,
+        "pull_requests": 10,
+        "issues": 10,
+    }
+
+
+def test_activity_summary_uses_issue_only_search_before_limit():
+    def handler(request):
+        if request.url.path != "/search/issues":
+            return httpx.Response(200, json=[], request=request)
+        query = parse_qs(request.url.query.decode())
+        assert query["per_page"] == ["10"]
+        assert "is:issue" in query["q"][0]
+        issue = {
+            "number": 20,
+            "title": "Issue after recent pull requests",
+            "state": "open",
+            "user": {"login": "reporter"},
+            "created_at": "2026-09-02T07:00:00Z",
+            "updated_at": "2026-09-02T09:00:00Z",
+            "html_url": "https://github.com/issues/20",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 1,
+                "incomplete_results": False,
+                "items": [issue],
+            },
+            request=request,
+        )
+
+    result = _execute(
+        "github_activity_summary",
+        {
+            "repositories": ["HyperBDR/sourcelens"],
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
+        },
+        handler,
+    )
+
+    repository = result["repositories"][0]
+    assert [item["number"] for item in repository["issues"]] == [20]
+    assert repository["possibly_truncated"]["issues"] is False
+
+
+def test_activity_summary_preserves_partial_results_when_one_request_fails():
+    def handler(request):
+        if request.url.path.endswith("/issues"):
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json=[], request=request)
+
+    result = _execute(
+        "github_activity_summary",
+        {
+            "repositories": ["HyperBDR/sourcelens"],
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
+        },
+        handler,
+    )
+
+    repository = result["repositories"][0]
+    assert result["ok"] is True
+    assert repository["errors"] == {"issues": "GITHUB_REQUEST_FAILED"}
+    assert repository["commits"] == []
+    assert repository["pull_requests"] == []
+
+
+def test_activity_summary_retries_transient_issue_search_failure():
+    issue_attempts = 0
+
+    def handler(request):
+        nonlocal issue_attempts
+        if request.url.path != "/search/issues":
+            return httpx.Response(200, json=[], request=request)
+        issue_attempts += 1
+        if issue_attempts == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "total_count": 1,
+                "incomplete_results": False,
+                "items": [
+                    {
+                        "number": 20,
+                        "title": "Recovered issue search",
+                        "state": "open",
+                        "user": {"login": "reporter"},
+                        "created_at": "2026-09-02T07:00:00Z",
+                        "updated_at": "2026-09-02T09:00:00Z",
+                        "html_url": "https://github.com/issues/20",
+                    }
+                ],
+            },
+            request=request,
+        )
+
+    result = _execute(
+        "github_activity_summary",
+        {
+            "repositories": ["HyperBDR/sourcelens"],
+            "since": "2026-09-01T16:00:00Z",
+            "until": "2026-09-02T15:59:59Z",
+        },
+        handler,
+    )
+
+    repository = result["repositories"][0]
+    assert issue_attempts == 2
+    assert [item["number"] for item in repository["issues"]] == [20]
+    assert "errors" not in repository
 
 
 @pytest.mark.parametrize(

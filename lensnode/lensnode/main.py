@@ -1103,6 +1103,14 @@ class LensNodeClient:
                 self.config.token,
                 message.get("snapshot_uuid"),
             )
+            plugin_key = str(snapshot.get("plugin_key") or "")
+            plugin_version = str(snapshot.get("plugin_version") or "")
+            runtime = load_runtime_contract(plugin_key, plugin_version)
+            if not callable(runtime.build_datasource_command):
+                return {
+                    "status": "failed",
+                    "error": "PLUGIN_DATASOURCE_UNSUPPORTED",
+                }
             lease = acquire_plugin_lease(
                 self.gateway_http_client,
                 self.config.ai_gateway_url,
@@ -1115,46 +1123,40 @@ class LensNodeClient:
                 self.config.token,
                 lease["lease_uuid"],
             )
+        except PluginPackageLoadError:
+            return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
         except PluginRuntimeError as exc:
             return {"status": "failed", "error": str(exc)}
         except httpx.HTTPError:
             return {"status": "failed", "error": "PLUGIN_RUNTIME_UNAVAILABLE"}
         try:
-            plugin_key = str(snapshot.get("plugin_key") or "")
-            plugin_version = str(snapshot.get("plugin_version") or "")
-            try:
-                runtime = load_runtime_contract(plugin_key, plugin_version)
-                command = runtime.build_datasource_command(
-                    snapshot,
-                    material,
-                    message.get("trigger") or "plugin",
+            command = runtime.build_datasource_command(
+                snapshot,
+                material,
+                message.get("trigger") or "plugin",
+            )
+            plugin_http_pool = getattr(
+                self,
+                "plugin_http_pool",
+                None,
+            )
+            if plugin_http_pool is not None and callable(
+                runtime.http_origins
+            ):
+                resolved = snapshot.get("resolved_config") or {}
+                endpoint = resolved.get("endpoint")
+                connection_scope = (
+                    snapshot.get("connection_uuid")
+                    or snapshot.get("snapshot_uuid")
+                    or message.get("snapshot_uuid")
                 )
-                plugin_http_pool = getattr(
-                    self,
-                    "plugin_http_pool",
-                    None,
+                command["provider_http_client"] = plugin_http_pool.bind(
+                    plugin_key,
+                    connection_scope,
+                    runtime.http_origins(endpoint),
                 )
-                if plugin_http_pool is not None and callable(
-                    runtime.http_origins
-                ):
-                    resolved = snapshot.get("resolved_config") or {}
-                    endpoint = resolved.get("endpoint")
-                    connection_scope = (
-                        snapshot.get("connection_uuid")
-                        or snapshot.get("snapshot_uuid")
-                        or message.get("snapshot_uuid")
-                    )
-                    command["provider_http_client"] = (
-                        plugin_http_pool.bind(
-                            plugin_key,
-                            connection_scope,
-                            runtime.http_origins(endpoint),
-                        )
-                    )
-                if message.get("cancel_event") is not None:
-                    command["cancel_event"] = message["cancel_event"]
-            except PluginPackageLoadError:
-                return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
+            if message.get("cancel_event") is not None:
+                command["cancel_event"] = message["cancel_event"]
             return sync_datasource(
                 command,
                 self.config.workspace_path,

@@ -2,18 +2,14 @@
 
 from .contracts import ToolProviderError
 from .package_loader import PluginPackageLoadError, load_control_contract
-from .registry import PluginRegistryError, installed_plugin, latest_plugin
+from .registry import PluginRegistryError, installed_plugin
 
 
 def get_tool_provider(plugin_key, plugin_version=None):
-    """Return the Tool Provider for one exact installed Plugin version."""
+    """Return the Tool Provider for one installed Plugin release."""
 
     try:
-        plugin = (
-            installed_plugin(plugin_key, plugin_version)
-            if plugin_version
-            else latest_plugin(plugin_key)
-        )
+        plugin = installed_plugin(plugin_key, plugin_version)
         if plugin.control_handler != "python_v1":
             raise ToolProviderError("tool provider is unsupported")
         return load_control_contract(plugin).tool_provider

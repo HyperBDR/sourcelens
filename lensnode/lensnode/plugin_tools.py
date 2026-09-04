@@ -1,4 +1,4 @@
-"""Model-facing tools backed by versioned Plugin runtime packages."""
+"""Model-facing tools backed by installed Plugin runtime packages."""
 
 import json
 import threading
@@ -34,7 +34,7 @@ def build_plugin_tools(
     emit_event=None,
     plugin_http_pool=None,
 ):
-    """Build tools from exact runtime versions in frozen Plugin bindings."""
+    """Build tools from installed runtimes in frozen Plugin bindings."""
 
     loaded_plugins = command.get("loaded_plugins") or []
     if not loaded_plugins:
@@ -83,6 +83,7 @@ def build_plugin_tools(
                 _contract=contract,
                 _connection_uuid=connection_uuid,
                 _plugin_key=plugin_key,
+                _plugin_version=plugin_version,
             ):
                 return _execute_plugin_tool(
                     command,
@@ -90,6 +91,7 @@ def build_plugin_tools(
                     http_client,
                     _connection_uuid,
                     _plugin_key,
+                    _plugin_version,
                     selected_tool_key,
                     runtime,
                     arguments,
@@ -127,6 +129,7 @@ def _execute_plugin_tool(
     http_client,
     connection_uuid,
     plugin_key,
+    plugin_version,
     tool_key,
     runtime,
     arguments,
@@ -142,6 +145,7 @@ def _execute_plugin_tool(
     call_id = str(getattr(runtime, "tool_call_id", "") or "")
     cache_key = _plugin_result_cache_key(
         plugin_key,
+        plugin_version,
         connection_uuid,
         tool_key,
         arguments,
@@ -192,6 +196,7 @@ def _execute_plugin_tool(
             resolved,
             command.get("run_uuid"),
             plugin_key,
+            plugin_version,
             tool_key,
             call_id,
         )
@@ -268,11 +273,18 @@ def _execute_plugin_tool(
     return encoded
 
 
-def _plugin_result_cache_key(plugin_key, connection_uuid, tool_key, arguments):
+def _plugin_result_cache_key(
+    plugin_key,
+    plugin_version,
+    connection_uuid,
+    tool_key,
+    arguments,
+):
     """Build a stable per-run key for identical read-only Plugin calls."""
 
     return (
         str(plugin_key),
+        str(plugin_version),
         str(connection_uuid),
         str(tool_key),
         json.dumps(
@@ -284,13 +296,21 @@ def _plugin_result_cache_key(plugin_key, connection_uuid, tool_key, arguments):
     )
 
 
-def _validate_snapshot(snapshot, run_uuid, plugin_key, tool_key, call_id):
+def _validate_snapshot(
+    snapshot,
+    run_uuid,
+    plugin_key,
+    plugin_version,
+    tool_key,
+    call_id,
+):
     """Return frozen Plugin inputs from the matching snapshot."""
 
     resolved_config = snapshot.get("resolved_config")
     if (
         str(snapshot.get("run_uuid") or "") != str(run_uuid or "")
         or snapshot.get("plugin_key") != plugin_key
+        or snapshot.get("plugin_version") != plugin_version
         or snapshot.get("tool_key") != tool_key
         or str(snapshot.get("invocation_id") or "") != call_id
         or not isinstance(resolved_config, dict)

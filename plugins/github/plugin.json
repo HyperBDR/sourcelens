@@ -33,9 +33,10 @@
       },
       {
         "key": "issues_and_pull_requests",
-        "summary": "Inspect issue and pull request metadata, comments, files, and reviews.",
-        "details": "Use list tools before requesting a specific item when the number is unknown. For activity reports, pass an ISO-8601 since/until window to commit lists; pass since to issue lists and filter until locally. Pull requests do not support server-side time filters: request the smallest recent page, filter locally by the window, and stop when entries are older. Fetch pull request or issue details, comments, files, and reviews only for records that match the window and need clarification. Never repeat the same repository, tool, and arguments; parallelize independent repositories.",
+        "summary": "Inspect activity, issue and pull request metadata, comments, files, and reviews.",
+        "details": "For a time-bounded activity report across one or more repositories, call github_activity_summary once with every approved repository instead of calling list tools per repository. Use list tools before requesting a specific item for other tasks. Fetch pull request or issue details, comments, files, and reviews only for the few matching records whose summary lacks a required report field. Never repeat the same repository, tool, and arguments.",
         "tool_keys": [
+          "github_activity_summary",
           "github_issue_list",
           "github_issue_get",
           "github_issue_comments",
@@ -204,6 +205,46 @@
           }
         },
         "required": ["repository"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_activity_summary",
+      "description": "Get compact commits, pull requests, and issues updated in one ISO-8601 time window across approved GitHub repositories. Use this once for activity reports instead of separate list calls per repository. Results use safe resource-specific candidate limits and omit bodies, comments, reviews, files, and patches.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repositories": {
+            "type": "array",
+            "description": "Approved repositories in owner/repository form.",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inclusive ISO-8601 lower bound."
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Inclusive ISO-8601 upper bound."
+          },
+          "per_page": {
+            "type": "integer",
+            "description": "Optional candidate ceiling from 1 through 100. The runtime applies lower safe limits to body-heavy resource types. Defaults to 50; only records inside the requested window are returned.",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": ["repositories", "since", "until"],
         "additionalProperties": false
       }
     },

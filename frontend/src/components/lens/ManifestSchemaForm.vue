@@ -160,15 +160,45 @@
       >
         {{ emptyResourceText }}
       </div>
-      <textarea
+      <div
         v-else-if="isArrayField(field) && !isTreeField(field)"
-        :id="fieldId(field)"
-        :value="arrayValue(field).join('\n')"
-        :class="[controlClass, 'min-h-24 font-mono']"
-        :placeholder="field.description || ''"
-        :required="isRequired(field)"
-        @input="updateArray(field, $event.target.value)"
-      />
+        class="space-y-2"
+      >
+        <div
+          v-for="(item, index) in arrayRows(field)"
+          :key="index"
+          class="flex items-center gap-2"
+        >
+          <input
+            :id="arrayItemId(field, index)"
+            :value="item"
+            :class="[controlClass, 'min-w-0 flex-1 font-mono']"
+            :type="arrayInputType(field)"
+            :aria-label="`${field.title || field.key} ${index + 1}`"
+            :placeholder="field.description || ''"
+            @input="updateArrayItem(field, index, $event.target.value)"
+          />
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line text-ink-500 transition hover:border-danger-200 hover:bg-danger-50 hover:text-danger-700 disabled:cursor-not-allowed disabled:opacity-40"
+            :aria-label="`${removeArrayItemLabel} ${index + 1}`"
+            :title="removeArrayItemLabel"
+            :disabled="arrayRows(field).length === 1"
+            @click="removeArrayItem(field, index)"
+          >
+            <XIcon class="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-line px-3 py-2 text-sm font-medium text-ink-600 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="!canAddArrayItem(field)"
+          @click="addArrayItem(field)"
+        >
+          <PlusIcon class="h-4 w-4" aria-hidden="true" />
+          {{ addArrayItemLabel }}
+        </button>
+      </div>
       <BaseSelect
         v-else-if="isResourceField(field)"
         :id="fieldId(field)"
@@ -228,7 +258,8 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { Plus as PlusIcon, X as XIcon } from '@lucide/vue'
+import { computed, nextTick, ref } from 'vue'
 
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
@@ -244,6 +275,8 @@ const props = defineProps({
   resourceCountLabel: { type: String, default: 'resources' },
   selectedCountLabel: { type: String, default: 'selected' },
   privateResourceLabel: { type: String, default: 'Private' },
+  addArrayItemLabel: { type: String, default: 'Add' },
+  removeArrayItemLabel: { type: String, default: 'Remove' },
   controlClass: { type: String, default: 'form-input' }
 })
 
@@ -294,6 +327,45 @@ function arrayValue(field) {
 
 function isArrayField(field) {
   return field.type === 'array'
+}
+
+function arrayRows(field) {
+  const values = arrayValue(field)
+  return values.length ? values : ['']
+}
+
+function arrayItemId(field, index) {
+  return index === 0 ? fieldId(field) : `${fieldId(field)}-${index}`
+}
+
+function arrayInputType(field) {
+  return field.items?.format === 'uri' ? 'url' : 'text'
+}
+
+function canAddArrayItem(field) {
+  const maximum = Number(field.maxItems)
+  return !Number.isFinite(maximum) || arrayRows(field).length < maximum
+}
+
+function updateArrayItem(field, index, value) {
+  const nextValue = [...arrayRows(field)]
+  nextValue[index] = value
+  setField(field, nextValue)
+}
+
+function addArrayItem(field) {
+  if (!canAddArrayItem(field)) return
+  setField(field, [...arrayRows(field), ''])
+}
+
+async function removeArrayItem(field, index) {
+  const nextValue = [...arrayRows(field)]
+  if (nextValue.length === 1) return
+  nextValue.splice(index, 1)
+  setField(field, nextValue)
+  await nextTick()
+  const nextIndex = Math.min(index, nextValue.length - 1)
+  document.getElementById(arrayItemId(field, nextIndex))?.focus()
 }
 
 function isTreeField(field) {
@@ -503,16 +575,6 @@ function setField(field, value) {
     }
   })
   emit('update:modelValue', nextValue)
-}
-
-function updateArray(field, value) {
-  setField(
-    field,
-    String(value || '')
-      .split(/[\n,]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  )
 }
 </script>
 

@@ -130,6 +130,41 @@ class PluginLeaseTests(TestCase):
         )
         self.assertNotIn("encrypted_value", response.data)
 
+    def test_feishu_snapshot_keeps_non_secret_resource_tokens(self):
+        self.snapshot.plugin_key = "feishu"
+        self.snapshot.resolved_config = {
+            "token": "must-not-leave-control-plane",
+            "connection_config": {
+                "kind": "credential",
+                "token": "nested-secret",
+            },
+            "datasource_config": {
+                "resources": [
+                    {"kind": "folder", "token": "fld_resource"}
+                ]
+            },
+        }
+        self.snapshot.save(update_fields=["plugin_key", "resolved_config"])
+
+        response = self.client.get(
+            f"/api/lens/plugin-runtime/snapshots/{self.snapshot.uuid}/",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("token", response.data["resolved_config"])
+        self.assertNotIn(
+            "token",
+            response.data["resolved_config"]["connection_config"],
+        )
+        resources = response.data["resolved_config"]["datasource_config"][
+            "resources"
+        ]
+        self.assertEqual(
+            resources[0],
+            {"kind": "folder", "token": "fld_resource"},
+        )
+
     def test_expired_lease_cannot_resolve_material(self):
         lease_response = self.client.post(
             "/api/lens/plugin-runtime/leases/",

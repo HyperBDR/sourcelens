@@ -181,6 +181,8 @@
           :resources="pluginResources"
           :loading-resource="loadingResourceOptions"
           :schema="datasourceSchema"
+          :add-array-item-label="t('common.add')"
+          :remove-array-item-label="t('common.delete')"
           @resource-options-request="$emit('request-resource-options', $event)"
           @update:model-value="updatePluginConfig"
         />
@@ -1534,28 +1536,33 @@ const drawerSubtitle = computed(() =>
   props.mode === 'edit' ? props.form.name || '' : ''
 )
 
-const sourceTypes = computed(() => [
-  ...props.plugins.map((plugin) => ({
-    value: `plugin:${plugin.key}`,
-    label: plugin.display_name,
-    description: plugin.description || ''
-  })),
-  {
-    value: 'gitlab',
-    label: 'GitLab',
-    description: t('lensAdmin.datasourceWizard.gitlabDesc')
-  },
-  {
-    value: 'feishu',
-    label: t('lensAdmin.datasourceWizard.feishu'),
-    description: t('lensAdmin.datasourceWizard.feishuDesc')
-  },
-  {
-    value: 'managed_workspace',
-    label: t('lensAdmin.datasourceWizard.managedWorkspace'),
-    description: t('lensAdmin.datasourceWizard.managedWorkspaceDesc')
+const sourceTypes = computed(() => {
+  const types = [
+    ...props.plugins.map((plugin) => ({
+      value: `plugin:${plugin.key}`,
+      label: plugin.display_name,
+      description: plugin.description || ''
+    })),
+    {
+      value: 'gitlab',
+      label: 'GitLab',
+      description: t('lensAdmin.datasourceWizard.gitlabDesc')
+    },
+    {
+      value: 'managed_workspace',
+      label: t('lensAdmin.datasourceWizard.managedWorkspace'),
+      description: t('lensAdmin.datasourceWizard.managedWorkspaceDesc')
+    }
+  ]
+  if (props.mode === 'edit' && props.form.source_type === 'feishu') {
+    types.splice(types.length - 1, 0, {
+      value: 'feishu',
+      label: t('lensAdmin.datasourceWizard.feishu'),
+      description: t('lensAdmin.datasourceWizard.feishuDesc')
+    })
   }
-])
+  return types
+})
 
 const selectedSourceTypeDescription = computed(() => {
   const selected = sourceTypes.value.find(
@@ -1711,13 +1718,13 @@ const canProceedWizard = computed(() => {
     if (props.connectionResult?.status !== 'success') {
       return false
     }
+    if (isPluginSourceType(props.form.source_type)) {
+      return Boolean(
+        props.form.connection_uuid &&
+          schemaRequiredFieldsHaveValues(datasourceSchema.value, props.config)
+      )
+    }
     if (isGitSourceType(props.form.source_type)) {
-      if (isPluginSourceType(props.form.source_type)) {
-        return Boolean(
-          props.form.connection_uuid &&
-            schemaRequiredFieldsHaveValues(datasourceSchema.value, props.config)
-        )
-      }
       if (isGitOrganizationMode.value) {
         return selectedGitOrganizationRepositories.value.length > 0
       }
@@ -1861,7 +1868,7 @@ function schemaRequiredFieldsHaveValues(schema, value) {
   return required.every((key) => {
     const fieldValue = value?.[key]
     return Array.isArray(fieldValue)
-      ? fieldValue.length > 0
+      ? fieldValue.some((item) => String(item ?? '').trim().length > 0)
       : String(fieldValue ?? '').trim().length > 0
   })
 }

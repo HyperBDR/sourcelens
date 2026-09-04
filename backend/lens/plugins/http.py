@@ -1,6 +1,7 @@
 """Host-controlled HTTP clients for trusted Plugin control runtimes."""
 
 import atexit
+import json
 import threading
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -38,7 +39,7 @@ class PluginHttpClientPool:
         self._lock = threading.Lock()
 
     def bind(self, plugin_key, connection_uuid, origins):
-        """Return a request facade restricted to declared HTTPS origins."""
+        """Return a request facade restricted to declared HTTP origins."""
 
         plugin_key = str(plugin_key or "").strip()
         connection_uuid = str(connection_uuid or "").strip()
@@ -141,18 +142,27 @@ class PluginHttpClient:
 
     @contextmanager
     def stream(self, method, url, **kwargs):
-        """Stream one bounded read request within the declared origins."""
+        """Stream one bounded integration request within declared origins."""
 
         method = str(method or "").upper()
-        if method not in {"GET", "HEAD"}:
+        if method not in {"GET", "HEAD", "POST"}:
             raise PluginHttpClientError("PLUGIN_HTTP_METHOD_REJECTED")
         unsupported = set(kwargs) - {
+            "content",
+            "json",
             "params",
             "headers",
             "follow_redirects",
         }
         if unsupported:
             raise PluginHttpClientError("PLUGIN_HTTP_OPTIONS_REJECTED")
+        if "content" in kwargs and "json" in kwargs:
+            raise PluginHttpClientError("PLUGIN_HTTP_OPTIONS_REJECTED")
+        if method != "POST" and any(
+            kwargs.get(key) is not None for key in ("content", "json")
+        ):
+            raise PluginHttpClientError("PLUGIN_HTTP_OPTIONS_REJECTED")
+        _validate_request_body(kwargs)
         origin = _request_origin(url)
         if origin not in self._origins:
             raise PluginHttpClientError("PLUGIN_HTTP_ORIGIN_REJECTED")
@@ -171,8 +181,34 @@ class PluginHttpClient:
             yield response
 
 
+def _validate_request_body(options):
+    """Reject oversized or unsupported Plugin request bodies."""
+
+    content = options.get("content")
+    if content is not None:
+        if not isinstance(content, (bytes, str)):
+            raise PluginHttpClientError("PLUGIN_HTTP_BODY_REJECTED")
+        encoded_content = (
+            content.encode("utf-8") if isinstance(content, str) else content
+        )
+        if len(encoded_content) > 64 * 1024:
+            raise PluginHttpClientError("PLUGIN_HTTP_BODY_REJECTED")
+    value = options.get("json")
+    if value is not None:
+        try:
+            encoded = json.dumps(
+                value,
+                allow_nan=False,
+                ensure_ascii=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise PluginHttpClientError("PLUGIN_HTTP_BODY_REJECTED") from exc
+        if len(encoded) > 64 * 1024:
+            raise PluginHttpClientError("PLUGIN_HTTP_BODY_REJECTED")
+
+
 def _normalize_origins(origins):
-    """Return a non-empty immutable set of canonical HTTPS origins."""
+    """Return a non-empty immutable set of canonical HTTP origins."""
 
     try:
         normalized = frozenset(_normalize_origin(item) for item in origins)
@@ -184,7 +220,7 @@ def _normalize_origins(origins):
 
 
 def _normalize_origin(value):
-    """Return a canonical HTTPS origin without credentials or path."""
+    """Return a canonical HTTP origin without credentials or path."""
 
     parsed = _safe_split(value)
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
@@ -208,7 +244,7 @@ def _safe_split(value):
     except ValueError as exc:
         raise PluginHttpClientError("PLUGIN_HTTP_URL_INVALID") from exc
     if (
-        parsed.scheme.lower() != "https"
+        parsed.scheme.lower() not in {"http", "https"}
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
@@ -218,12 +254,14 @@ def _safe_split(value):
 
 
 def _parsed_origin(parsed):
+    scheme = parsed.scheme.lower()
     host = parsed.hostname.lower()
     if ":" in host:
         host = f"[{host}]"
     port = parsed.port
-    port_suffix = f":{port}" if port not in {None, 443} else ""
-    return f"https://{host}{port_suffix}"
+    default_port = 80 if scheme == "http" else 443
+    port_suffix = f":{port}" if port not in {None, default_port} else ""
+    return f"{scheme}://{host}{port_suffix}"
 
 
 plugin_http_pool = PluginHttpClientPool()

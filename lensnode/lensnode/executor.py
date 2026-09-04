@@ -642,6 +642,11 @@ class LensNodeExecutor:
                     "run_uuid": run_uuid,
                     "status": result.get("status") or "done",
                     "outcome": result.get("outcome") or "completed",
+                    "final_content": result["answer"],
+                    "citations": result.get("citations") or [],
+                    "planned_evidence": (
+                        result.get("planned_evidence") or {}
+                    ),
                     "termination_detail": (
                         result.get("termination_detail") or {}
                     ),

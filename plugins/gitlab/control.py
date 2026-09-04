@@ -1,6 +1,7 @@
 """GitLab implementation of the generic datasource Provider contract."""
 
 import json
+from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -204,6 +205,77 @@ class GitLabDatasourceProvider(DatasourceProvider):
                 items.append({"value": name[:255], "label": name[:255]})
         return {"resources": {"branches": {"items": items}}}
 
+    def discover_connection_resources(
+        self,
+        secret,
+        endpoint="",
+        connection_config=None,
+        query="",
+        cursor="",
+        limit=50,
+        client=None,
+        request_context=None,
+    ):
+        """List projects visible to a temporary Connection token."""
+
+        base_url = self.validate_connection(endpoint, connection_config)
+        token = _secret_value(secret)
+        page = _connection_resource_page(cursor)
+        limit = _connection_resource_limit(limit)
+        query = _connection_resource_query(query)
+        params = {
+            "membership": "true",
+            "simple": "true",
+            "order_by": "last_activity_at",
+            "sort": "desc",
+            "per_page": limit,
+            "page": page,
+        }
+        if query:
+            params["search"] = query
+        context = request_context or PluginRequestContext(
+            timeout_seconds=GITLAB_TIMEOUT_SECONDS,
+        )
+        with _GitLabClient(client) as gitlab_client:
+            payload = context.run(
+                lambda: _gitlab_json(
+                    gitlab_client,
+                    base_url,
+                    "/api/v4/projects",
+                    token,
+                    params=params,
+                )
+            )
+        if not isinstance(payload, list):
+            raise DatasourceProviderError("GITLAB_RESPONSE_INVALID")
+        items = []
+        for item in payload[:limit]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("path_with_namespace")
+            try:
+                project = _project_name(name)
+            except DatasourceProviderError:
+                continue
+            items.append(
+                {
+                    "value": project,
+                    "label": project,
+                    "metadata": {
+                        "visibility": str(
+                            item.get("visibility") or ""
+                        )[:32],
+                        "last_activity_at": str(
+                            item.get("last_activity_at") or ""
+                        )[:64],
+                    },
+                }
+            )
+        return {
+            "resources": {"projects": {"items": items}},
+            "next_cursor": str(page + 1) if len(payload) == limit else "",
+        }
+
     def validate_datasource_config(
         self,
         connection_scope,
@@ -248,11 +320,11 @@ class GitLabDatasourceProvider(DatasourceProvider):
 
 
 def _endpoint(value):
-    """Return a safe root HTTPS GitLab endpoint."""
+    """Return a safe root HTTP(S) GitLab endpoint."""
 
     parsed = urlsplit(str(value or "").strip())
     if (
-        parsed.scheme != "https"
+        parsed.scheme not in {"http", "https"}
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
@@ -261,7 +333,7 @@ def _endpoint(value):
         or parsed.fragment
     ):
         raise DatasourceProviderError("GitLab connection endpoint is invalid")
-    return urlunsplit(("https", parsed.netloc, "", "", ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
 def _project_name(value):
@@ -290,6 +362,46 @@ def _project_name(value):
             "project must use namespace/project form"
         )
     return project
+
+
+def _connection_resource_page(value):
+    """Return one bounded one-based GitLab page cursor."""
+
+    if value in {None, ""}:
+        return 1
+    try:
+        page = int(value)
+    except (TypeError, ValueError) as exc:
+        raise DatasourceProviderError(
+            "connection resource cursor is invalid"
+        ) from exc
+    if page < 1 or page > 10_000:
+        raise DatasourceProviderError(
+            "connection resource cursor is invalid"
+        )
+    return page
+
+
+def _connection_resource_limit(value):
+    """Return one bounded connection project page size."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DatasourceProviderError(
+            "connection resource limit is invalid"
+        )
+    return min(max(value, 1), 100)
+
+
+def _connection_resource_query(value):
+    """Return one bounded optional project search query."""
+
+    if not isinstance(value, str) or len(value) > 100 or any(
+        ord(character) < 32 for character in value
+    ):
+        raise DatasourceProviderError(
+            "connection resource query is invalid"
+        )
+    return value.strip()
 
 
 def _optional_text(value, field, limit):
@@ -409,16 +521,35 @@ class GitLabToolProvider:
 
         try:
             endpoint = _endpoint(endpoint)
-            project = _project_name(
-                arguments.get("project")
-                if isinstance(arguments, dict)
-                else None
-            )
             allowed = {
                 item.casefold()
                 for item in GitLabDatasourceProvider()
                 .validate_connection_scope(allowed_scope)["projects"]
             }
+        except DatasourceProviderError as exc:
+            raise ToolProviderError(str(exc)) from exc
+        if not isinstance(arguments, dict):
+            raise ToolProviderError("tool arguments must be an object")
+        if tool_key == "gitlab_activity_summary":
+            projects = _tool_projects(arguments.get("projects"))
+            if any(project.casefold() not in allowed for project in projects):
+                raise ToolProviderError("project is outside connection scope")
+            since = _tool_timestamp(arguments.get("since"), "since")
+            until = _tool_timestamp(arguments.get("until"), "until")
+            if datetime.fromisoformat(since.replace("Z", "+00:00")) > (
+                datetime.fromisoformat(until.replace("Z", "+00:00"))
+            ):
+                raise ToolProviderError("time window is invalid")
+            return endpoint, {
+                "projects": projects,
+                "since": since,
+                "until": until,
+                "max_results": _activity_max_results(
+                    arguments.get("max_results")
+                ),
+            }
+        try:
+            project = _project_name(arguments.get("project"))
         except DatasourceProviderError as exc:
             raise ToolProviderError(str(exc)) from exc
         if project.casefold() not in allowed:
@@ -498,6 +629,48 @@ def _tool_max_results(value):
     ):
         raise ToolProviderError("max_results must be between 1 and 20")
     return value
+
+
+def _activity_max_results(value):
+    """Return one bounded activity result count."""
+
+    if value is None:
+        return 50
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > 100
+    ):
+        raise ToolProviderError("max_results must be between 1 and 100")
+    return value
+
+
+def _tool_projects(value):
+    """Return unique canonical GitLab projects."""
+
+    if not isinstance(value, list) or not value or len(value) > 50:
+        raise ToolProviderError("projects must contain 1 through 50 items")
+    try:
+        projects = [_project_name(item) for item in value]
+    except DatasourceProviderError as exc:
+        raise ToolProviderError(str(exc)) from exc
+    if len({project.casefold() for project in projects}) != len(projects):
+        raise ToolProviderError("projects must be unique")
+    return projects
+
+
+def _tool_timestamp(value, field):
+    """Return one bounded timezone-aware ISO-8601 timestamp."""
+
+    text = _tool_text(value, field, 64, required=True)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ToolProviderError(f"{field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ToolProviderError(f"{field} is invalid")
+    return text
 
 
 DATASOURCE_PROVIDER = GitLabDatasourceProvider()

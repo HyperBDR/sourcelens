@@ -25,7 +25,7 @@ ALLOWED_HANDLERS = frozenset(
 READ_ONLY_TOOL_CAPABILITIES = frozenset(
     {"issue.read", "jira.issue.search", "repository.read"}
 )
-DATASOURCE_SOURCE_TYPES = frozenset({"git", "jira"})
+DATASOURCE_SOURCE_TYPES = frozenset({"feishu", "git", "jira"})
 SCHEMA_TYPES = frozenset({"array", "boolean", "integer", "string"})
 SCHEMA_FORMATS = frozenset(
     {
@@ -49,12 +49,12 @@ class PluginRegistryError(ValueError):
 
 
 class PluginNotFoundError(PluginRegistryError):
-    """Raised when no installed version matches one Plugin identity."""
+    """Raised when no installed Plugin matches one identity."""
 
 
 @dataclass(frozen=True)
 class InstalledPlugin:
-    """One validated plugin version available to the platform."""
+    """One validated Plugin release available to the platform."""
 
     key: str
     version: str
@@ -63,13 +63,13 @@ class InstalledPlugin:
     display_name: str
     description: str
     icon: str
-    datasource_source_type: str
-    datasource: dict
+    datasource_source_type: str | None
+    datasource: dict | None
     connection_schema: dict
-    datasource_schema: dict
+    datasource_schema: dict | None
     control_handler: str
     runtime_handler: str
-    datasource_handler: str
+    datasource_handler: str | None
     tools: tuple
     assistant_guidance: dict
     path: Path
@@ -88,7 +88,7 @@ class InstalledPluginTool:
 
 
 def discover_plugins():
-    """Return validated Plugin versions from configured controlled roots."""
+    """Return validated Plugin releases from controlled roots."""
 
     plugins = []
     identities = set()
@@ -106,22 +106,19 @@ def discover_plugins():
         for key_dir in sorted(root.iterdir()):
             if not key_dir.is_dir() or key_dir.is_symlink():
                 continue
-            for version_dir in sorted(key_dir.iterdir()):
-                if not version_dir.is_dir() or version_dir.is_symlink():
-                    continue
-                plugin = _load_plugin(root, key_dir, version_dir)
-                identity = (plugin.key, plugin.version)
-                if identity in identities:
-                    raise PluginRegistryError(
-                        "duplicate plugin key and version"
-                    )
-                identities.add(identity)
-                plugins.append(plugin)
+            plugin = _load_plugin(root, key_dir)
+            identity = (plugin.key, plugin.version)
+            if identity in identities:
+                raise PluginRegistryError(
+                    "duplicate plugin key and version"
+                )
+            identities.add(identity)
+            plugins.append(plugin)
     return plugins
 
 
 def latest_plugin(plugin_key):
-    """Return the latest installed version for one Plugin identity."""
+    """Return the latest installed release for one Plugin key."""
 
     matches = [
         plugin for plugin in discover_plugins() if plugin.key == plugin_key
@@ -136,8 +133,11 @@ def latest_plugin(plugin_key):
     )
 
 
-def installed_plugin(plugin_key, version):
-    """Return one exact installed Plugin version."""
+def installed_plugin(plugin_key, version=None):
+    """Return an exact release, or the latest release when omitted."""
+
+    if version is None:
+        return latest_plugin(plugin_key)
 
     for plugin in discover_plugins():
         if plugin.key == plugin_key and plugin.version == version:
@@ -145,10 +145,10 @@ def installed_plugin(plugin_key, version):
     raise PluginNotFoundError("installed plugin version is required")
 
 
-def _load_plugin(root, key_dir, version_dir):
+def _load_plugin(root, plugin_dir):
     """Load one manifest after validating its controlled directory identity."""
 
-    manifest_path = version_dir / "plugin.json"
+    manifest_path = plugin_dir / "plugin.json"
     resolved_path = manifest_path.resolve()
     if root not in resolved_path.parents:
         raise PluginRegistryError("plugin manifest is outside configured root")
@@ -173,7 +173,7 @@ def _load_plugin(root, key_dir, version_dir):
         version
     ):
         raise PluginRegistryError("plugin version is invalid")
-    if key != key_dir.name or version != version_dir.name:
+    if key != plugin_dir.name:
         raise PluginRegistryError(
             "plugin manifest does not match directory identity"
         )
@@ -184,19 +184,27 @@ def _load_plugin(root, key_dir, version_dir):
     control_handler = handlers.get("control")
     runtime_handler = handlers.get("runtime")
     datasource_handler = handlers.get("datasource")
-    if control_handler == "python_v1":
+    has_datasource = any(
+        (
+            datasource_handler is not None,
+            manifest.get("datasource_source_type") is not None,
+            manifest.get("datasource") is not None,
+            manifest.get("datasource_schema") is not None,
+        )
+    )
+    if has_datasource and control_handler == "python_v1":
         datasource_handler = "python_v1"
     elif control_handler is None:
         control_handler = datasource_handler
     if runtime_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin runtime handler is not allowed")
-    if datasource_handler not in ALLOWED_HANDLERS:
+    if has_datasource and datasource_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin datasource handler is not allowed")
     if control_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin control handler is not allowed")
     if control_handler == "python_v1" or runtime_handler == "python_v1":
-        _validate_python_entrypoint(version_dir, "control")
-        _validate_python_entrypoint(version_dir, "runtime")
+        _validate_python_entrypoint(plugin_dir, "control")
+        _validate_python_entrypoint(plugin_dir, "runtime")
     capability_family = manifest.get("capability_family", "plugin")
     if capability_family not in SUPPORTED_CAPABILITY_FAMILIES:
         raise PluginRegistryError(
@@ -221,23 +229,32 @@ def _load_plugin(root, key_dir, version_dir):
         1000,
         required=False,
     )
-    icon = _validate_plugin_icon(version_dir, manifest.get("icon"))
-    datasource_source_type = manifest.get("datasource_source_type", "git")
-    if datasource_source_type not in DATASOURCE_SOURCE_TYPES:
-        raise PluginRegistryError("plugin datasource source type is invalid")
+    icon = _validate_plugin_icon(plugin_dir, manifest.get("icon"))
     connection_schema = _validate_form_schema(
         manifest.get("connection_schema"),
         "connection",
     )
-    datasource_schema = _validate_form_schema(
-        manifest.get("datasource_schema"),
-        "datasource",
-    )
-    datasource = _validate_datasource_definition(
-        manifest.get("datasource"),
-        datasource_source_type,
-        datasource_schema,
-    )
+    datasource_source_type = None
+    datasource_schema = None
+    datasource = None
+    if has_datasource:
+        datasource_source_type = manifest.get(
+            "datasource_source_type",
+            "git",
+        )
+        if datasource_source_type not in DATASOURCE_SOURCE_TYPES:
+            raise PluginRegistryError(
+                "plugin datasource source type is invalid"
+            )
+        datasource_schema = _validate_form_schema(
+            manifest.get("datasource_schema"),
+            "datasource",
+        )
+        datasource = _validate_datasource_definition(
+            manifest.get("datasource"),
+            datasource_source_type,
+            datasource_schema,
+        )
     return InstalledPlugin(
         key=key,
         version=version,
@@ -255,7 +272,7 @@ def _load_plugin(root, key_dir, version_dir):
         datasource_handler=datasource_handler,
         tools=tools,
         assistant_guidance=assistant_guidance,
-        path=version_dir.resolve(),
+        path=plugin_dir.resolve(),
     )
 
 
@@ -291,7 +308,9 @@ def _validate_assistant_guidance(value, tools):
     tool_keys = {tool.key for tool in tools}
     topics = value.get("topics") or []
     if not isinstance(topics, list) or len(topics) > GUIDANCE_MAX_TOPICS:
-        raise PluginRegistryError("plugin assistant guidance topics are invalid")
+        raise PluginRegistryError(
+            "plugin assistant guidance topics are invalid"
+        )
     normalized_topics = []
     seen_topics = set()
     for topic in topics:
@@ -357,15 +376,15 @@ def _validate_assistant_guidance(value, tools):
     }
 
 
-def _validate_plugin_icon(version_dir, value):
+def _validate_plugin_icon(plugin_dir, value):
     """Return one package-relative icon path after boundary validation."""
 
     if value in (None, ""):
         return ""
     if not isinstance(value, str) or len(value) > 240:
         raise PluginRegistryError("plugin icon is invalid")
-    package_root = version_dir.resolve()
-    icon_path = (version_dir / value).resolve()
+    package_root = plugin_dir.resolve()
+    icon_path = (plugin_dir / value).resolve()
     if package_root not in icon_path.parents:
         raise PluginRegistryError("plugin icon is outside its package")
     if icon_path.is_symlink() or not icon_path.is_file():
@@ -559,7 +578,8 @@ def _validate_tool_schema(tool_key, value):
             not isinstance(name, str)
             or not PLUGIN_KEY_PATTERN.fullmatch(name)
             or not isinstance(field, dict)
-            or field.get("type") not in {"boolean", "integer", "string"}
+            or field.get("type")
+            not in {"array", "boolean", "integer", "string"}
         ):
             raise PluginRegistryError("plugin tool field schema is invalid")
         safe_field = {"type": field["type"]}
@@ -574,6 +594,19 @@ def _validate_tool_schema(tool_key, value):
             limit = field.get(limit_name)
             if isinstance(limit, int) and not isinstance(limit, bool):
                 safe_field[limit_name] = limit
+        if field["type"] == "array":
+            items = field.get("items")
+            if not isinstance(items, dict) or items.get("type") != "string":
+                raise PluginRegistryError(
+                    "plugin tool array item schema is invalid"
+                )
+            safe_field["items"] = {"type": "string"}
+            for limit_name in ("minItems", "maxItems"):
+                limit = field.get(limit_name)
+                if isinstance(limit, int) and not isinstance(limit, bool):
+                    safe_field[limit_name] = limit
+            if field.get("uniqueItems") is True:
+                safe_field["uniqueItems"] = True
         normalized[name] = safe_field
     return {
         "type": "object",
@@ -583,10 +616,10 @@ def _validate_tool_schema(tool_key, value):
     }
 
 
-def _validate_python_entrypoint(version_dir, name):
+def _validate_python_entrypoint(plugin_dir, name):
     """Require a bounded regular Python file at one fixed package path."""
 
-    path = version_dir / f"{name}.py"
+    path = plugin_dir / f"{name}.py"
     try:
         resolved = path.resolve(strict=True)
     except OSError as exc:
@@ -596,7 +629,7 @@ def _validate_python_entrypoint(version_dir, name):
     if (
         path.is_symlink()
         or not resolved.is_file()
-        or version_dir.resolve() not in resolved.parents
+        or plugin_dir.resolve() not in resolved.parents
         or resolved.stat().st_size > 1_000_000
     ):
         raise PluginRegistryError(f"plugin {name} entrypoint is invalid")
@@ -701,6 +734,25 @@ def _validate_form_schema(value, label):
                     f"plugin {label} array field is invalid"
                 )
             safe_field["items"] = {"type": "string"}
+            item_format = items.get("format")
+            if item_format is not None:
+                if item_format != "uri":
+                    raise PluginRegistryError(
+                        f"plugin {label} array item format is invalid"
+                    )
+                safe_field["items"]["format"] = item_format
+            for limit_name in ("minItems", "maxItems"):
+                limit = field.get(limit_name)
+                if isinstance(limit, int) and not isinstance(limit, bool):
+                    safe_field[limit_name] = limit
+            minimum = safe_field.get("minItems", 0)
+            maximum = safe_field.get("maxItems")
+            if minimum < 0 or (
+                maximum is not None and maximum < minimum
+            ):
+                raise PluginRegistryError(
+                    f"plugin {label} array limits are invalid"
+                )
         write_to = field.get("write_to")
         if write_to is not None:
             if (
@@ -718,7 +770,10 @@ def _validate_form_schema(value, label):
         if depends_on is None:
             continue
         dependency = normalized.get(depends_on)
-        if dependency is None or dependency.get("format") != "provider-resource":
+        if (
+            dependency is None
+            or dependency.get("format") != "provider-resource"
+        ):
             raise PluginRegistryError(
                 f"plugin {label} field dependency is invalid"
             )

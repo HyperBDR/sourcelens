@@ -113,6 +113,8 @@ from .system_prompts import (
     _context_guidance,
     _general_chat_guidance,
     _general_chat_system_prompt,
+    _activity_report_batch_tools,
+    _is_activity_report,
     _is_general_chat,
     _knowledge_system_prompt,
     _subagent_guidance,
@@ -128,6 +130,47 @@ from ..runtime_resources import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+
+
+def _high_confidence_report_route(command):
+    """Route an explicit batch-capable report without a classifier call."""
+
+    if not _is_activity_report(command):
+        return None
+    return {
+        "intent": "action",
+        "complexity": "complex",
+        "route": "plan_execute",
+        "required_capabilities": ["plugin"],
+        "evidence_requirement": "tool_result",
+    }
+
+
+def _report_scoped_tools(command, tools):
+    """Expose only batch Tools for each available report source."""
+
+    if (
+        command.get("runtime_route") != "plan_execute"
+        or not _is_activity_report(command)
+    ):
+        return list(tools)
+    batch_tools = _activity_report_batch_tools(command)
+    batch_by_plugin = {
+        key.split("_", 1)[0]: key
+        for key in batch_tools
+    }
+    return [
+        tool
+        for tool in tools
+        if (
+            (getattr(tool, "metadata", None) or {}).get("plugin_key")
+            not in batch_by_plugin
+            or getattr(tool, "name", "")
+            == batch_by_plugin.get(
+                (getattr(tool, "metadata", None) or {}).get("plugin_key")
+            )
+        )
+    ]
 MAX_CONFIGURED_SUBAGENTS = 8
 
 _MAX_PRESENTED_CITATIONS = 5
@@ -367,6 +410,8 @@ class LensDeepAgentRuntime:
             return state.command.get("task") != "code_analysis"
         if not state.runtime_mode.general_chat:
             return state.command.get("task") != "code_analysis"
+        if _is_activity_report(state.command):
+            return False
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
 
@@ -881,7 +926,9 @@ class LensDeepAgentRuntime:
                     self._seed_run_checkpoint(state)
                 except Exception:
                     LOGGER.exception("Failed to enable route checkpoint")
-            state.route_decision = _select_general_chat_route(
+            state.route_decision = _high_confidence_report_route(
+                state.command
+            ) or _select_general_chat_route(
                 state.model,
                 state.question,
                 history=state.command.get("history"),
@@ -916,6 +963,22 @@ class LensDeepAgentRuntime:
             **state.command,
             "runtime_route": state.route_decision["route"],
         }
+        state_tools = getattr(state, "tools", [])
+        original_tool_count = len(state_tools)
+        state.tools = _report_scoped_tools(state.command, state_tools)
+        state.plugin_tools = _report_scoped_tools(
+            state.command,
+            getattr(state, "plugin_tools", []),
+        )
+        removed_tool_count = original_tool_count - len(state.tools)
+        if removed_tool_count:
+            state.emit_agent_event(
+                "deepagents.report.tools_scoped",
+                {
+                    "removed_tool_count": removed_tool_count,
+                    "remaining_tool_count": len(state.tools),
+                },
+            )
         state.emit_user_event(
             "route.resumed" if route_was_resumed else "route.selected",
             state.route_decision,

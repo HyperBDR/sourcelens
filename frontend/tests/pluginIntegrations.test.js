@@ -19,6 +19,7 @@ test('Plugin data sources use installed manifests and Connections', async () => 
   assert.match(page, /payload\.datasource_config = buildPluginDatasourceConfig/)
   assert.match(page, /payload\.credential_uuid = null/)
   assert.match(page, /getConnectionResources/)
+  assert.doesNotMatch(page, /GitHub resources are available/)
   assert.match(drawer, /isPluginSourceType/)
   assert.match(drawer, /form\.connection_uuid/)
   assert.match(drawer, /pluginResources/)
@@ -27,6 +28,105 @@ test('Plugin data sources use installed manifests and Connections', async () => 
   assert.doesNotMatch(drawer, /githubPluginRepositories/)
   assert.doesNotMatch(drawer, /github\.repositories/)
   assert.doesNotMatch(drawer, /github\.repository\.branches/)
+})
+
+test('Tool-only Plugins stay out of datasource creation', async () => {
+  const page = await source('pages/lens/DataSources.vue')
+
+  assert.match(page, /const datasourcePlugins = computed/)
+  assert.match(
+    page,
+    /plugin\.datasource && plugin\.datasource_source_type/
+  )
+  assert.match(page, /:plugins="datasourcePlugins"/)
+})
+
+test('Datasource-only Plugins stay out of Assistant configuration', async () => {
+  const drawer = await source(
+    'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
+  )
+
+  assert.match(drawer, /const activePluginConnections = computed/)
+  assert.match(drawer, /props\.pluginManifests\?\.\[connection\.plugin_key\]/)
+  assert.match(drawer, /Array\.isArray\(manifest\?\.tools\)/)
+  assert.match(drawer, /manifest\.tools\.length > 0/)
+})
+
+test('Feishu datasource URLs are checked before they can be saved', async () => {
+  const [page, api] = await Promise.all([
+    source('pages/lens/DataSources.vue'),
+    source('api/lens.js')
+  ])
+
+  assert.match(api, /connections\/\$\{uuid\}\/validate-datasource/)
+  assert.match(page, /validateConnectionDatasource/)
+  assert.match(page, /form\.value\.plugin_key === 'feishu'/)
+  assert.match(page, /datasource_config: buildPluginDatasourceConfig\(\)/)
+  assert.match(
+    page,
+    /datasourceConnectionSignature\(true\) !==\s*datasourceConnectionBaseSignature\.value/
+  )
+})
+
+test('Feishu Connection keeps setup guidance beside editable fields', async () => {
+  const [page, guide, drawer, chinese, manifestText] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/FeishuConnectionGuide.vue'),
+    source('components/ui/BaseDrawer.vue'),
+    source('admin/locales/zh-CN.json'),
+    readFile(
+      new URL('../../plugins/feishu/plugin.json', import.meta.url),
+      'utf8'
+    )
+  ])
+  const manifest = JSON.parse(manifestText)
+
+  assert.match(page, /v-if="form\.plugin_key === 'feishu'"/)
+  assert.match(page, /width="5xl"/)
+  assert.match(
+    page,
+    /class="connection-form-layout grid gap-5 md:grid-cols-\[minmax\(0,1fr\)_18rem\]/
+  )
+  assert.doesNotMatch(page, /form\.plugin_key === 'feishu'\s*\? 'grid gap-5/)
+  assert.match(page, /<FeishuConnectionGuide/)
+  assert.match(guide, /<aside/)
+  assert.match(guide, /md:sticky md:top-0/)
+  assert.match(guide, /md:max-h-\[calc\(100vh-10rem\)\]/)
+  assert.match(guide, /md:overflow-y-auto/)
+  assert.doesNotMatch(guide, /<details/)
+  assert.match(guide, /drive:file:readonly/)
+  assert.match(guide, /wiki:wiki:readonly/)
+  assert.match(guide, /configure-app-data-permissions/)
+  assert.match(guide, /application-scope/)
+  assert.match(guide, /scope-list/)
+  assert.match(drawer, /'5xl': 'max-w-5xl'/)
+  assert.match(chinese, /仅配置 API 权限并不会自动开放全部文档/)
+  assert.match(chinese, /保存数据源时会验证每个地址是否可访问/)
+  assert.match(manifest.description, /Feishu custom app/)
+  assert.match(
+    manifest.datasource_schema.properties.resource_urls.description,
+    /One HTTPS folder/
+  )
+})
+
+test('Feishu datasource creation uses the Plugin while legacy rows remain editable', async () => {
+  const [page, drawer] = await Promise.all([
+    source('pages/lens/DataSources.vue'),
+    source('pages/lens/DataSourceFormDrawer.vue')
+  ])
+
+  assert.match(
+    page,
+    /if \(row\?\.plugin_key && row\?\.connection\) \{\s*return `plugin:\$\{row\.plugin_key\}`/
+  )
+  assert.match(
+    drawer,
+    /props\.mode === 'edit' && props\.form\.source_type === 'feishu'/
+  )
+  assert.match(
+    drawer,
+    /if \(isPluginSourceType\(props\.form\.source_type\)\) \{\s*return Boolean\([\s\S]*schemaRequiredFieldsHaveValues/
+  )
 })
 
 test('Direct Assistants bind installed Plugin tools without provider branches', async () => {
@@ -120,6 +220,28 @@ test('manifest schema renderer supports safe scalar, secret, array and resource 
   assert.match(renderer, /properties/)
 })
 
+test('plain manifest arrays use independently removable input rows', async () => {
+  const [renderer, drawer, page] = await Promise.all([
+    source('components/lens/ManifestSchemaForm.vue'),
+    source('pages/lens/DataSourceFormDrawer.vue'),
+    source('pages/lens/DataSources.vue')
+  ])
+
+  assert.match(renderer, /v-for="\(item, index\) in arrayRows\(field\)"/)
+  assert.match(renderer, /updateArrayItem\(field, index/)
+  assert.match(renderer, /addArrayItem\(field\)/)
+  assert.match(renderer, /removeArrayItem\(field, index\)/)
+  assert.match(renderer, /await nextTick\(\)/)
+  assert.match(renderer, /document\.getElementById[\s\S]*\.focus\(\)/)
+  assert.doesNotMatch(renderer, /arrayValue\(field\)\.join\('\n'\)/)
+  assert.match(drawer, /:add-array-item-label="t\('common\.add'\)"/)
+  assert.match(drawer, /:remove-array-item-label="t\('common\.delete'\)"/)
+  assert.match(drawer, /fieldValue\.some/)
+  assert.match(page, /normalizePluginDatasourceField/)
+  assert.match(page, /\.map\(\(item\) => String\(item \?\? ''\)\.trim\(\)\)/)
+  assert.match(page, /\.filter\(Boolean\)/)
+})
+
 test('connection resource trees stay hidden until scope values exist', async () => {
   const renderer = await source('components/lens/ManifestSchemaForm.vue')
 
@@ -206,6 +328,7 @@ test('Connection management renders manifest connection fields instead of GitHub
   assert.match(page, /ManifestSchemaForm/)
   assert.match(page, /manifest\.connection_schema/)
   assert.match(page, /listPlugins/)
+  assert.match(page, /plugin\.version/)
   assert.match(page, /field\.write_to/)
   assert.doesNotMatch(page, /v-model="form\.repositories"/)
   assert.doesNotMatch(page, /<option value="github">/)

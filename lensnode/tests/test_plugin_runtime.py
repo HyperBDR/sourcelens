@@ -52,7 +52,6 @@ def test_create_plugin_tool_snapshot_uses_model_call_identity():
                     "tool_key": "github_read_file",
                     "invocation_id": "call-1",
                     "plugin_key": "github",
-                "plugin_version": "1.0.0",
                 },
             )
 
@@ -245,7 +244,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
-                "plugin_version": "1.0.0",
+            "plugin_version": "1.0.0",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://github.com",
@@ -262,7 +261,6 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
         "lensnode.main.retrieve_plugin_material",
         lambda *args: {
             "plugin_key": "github",
-                "plugin_version": "1.0.0",
             "endpoint": "https://github.com",
             "value": "secret",
         },
@@ -300,7 +298,7 @@ def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
-                "plugin_version": "1.0.0",
+            "plugin_version": "1.0.0",
             "resolved_config": {
                 "endpoint": "https://github.com",
                 "target_path": "/workspace/repo",
@@ -314,7 +312,6 @@ def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
     )
     material = {
         "plugin_key": "github",
-                "plugin_version": "1.0.0",
         "endpoint": "https://evil.example",
         "value": "secret",
     }
@@ -341,8 +338,11 @@ def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
     client.gateway_http_client = object()
     monkeypatch.setattr(
         "lensnode.main.fetch_plugin_snapshot",
-        lambda *args: {"plugin_key": "github",
-                "plugin_version": "1.0.0", "resolved_config": []},
+        lambda *args: {
+            "plugin_key": "github",
+            "plugin_version": "1.0.0",
+            "resolved_config": [],
+        },
     )
     monkeypatch.setattr(
         "lensnode.main.acquire_plugin_lease",
@@ -350,7 +350,6 @@ def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
     )
     material = {
         "plugin_key": "github",
-                "plugin_version": "1.0.0",
         "endpoint": "https://github.com",
         "value": "secret",
     }
@@ -429,7 +428,7 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
-                "plugin_version": "1.0.0",
+            "plugin_version": "1.0.0",
             "resolved_config": {
                 "endpoint": "https://github.com",
                 "datasource_config": {},
@@ -442,7 +441,6 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
     )
     material = {
         "plugin_key": "gitlab",
-                "plugin_version": "1.0.0",
         "endpoint": "https://github.com",
         "value": "secret",
     }
@@ -471,7 +469,7 @@ def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "gitlab",
-                "plugin_version": "1.0.0",
+            "plugin_version": "1.0.0",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://gitlab.internal.example",
@@ -490,7 +488,6 @@ def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
     )
     material = {
         "plugin_key": "gitlab",
-                "plugin_version": "1.0.0",
         "endpoint": "https://gitlab.internal.example",
         "value": "gitlab-secret",
     }
@@ -518,7 +515,7 @@ def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
     assert material["value"] == ""
 
 
-def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
+def test_tool_only_plugin_rejects_datasource_sync(monkeypatch):
     client = LensNodeClient.__new__(LensNodeClient)
     client.config = SimpleNamespace(
         ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
@@ -526,72 +523,33 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
         workspace_path="/workspace",
     )
     client.gateway_http_client = object()
-    provider_http_client = object()
-
-    class PluginHttpPool:
-        def __init__(self):
-            self.bindings = []
-
-        def bind(self, plugin_key, connection_uuid, origins):
-            self.bindings.append((plugin_key, connection_uuid, tuple(origins)))
-            return provider_http_client
-
-    client.plugin_http_pool = PluginHttpPool()
     monkeypatch.setattr(
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "jira",
             "plugin_version": "1.0.0",
-            "connection_uuid": "connection-1",
-            "datasource_uuid": "datasource-1",
-            "resolved_config": {
-                "endpoint": "https://company.atlassian.net",
-                "connection_config": {"email": "admin@example.com"},
-                "target_path": "/workspace/jira",
-                "datasource_config": {
-                    "project": "SL",
-                    "max_issues": 50,
-                },
-            },
         },
     )
     monkeypatch.setattr(
         "lensnode.main.acquire_plugin_lease",
-        lambda *args: {"lease_uuid": "lease-1"},
+        lambda *args: pytest.fail("tool-only Plugin must not acquire a lease"),
     )
-    material = {
-        "plugin_key": "jira",
-        "plugin_version": "1.0.0",
-        "endpoint": "https://company.atlassian.net",
-        "value": "jira-api-token",
-    }
     monkeypatch.setattr(
         "lensnode.main.retrieve_plugin_material",
-        lambda *args: material,
+        lambda *args: pytest.fail(
+            "tool-only Plugin must not retrieve secret material"
+        ),
     )
-    seen = {}
-
-    def fake_sync(command, workspace, emit):
-        seen.update(command)
-        return {"status": "success"}
-
-    monkeypatch.setattr("lensnode.main.sync_datasource", fake_sync)
+    monkeypatch.setattr(
+        "lensnode.main.load_runtime_contract",
+        lambda *args: SimpleNamespace(build_datasource_command=None),
+    )
 
     result = client._execute_plugin_datasource_sync(
         {"snapshot_uuid": "snapshot-1"}
     )
 
-    assert result["status"] == "success"
-    assert seen["source_type"] == "jira"
-    assert seen["config"]["project"] == "SL"
-    assert seen["config"]["email"] == "admin@example.com"
-    assert seen["config"]["access_token"] == "jira-api-token"
-    assert seen["provider_http_client"] is provider_http_client
-    assert client.plugin_http_pool.bindings == [
-        (
-            "jira",
-            "connection-1",
-            ("https://company.atlassian.net",),
-        )
-    ]
-    assert material["value"] == ""
+    assert result == {
+        "status": "failed",
+        "error": "PLUGIN_DATASOURCE_UNSUPPORTED",
+    }

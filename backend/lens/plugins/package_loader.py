@@ -13,19 +13,21 @@ class PluginPackageLoadError(RuntimeError):
 
 @dataclass(frozen=True)
 class PluginControlContract:
-    """Control-plane implementations exported by one installed Plugin."""
+    """Control-plane implementations exported by one Plugin release."""
 
     datasource_provider: object
     tool_provider: object
 
 
 def load_control_contract(plugin):
-    """Return the validated control contract for one exact Plugin version."""
+    """Return the validated control contract for one Plugin release."""
 
+    path = plugin.path / "control.py"
     module = _load_control_module(
-        str(plugin.path / "control.py"),
+        str(path),
         plugin.key,
         plugin.version,
+        _entrypoint_digest(path),
     )
     if (
         getattr(module, "PLUGIN_API_VERSION", None) != 1
@@ -44,16 +46,20 @@ def load_control_contract(plugin):
 
 
 @lru_cache(maxsize=128)
-def _load_control_module(path_value, plugin_key, plugin_version):
+def _load_control_module(
+    path_value,
+    plugin_key,
+    plugin_version,
+    content_digest,
+):
     """Execute one fixed regular file under an opaque module identity."""
 
     path = Path(path_value)
     resolved = path.resolve(strict=True)
     if path.is_symlink() or not resolved.is_file():
         raise PluginPackageLoadError("plugin control entrypoint is invalid")
-    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
     module_name = (
-        f"_sourcelens_plugin_{plugin_key}_{plugin_version}_{digest}"
+        f"_sourcelens_plugin_{plugin_key}_{plugin_version}_{content_digest}"
         .replace("-", "_")
         .replace(".", "_")
     )
@@ -66,6 +72,21 @@ def _load_control_module(path_value, plugin_key, plugin_version):
     except Exception as exc:
         raise PluginPackageLoadError("plugin control failed to load") from exc
     return module
+
+
+def _entrypoint_digest(path):
+    """Return a content identity for one fixed regular entrypoint."""
+
+    try:
+        resolved = path.resolve(strict=True)
+        content = resolved.read_bytes()
+    except OSError as exc:
+        raise PluginPackageLoadError(
+            "plugin control entrypoint is invalid"
+        ) from exc
+    if path.is_symlink() or not resolved.is_file():
+        raise PluginPackageLoadError("plugin control entrypoint is invalid")
+    return hashlib.sha256(content).hexdigest()[:16]
 
 
 def _validate_datasource_provider(provider):
@@ -94,4 +115,6 @@ def _validate_tool_provider(provider):
     if provider is None or not callable(
         getattr(provider, "validate_request", None)
     ):
-        raise PluginPackageLoadError("plugin tool provider contract is invalid")
+        raise PluginPackageLoadError(
+            "plugin tool provider contract is invalid"
+        )

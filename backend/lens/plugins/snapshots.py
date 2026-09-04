@@ -3,11 +3,12 @@
 from copy import deepcopy
 
 from django.db import transaction
+
 from lens.models import DataSource, ExecutionSnapshot
 
-from .providers import DatasourceProviderError, get_datasource_provider
 from .audit import create_invocation_audit
-from .registry import PluginRegistryError, latest_plugin
+from .providers import DatasourceProviderError, get_datasource_provider
+from .registry import PluginRegistryError, installed_plugin
 
 SENSITIVE_CONFIG_KEYS = frozenset(
     {
@@ -57,10 +58,15 @@ def create_datasource_sync_snapshot(datasource):
         )
     if datasource.lensnode is None:
         raise PluginRegistryError("datasource LensNode is required")
-    plugin = latest_plugin(datasource.plugin_key)
+    plugin = installed_plugin(datasource.plugin_key)
+    if plugin.datasource is None:
+        raise PluginRegistryError("plugin does not support datasources")
     _reject_sensitive_values(connection.config)
     _reject_sensitive_values(connection.allowed_scope)
-    _reject_sensitive_values(datasource.datasource_config)
+    _reject_sensitive_values(
+        datasource.datasource_config,
+        allow_feishu_resource_tokens=datasource.plugin_key == "feishu",
+    )
     try:
         provider = get_datasource_provider(
             datasource.plugin_key,
@@ -105,16 +111,33 @@ def create_datasource_sync_snapshot(datasource):
         return snapshot
 
 
-def _reject_sensitive_values(value):
+def _reject_sensitive_values(
+    value,
+    *,
+    allow_feishu_resource_tokens=False,
+):
     """Reject credential-shaped keys from persisted non-secret config."""
 
     if isinstance(value, dict):
+        resource_identity = (
+            allow_feishu_resource_tokens
+            and set(value) == {"kind", "token"}
+            and isinstance(value.get("kind"), str)
+            and isinstance(value.get("token"), str)
+        )
         for key, nested in value.items():
-            if str(key).lower() in SENSITIVE_CONFIG_KEYS:
+            sensitive_key = str(key).lower() in SENSITIVE_CONFIG_KEYS
+            if sensitive_key and not (resource_identity and key == "token"):
                 raise PluginRegistryError(
                     "plugin config cannot contain credentials"
                 )
-            _reject_sensitive_values(nested)
+            _reject_sensitive_values(
+                nested,
+                allow_feishu_resource_tokens=allow_feishu_resource_tokens,
+            )
     elif isinstance(value, list):
         for nested in value:
-            _reject_sensitive_values(nested)
+            _reject_sensitive_values(
+                nested,
+                allow_feishu_resource_tokens=allow_feishu_resource_tokens,
+            )

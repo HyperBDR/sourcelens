@@ -238,7 +238,7 @@
         :lensnodes="lensnodes"
         :credentials="credentials"
         :connections="connections"
-        :plugins="plugins"
+        :plugins="datasourcePlugins"
         :plugin-manifest="currentPluginManifest"
         :llm-config-options="llmConfigOptions"
         v-model:sync-interval-seconds="syncIntervalSeconds"
@@ -316,7 +316,8 @@ import {
   setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
-  updateDataSource
+  updateDataSource,
+  validateConnectionDatasource
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -423,6 +424,12 @@ const enabledDataSourceCount = computed(
 
 const currentPluginManifest = computed(
   () => pluginManifests.value[form.value.plugin_key] || null
+)
+
+const datasourcePlugins = computed(() =>
+  plugins.value.filter(
+    (plugin) => plugin.datasource && plugin.datasource_source_type
+  )
 )
 
 const datasourceSearchOptions = computed(() => [
@@ -707,11 +714,11 @@ function sourceTypeInitials(row) {
 }
 
 function uiSourceTypeFromRow(row) {
-  if (row?.source_type !== 'git') {
-    return row?.source_type || 'feishu'
-  }
   if (row?.plugin_key && row?.connection) {
     return `plugin:${row.plugin_key}`
+  }
+  if (row?.source_type !== 'git') {
+    return row?.source_type || 'feishu'
   }
   const credentialUuid = row?.credential || ''
   const credential = credentials.value.find(
@@ -918,7 +925,7 @@ function closeDrawer() {
 }
 
 function defaultForm() {
-  const defaultPluginKey = plugins.value[0]?.key || ''
+  const defaultPluginKey = datasourcePlugins.value[0]?.key || ''
   const seed = {
     name: '',
     source_type: defaultPluginKey ? `plugin:${defaultPluginKey}` : 'gitlab',
@@ -1196,10 +1203,18 @@ function buildPluginDatasourceConfig() {
   const properties =
     currentPluginManifest.value?.datasource_schema?.properties || {}
   return Object.fromEntries(
-    Object.keys(properties)
-      .filter((key) => hasDatasourceFieldValue(config[key]))
-      .map((key) => [key, config[key]])
+    Object.entries(properties)
+      .map(([key, field]) => [
+        key,
+        normalizePluginDatasourceField(field, config[key])
+      ])
+      .filter(([, value]) => hasDatasourceFieldValue(value))
   )
+}
+
+function normalizePluginDatasourceField(field, value) {
+  if (field?.type !== 'array' || !Array.isArray(value)) return value
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean)
 }
 
 function datasourceSchemaDefaults(schema) {
@@ -1423,6 +1438,15 @@ function resetDatasourceConnectionResult() {
     datasourceConnectionResult.value?.details?.connection_uuid ===
       form.value.connection_uuid
   ) {
+    if (
+      form.value.plugin_key === 'feishu' &&
+      datasourceConnectionSignature(true) !==
+        datasourceConnectionBaseSignature.value
+    ) {
+      datasourceConnectionResult.value = null
+      datasourceConnectionBaseSignature.value = ''
+      return
+    }
     return
   }
   if (shouldKeepGitBranchConnectionResult()) {
@@ -1445,10 +1469,29 @@ async function testDatasourceConnection() {
   try {
     if (isPluginSourceType(form.value.source_type)) {
       if (!form.value.connection_uuid) return
+      if (form.value.plugin_key === 'feishu') {
+        const result = await validateConnectionDatasource(
+          form.value.connection_uuid,
+          { datasource_config: buildPluginDatasourceConfig() }
+        )
+        datasourceConnectionResult.value = {
+          status: 'success',
+          message: t(
+            'lensAdmin.datasourceWizard.feishuResourcesAccessible'
+          ),
+          details: {
+            ...result,
+            connection_uuid: form.value.connection_uuid
+          }
+        }
+        datasourceConnectionBaseSignature.value =
+          datasourceConnectionSignature(true)
+        return
+      }
       const resources = await getConnectionResources(form.value.connection_uuid)
       datasourceConnectionResult.value = {
         status: 'success',
-        message: 'GitHub resources are available.',
+        message: 'Plugin Connection resources are available.',
         details: {
           ...resources,
           connection_uuid: form.value.connection_uuid
@@ -1478,12 +1521,30 @@ async function testDatasourceConnection() {
     datasourceConnectionResult.value = {
       status: 'failed',
       message:
+        feishuDatasourceAccessError(error) ||
         lensNodeErrorMessage(error.response?.data?.detail, t) ||
         extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
     }
   } finally {
     testingDatasourceConnection.value = false
   }
+}
+
+function feishuDatasourceAccessError(error) {
+  if (form.value.plugin_key !== 'feishu') return ''
+  const payload = error.response?.data
+  const data =
+    payload?.data && typeof payload.data === 'object'
+      ? payload.data
+      : payload
+  const failures = Array.isArray(data?.resources)
+    ? data.resources.filter((item) => item?.accessible === false)
+    : []
+  const urls = failures.map((item) => item.url).filter(Boolean)
+  if (!urls.length) return ''
+  return t('lensAdmin.datasourceWizard.feishuResourcesInaccessible', {
+    urls: urls.join(', ')
+  })
 }
 
 async function loadPluginResourceOptions({ resource, selectedValues }) {

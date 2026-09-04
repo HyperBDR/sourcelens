@@ -15,7 +15,7 @@ from lens.models import (
 )
 from lens.plugins.providers.base import DatasourceProviderError
 from lens.plugins.providers import get_datasource_provider
-from lens.plugins.registry import latest_plugin
+from lens.plugins.registry import installed_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 from lens.services import create_execution_run
 from rest_framework.test import APIClient
@@ -25,13 +25,18 @@ class GitLabPluginManifestTests(TestCase):
     """Verify the bundled GitLab Plugin contract is installed."""
 
     def test_bundled_gitlab_plugin_is_discoverable(self):
-        plugin = latest_plugin("gitlab")
+        plugin = installed_plugin("gitlab")
 
+        self.assertEqual(plugin.version, "1.0.0")
         self.assertEqual(plugin.display_name, "GitLab")
         self.assertEqual(plugin.datasource_source_type, "git")
         self.assertEqual(
             [tool.key for tool in plugin.tools],
-            ["gitlab_read_file", "gitlab_search_code"],
+            [
+                "gitlab_read_file",
+                "gitlab_search_code",
+                "gitlab_activity_summary",
+            ],
         )
 
 
@@ -62,10 +67,11 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
                 {"project": "other/repository"},
             )
 
-    def test_accepts_public_and_self_managed_https_endpoints(self):
+    def test_accepts_public_and_self_managed_http_endpoints(self):
         endpoints = [
             "https://gitlab.com/",
             "https://gitlab.internal.example/",
+            "http://gitlab.internal.example:8080/",
         ]
 
         for endpoint in endpoints:
@@ -75,9 +81,9 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
                     endpoint.rstrip("/"),
                 )
 
-    def test_rejects_endpoint_paths_and_non_https_schemes(self):
+    def test_rejects_endpoint_paths_and_unsupported_schemes(self):
         endpoints = [
-            "http://gitlab.example",
+            "ftp://gitlab.example",
             "https://gitlab.example/nested",
             "https://user@gitlab.example",
         ]
@@ -113,6 +119,50 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
             ["https://gitlab.internal.example/api/v4/user"],
         )
         self.assertEqual(result["account"]["username"], "plugin-admin")
+
+    def test_discovers_projects_visible_to_connection_token(self):
+        seen = {}
+
+        def handler(request):
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "path_with_namespace": "platform/sourcelens",
+                        "visibility": "private",
+                        "last_activity_at": "2026-09-04T01:00:00Z",
+                    }
+                ],
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_connection_resources(
+                "secret",
+                endpoint="https://gitlab.internal.example",
+                query="source",
+                limit=25,
+                client=client,
+            )
+
+        self.assertEqual(seen["path"], "/api/v4/projects")
+        self.assertEqual(seen["params"]["membership"], "true")
+        self.assertEqual(seen["params"]["search"], "source")
+        self.assertEqual(
+            resources["resources"]["projects"]["items"],
+            [
+                {
+                    "value": "platform/sourcelens",
+                    "label": "platform/sourcelens",
+                    "metadata": {
+                        "visibility": "private",
+                        "last_activity_at": "2026-09-04T01:00:00Z",
+                    },
+                }
+            ],
+        )
 
     def test_discovers_allowed_projects_without_remote_requests(self):
         def handler(request):
@@ -194,6 +244,36 @@ class GitLabToolProviderTests(SimpleTestCase):
                 self.scope,
                 "gitlab_read_file",
                 {"project": "other/repository", "path": "README.md"},
+            )
+
+    def test_activity_summary_accepts_only_allowed_projects(self):
+        endpoint, arguments = self.provider.validate_request(
+            "https://gitlab.internal.example",
+            {"projects": ["platform/backend/sourcelens", "group/ops"]},
+            "gitlab_activity_summary",
+            {
+                "projects": ["group/ops", "platform/backend/sourcelens"],
+                "since": "2026-09-01T16:00:00Z",
+                "until": "2026-09-02T15:59:59Z",
+            },
+        )
+
+        self.assertEqual(endpoint, "https://gitlab.internal.example")
+        self.assertEqual(
+            arguments["projects"],
+            ["group/ops", "platform/backend/sourcelens"],
+        )
+
+        with self.assertRaisesMessage(ToolProviderError, "scope"):
+            self.provider.validate_request(
+                endpoint,
+                {"projects": ["group/ops"]},
+                "gitlab_activity_summary",
+                {
+                    "projects": ["other/project"],
+                    "since": "2026-09-01T16:00:00Z",
+                    "until": "2026-09-02T15:59:59Z",
+                },
             )
 
 

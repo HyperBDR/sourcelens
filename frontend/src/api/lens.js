@@ -494,6 +494,15 @@ export async function validateConnection(uuid) {
   return unwrapResponse(response)
 }
 
+export async function validateConnectionDatasource(uuid, payload) {
+  const response = await api.post(
+    `/lens/admin/connections/${uuid}/validate-datasource/`,
+    payload,
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function getConnectionResources(uuid, params = {}) {
   const response = await api.get(`/lens/admin/connections/${uuid}/resources/`, {
     params

@@ -37,7 +37,7 @@ class PluginHttpClientPool:
         self._lock = threading.Lock()
 
     def bind(self, plugin_key, connection_uuid, origins):
-        """Return a request facade restricted to declared HTTPS origins."""
+        """Return a request facade restricted to declared HTTP origins."""
 
         plugin_key = str(plugin_key or "").strip()
         connection_uuid = str(connection_uuid or "").strip()
@@ -142,7 +142,7 @@ class PluginHttpClient:
 
 
 def _normalize_origin(value):
-    """Return a canonical HTTPS origin without credentials or path."""
+    """Return a canonical HTTP origin without credentials or path."""
 
     parsed = _safe_split(value)
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
@@ -166,7 +166,7 @@ def _safe_split(value):
     except ValueError as exc:
         raise PluginHttpClientError("PLUGIN_HTTP_URL_INVALID") from exc
     if (
-        parsed.scheme.lower() != "https"
+        parsed.scheme.lower() not in {"http", "https"}
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
@@ -176,9 +176,11 @@ def _safe_split(value):
 
 
 def _parsed_origin(parsed):
+    scheme = parsed.scheme.lower()
     host = parsed.hostname.lower()
     if ":" in host:
         host = f"[{host}]"
     port = parsed.port
-    port_suffix = f":{port}" if port not in {None, 443} else ""
-    return f"https://{host}{port_suffix}"
+    default_port = 80 if scheme == "http" else 443
+    port_suffix = f":{port}" if port not in {None, default_port} else ""
+    return f"{scheme}://{host}{port_suffix}"

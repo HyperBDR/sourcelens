@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from lensnode.plugin_package_loader import (
@@ -11,7 +9,7 @@ from lensnode.plugin_package_loader import (
 RUNTIME_SOURCE = '''
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "example"
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.0.0"
 
 def http_origins(endpoint):
     return (endpoint,)
@@ -28,23 +26,23 @@ def build_datasource_command(snapshot, material, trigger):
 
 
 def _package(tmp_path, source=RUNTIME_SOURCE):
-    package = tmp_path / "example" / "1.2.3"
+    package = tmp_path / "example"
     package.mkdir(parents=True)
     (package / "runtime.py").write_text(source, encoding="utf-8")
     return package
 
 
-def test_loads_exact_runtime_contract_from_configured_root(tmp_path):
+def test_loads_runtime_contract_from_configured_root(tmp_path):
     _package(tmp_path)
 
     contract = load_runtime_contract(
         "example",
-        "1.2.3",
+        "1.0.0",
         roots=[tmp_path],
     )
 
     assert contract.plugin_key == "example"
-    assert contract.plugin_version == "1.2.3"
+    assert contract.plugin_version == "1.0.0"
     assert callable(contract.build_tool)
     assert callable(contract.execute_tool)
     assert callable(contract.build_datasource_command)
@@ -53,11 +51,39 @@ def test_loads_exact_runtime_contract_from_configured_root(tmp_path):
     )
 
 
+def test_loads_tool_only_runtime_without_datasource_command(tmp_path):
+    source = RUNTIME_SOURCE.replace(
+        '\ndef build_datasource_command(snapshot, material, trigger):\n'
+        '    return {"source_type": "git"}\n',
+        "",
+    )
+    _package(tmp_path, source)
+
+    contract = load_runtime_contract(
+        "example",
+        "1.0.0",
+        roots=[tmp_path],
+    )
+
+    assert contract.build_datasource_command is None
+
+
 def test_rejects_runtime_identity_mismatch(tmp_path):
     _package(tmp_path, RUNTIME_SOURCE.replace('"example"', '"other"'))
 
     with pytest.raises(PluginPackageLoadError):
-        load_runtime_contract("example", "1.2.3", roots=[tmp_path])
+        load_runtime_contract("example", "1.0.0", roots=[tmp_path])
+
+
+def test_rejects_runtime_version_mismatch(tmp_path):
+    source = RUNTIME_SOURCE.replace(
+        'PLUGIN_VERSION = "1.0.0"',
+        'PLUGIN_VERSION = "1.0.1"',
+    )
+    _package(tmp_path, source)
+
+    with pytest.raises(PluginPackageLoadError):
+        load_runtime_contract("example", "1.0.0", roots=[tmp_path])
 
 
 def test_rejects_symlinked_runtime_entrypoint(tmp_path):
@@ -68,19 +94,22 @@ def test_rejects_symlinked_runtime_entrypoint(tmp_path):
     (package / "runtime.py").symlink_to(external)
 
     with pytest.raises(PluginPackageLoadError):
-        load_runtime_contract("example", "1.2.3", roots=[tmp_path])
+        load_runtime_contract("example", "1.0.0", roots=[tmp_path])
 
 
 def test_rejects_path_like_plugin_identity(tmp_path):
     with pytest.raises(PluginPackageLoadError):
-        load_runtime_contract("../example", "1.2.3", roots=[tmp_path])
+        load_runtime_contract("../example", "1.0.0", roots=[tmp_path])
 
 
 def test_requires_complete_runtime_contract(tmp_path):
-    _package(tmp_path, RUNTIME_SOURCE.replace("def execute_tool", "def missing"))
+    _package(
+        tmp_path,
+        RUNTIME_SOURCE.replace("def execute_tool", "def missing"),
+    )
 
     with pytest.raises(PluginPackageLoadError):
-        load_runtime_contract("example", "1.2.3", roots=[tmp_path])
+        load_runtime_contract("example", "1.0.0", roots=[tmp_path])
 
 
 def test_reloads_runtime_when_package_content_changes(tmp_path):
@@ -89,7 +118,7 @@ def test_reloads_runtime_when_package_content_changes(tmp_path):
     package = _package(tmp_path)
     first = load_runtime_contract(
         "example",
-        "1.2.3",
+        "1.0.0",
         roots=[tmp_path],
     )
     updated = RUNTIME_SOURCE.replace(
@@ -100,7 +129,7 @@ def test_reloads_runtime_when_package_content_changes(tmp_path):
 
     second = load_runtime_contract(
         "example",
-        "1.2.3",
+        "1.0.0",
         roots=[tmp_path],
     )
 

@@ -1,9 +1,13 @@
 """GitHub LensNode runtime entrypoint."""
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit
 
+import httpx
 from langchain.tools import ToolRuntime, tool
 
 from lensnode.plugin_runtime import PluginRuntimeError
@@ -18,11 +22,20 @@ READ_MAX_BYTES = 200_000
 SEARCH_MAX_BYTES = 1_000_000
 JSON_MAX_BYTES = 1_000_000
 BODY_MAX_CHARS = 12_000
+GET_MAX_ATTEMPTS = 3
+GET_RETRY_DELAY_SECONDS = 0.25
+ACTIVITY_DEFAULT_PER_PAGE = 50
+ACTIVITY_RESOURCE_MAX = {
+    "commits": 50,
+    "pull_requests": 10,
+    "issues": 10,
+}
 TOOL_KEYS = frozenset(
     {
         "github_read_file",
         "github_search_code",
         "github_repository_get",
+        "github_activity_summary",
         "github_branch_list",
         "github_commit_list",
         "github_commit_get",
@@ -71,6 +84,8 @@ def execute_tool(key, client, arguments, secret, endpoint, config):
     if key not in TOOL_KEYS:
         raise PluginRuntimeError("PLUGIN_TOOL_UNSUPPORTED")
     _validate_runtime_arguments(key, arguments, config)
+    if key == "github_activity_summary":
+        return _activity_summary(client, arguments, secret)
     if key == "github_read_file":
         return _read_file(client, arguments, secret)
     if key == "github_search_code":
@@ -250,6 +265,249 @@ def execute_tool(key, client, arguments, secret, endpoint, config):
         result.update({"ok": True, "repository": repository})
         return result
     raise PluginRuntimeError("PLUGIN_TOOL_UNSUPPORTED")
+
+
+def _activity_summary(client, arguments, secret):
+    """Return compact activity from approved repositories in one Tool call."""
+
+    repositories = arguments["repositories"]
+    since = arguments["since"]
+    until = arguments["until"]
+    per_page = _page_value(
+        arguments,
+        "per_page",
+        1,
+        100,
+        ACTIVITY_DEFAULT_PER_PAGE,
+    )
+    results = {
+        repository: {
+            "repository": repository,
+            "commits": [],
+            "pull_requests": [],
+            "issues": [],
+            "possibly_truncated": {},
+        }
+        for repository in repositories
+    }
+    requests = [
+        (repository, resource)
+        for repository in repositories
+        for resource in ("commits", "pull_requests", "issues")
+    ]
+    workers = min(8, len(requests))
+    successful_resources = 0
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                _activity_resource,
+                client,
+                repository,
+                resource,
+                since,
+                until,
+                per_page,
+                secret,
+            ): (repository, resource)
+            for repository, resource in requests
+        }
+        for future in as_completed(futures):
+            repository, resource = futures[future]
+            try:
+                items, possibly_truncated = future.result()
+            except PluginRuntimeError as exc:
+                results[repository].setdefault("errors", {})[resource] = str(
+                    exc
+                )
+                continue
+            except httpx.HTTPError:
+                results[repository].setdefault("errors", {})[
+                    resource
+                ] = "GITHUB_REQUEST_FAILED"
+                continue
+            results[repository][resource] = items
+            results[repository]["possibly_truncated"][resource] = (
+                possibly_truncated
+            )
+            successful_resources += 1
+    if not successful_resources:
+        raise PluginRuntimeError("GITHUB_REQUEST_FAILED")
+    return {
+        "ok": True,
+        "since": since,
+        "until": until,
+        "limits": {
+            resource: min(per_page, maximum)
+            for resource, maximum in ACTIVITY_RESOURCE_MAX.items()
+        },
+        "repositories": [results[repository] for repository in repositories],
+    }
+
+
+def _activity_resource(
+    client,
+    repository,
+    resource,
+    since,
+    until,
+    per_page,
+    secret,
+):
+    """Read and project one activity resource within the requested window."""
+
+    repository_path = quote(repository, safe="/")
+    page_size = min(per_page, ACTIVITY_RESOURCE_MAX[resource])
+    if resource == "issues":
+        return _activity_issues(
+            client,
+            repository,
+            since,
+            until,
+            page_size,
+            secret,
+        )
+    params = {"page": 1, "per_page": page_size}
+    if resource == "commits":
+        params.update({"since": since, "until": until})
+        path = f"/repos/{repository_path}/commits"
+        projector = _activity_commit_summary
+    elif resource == "pull_requests":
+        params.update(
+            {
+                "state": "all",
+                "sort": "updated",
+                "direction": "desc",
+            }
+        )
+        path = f"/repos/{repository_path}/pulls"
+        projector = _activity_pull_request_summary
+    raw_payload = _items(_json_get(client, path, secret, params))
+    possibly_truncated = _activity_possibly_truncated(
+        raw_payload,
+        resource,
+        since,
+        page_size,
+    )
+    return (
+        [
+            projector(item)
+            for item in raw_payload
+            if _timestamp_in_window(
+                _nested(item, "commit", "author", "date")
+                if resource == "commits"
+                else item.get("updated_at"),
+                since,
+                until,
+            )
+        ],
+        possibly_truncated,
+    )
+
+
+def _activity_issues(
+    client,
+    repository,
+    since,
+    until,
+    page_size,
+    secret,
+):
+    """Search only issues so pull requests cannot consume the result limit."""
+
+    query = (
+        f"repo:{repository} is:issue "
+        f"updated:{since}..{until}"
+    )
+    payload = _json_get(
+        client,
+        "/search/issues",
+        secret,
+        {
+            "q": query,
+            "sort": "updated",
+            "direction": "desc",
+            "page": 1,
+            "per_page": page_size,
+        },
+        max_bytes=SEARCH_MAX_BYTES,
+    )
+    if (
+        not isinstance(payload, dict)
+        or isinstance(payload.get("total_count"), bool)
+        or not isinstance(payload.get("total_count"), int)
+        or not isinstance(payload.get("incomplete_results"), bool)
+    ):
+        raise PluginRuntimeError("GITHUB_RESPONSE_INVALID")
+    raw_items = _items(payload.get("items"))
+    items = [
+        _activity_issue_summary(item)
+        for item in raw_items
+        if _timestamp_in_window(item.get("updated_at"), since, until)
+    ]
+    possibly_truncated = (
+        payload["incomplete_results"]
+        or payload["total_count"] > len(raw_items)
+    )
+    return items[:page_size], possibly_truncated
+
+
+def _activity_possibly_truncated(payload, resource, since, per_page):
+    """Return whether another page could contain in-window activity."""
+
+    if len(payload) < per_page:
+        return False
+    if resource != "pull_requests":
+        return True
+    oldest_updated_at = payload[-1].get("updated_at")
+    if not isinstance(oldest_updated_at, str):
+        return True
+    try:
+        return _timestamp(oldest_updated_at) >= _timestamp(since)
+    except PluginRuntimeError:
+        return True
+
+
+def _activity_commit_summary(payload):
+    """Project one compact commit for an activity report."""
+
+    item = _commit_summary(payload)
+    item["message"] = _string(item["message"], 300)
+    return item
+
+
+def _activity_pull_request_summary(payload):
+    """Project one compact pull request for an activity report."""
+
+    _object(payload)
+    return {
+        "number": _integer(payload.get("number")),
+        "title": _string(payload.get("title"), 300),
+        "state": _string(payload.get("state"), 32),
+        "draft": bool(payload.get("draft")),
+        "author": _login(payload.get("user")),
+        "created_at": _string(payload.get("created_at"), 64),
+        "updated_at": _string(payload.get("updated_at"), 64),
+        "closed_at": _string(payload.get("closed_at"), 64),
+        "merged_at": _string(payload.get("merged_at"), 64),
+        "url": _string(payload.get("html_url"), 500),
+    }
+
+
+def _activity_issue_summary(payload):
+    """Project one compact issue for an activity report."""
+
+    _object(payload)
+    return {
+        "number": _integer(payload.get("number")),
+        "title": _string(payload.get("title"), 300),
+        "state": _string(payload.get("state"), 32),
+        "author": _login(payload.get("user")),
+        "labels": _labels(payload.get("labels")),
+        "created_at": _string(payload.get("created_at"), 64),
+        "updated_at": _string(payload.get("updated_at"), 64),
+        "closed_at": _string(payload.get("closed_at"), 64),
+        "url": _string(payload.get("html_url"), 500),
+    }
 
 
 def _read_file(client, arguments, secret):
@@ -672,6 +930,31 @@ def _validate_definition(value):
 def _validate_runtime_arguments(key, arguments, config):
     """Validate repository and path boundaries inside the Runtime."""
 
+    if key == "github_activity_summary":
+        if not isinstance(arguments, dict):
+            raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID")
+        repositories = arguments.get("repositories")
+        if (
+            not isinstance(repositories, list)
+            or not repositories
+            or len(repositories) > 50
+        ):
+            raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID")
+        scope = _runtime_scope(config)
+        for repository in repositories:
+            _validate_repository_scope(repository, scope)
+        identities = {
+            _repository_identity(repository).casefold()
+            for repository in repositories
+        }
+        if len(identities) != len(repositories):
+            raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID")
+        since = _timestamp(arguments.get("since"))
+        until = _timestamp(arguments.get("until"))
+        if since > until:
+            raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID")
+        _page_value(arguments, "per_page", 1, 100, 50)
+        return
     repository = _text(arguments, "repository")
     _validate_repository_scope(repository, _runtime_scope(config))
     if key == "github_read_file":
@@ -853,6 +1136,31 @@ def _add_time_filters(params, arguments):
             params[name] = _bounded_text(value, 64)
 
 
+def _timestamp(value):
+    """Return one timezone-aware ISO-8601 timestamp."""
+
+    text = _bounded_text(value, 64)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID") from exc
+    if parsed.tzinfo is None:
+        raise PluginRuntimeError("PLUGIN_ARGUMENTS_INVALID")
+    return parsed
+
+
+def _timestamp_in_window(value, since, until):
+    """Return whether one provider timestamp is within an inclusive window."""
+
+    if not isinstance(value, str):
+        return False
+    try:
+        timestamp = _timestamp(value)
+    except PluginRuntimeError:
+        return False
+    return _timestamp(since) <= timestamp <= _timestamp(until)
+
+
 def _page_value(arguments, name, minimum, maximum, default):
     """Return one bounded optional pagination value."""
 
@@ -952,34 +1260,41 @@ def _labels(value):
 
 
 def _get(client, url, token, params, accept, max_bytes, truncate):
-    with client.stream(
-        "GET",
-        url,
-        params=params,
-        timeout=15.0,
-        follow_redirects=False,
-        headers={
-            "Accept": accept,
-            "Authorization": f"Bearer {token}",
-            "X-GitHub-Api-Version": API_VERSION,
-            "User-Agent": "SourceLens-LensNode",
-        },
-    ) as response:
-        if response.is_redirect:
-            raise PluginRuntimeError("GITHUB_REDIRECT_REJECTED")
-        if response.status_code >= 400:
-            return response.status_code, b"", False
-        body = bytearray()
-        for chunk in response.iter_bytes():
-            remaining = max_bytes - len(body)
-            if len(chunk) <= remaining:
-                body.extend(chunk)
-                continue
-            if truncate:
-                body.extend(chunk[:remaining])
-                return response.status_code, bytes(body), True
-            raise PluginRuntimeError("GITHUB_RESPONSE_TOO_LARGE")
-    return response.status_code, bytes(body), False
+    for attempt in range(GET_MAX_ATTEMPTS):
+        try:
+            with client.stream(
+                "GET",
+                url,
+                params=params,
+                timeout=15.0,
+                follow_redirects=False,
+                headers={
+                    "Accept": accept,
+                    "Authorization": f"Bearer {token}",
+                    "X-GitHub-Api-Version": API_VERSION,
+                    "User-Agent": "SourceLens-LensNode",
+                },
+            ) as response:
+                if response.is_redirect:
+                    raise PluginRuntimeError("GITHUB_REDIRECT_REJECTED")
+                if response.status_code >= 400:
+                    return response.status_code, b"", False
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    remaining = max_bytes - len(body)
+                    if len(chunk) <= remaining:
+                        body.extend(chunk)
+                        continue
+                    if truncate:
+                        body.extend(chunk[:remaining])
+                        return response.status_code, bytes(body), True
+                    raise PluginRuntimeError("GITHUB_RESPONSE_TOO_LARGE")
+            return response.status_code, bytes(body), False
+        except httpx.TransportError:
+            if attempt + 1 == GET_MAX_ATTEMPTS:
+                raise
+            time.sleep(GET_RETRY_DELAY_SECONDS * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 def _status(status):

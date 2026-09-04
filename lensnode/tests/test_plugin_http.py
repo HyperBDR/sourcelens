@@ -105,6 +105,34 @@ def test_pool_isolates_connections_even_when_origin_matches():
     assert len(clients) == 2
 
 
+def test_bound_client_accepts_declared_http_origin_with_custom_port():
+    clients = []
+
+    def factory(**options):
+        client = FakeHttpClient(**options)
+        clients.append(client)
+        return client
+
+    pool = PluginHttpClientPool(
+        timeout=30,
+        verify=True,
+        client_factory=factory,
+    )
+    client = pool.bind(
+        "jira",
+        "connection-1",
+        ["http://office.oneprocloud.com.cn:9005"],
+    )
+
+    with client.stream(
+        "GET",
+        "http://office.oneprocloud.com.cn:9005/rest/api/2/myself",
+    ):
+        pass
+
+    assert len(clients[0].requests) == 1
+
+
 @pytest.mark.parametrize(
     ("method", "url", "kwargs"),
     [

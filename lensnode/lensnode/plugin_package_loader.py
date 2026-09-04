@@ -20,7 +20,7 @@ class PluginPackageLoadError(RuntimeError):
 
 @dataclass(frozen=True)
 class PluginRuntimeContract:
-    """Validated runtime exports for one exact installed Plugin version."""
+    """Validated runtime exports for one installed Plugin release."""
 
     plugin_key: str
     plugin_version: str
@@ -31,7 +31,7 @@ class PluginRuntimeContract:
 
 
 def load_runtime_contract(plugin_key, plugin_version, roots=None):
-    """Load one exact Plugin runtime from controlled package roots."""
+    """Load one exact Plugin release from controlled package roots."""
 
     if (
         not isinstance(plugin_key, str)
@@ -42,7 +42,7 @@ def load_runtime_contract(plugin_key, plugin_version, roots=None):
         raise PluginPackageLoadError("plugin runtime identity is invalid")
     for root_value in roots or _configured_roots():
         root = Path(root_value).resolve()
-        package = root / plugin_key / plugin_version
+        package = root / plugin_key
         if not package.exists():
             continue
         if package.is_symlink() or not package.is_dir():
@@ -102,12 +102,18 @@ def _runtime_contract(path, plugin_key, plugin_version):
         or getattr(module, "PLUGIN_VERSION", None) != plugin_version
     ):
         raise PluginPackageLoadError("plugin runtime identity is invalid")
-    exports = (
-        getattr(module, "build_tool", None),
-        getattr(module, "execute_tool", None),
-        getattr(module, "build_datasource_command", None),
+    build_tool = getattr(module, "build_tool", None)
+    execute_tool = getattr(module, "execute_tool", None)
+    build_datasource_command = getattr(
+        module,
+        "build_datasource_command",
+        None,
     )
-    if any(not callable(item) for item in exports):
+    if not callable(build_tool) or not callable(execute_tool):
+        raise PluginPackageLoadError("plugin runtime contract is invalid")
+    if build_datasource_command is not None and not callable(
+        build_datasource_command
+    ):
         raise PluginPackageLoadError("plugin runtime contract is invalid")
     http_origins = getattr(module, "http_origins", None)
     if http_origins is not None and not callable(http_origins):
@@ -116,9 +122,9 @@ def _runtime_contract(path, plugin_key, plugin_version):
         plugin_key=plugin_key,
         plugin_version=plugin_version,
         http_origins=http_origins,
-        build_tool=exports[0],
-        execute_tool=exports[1],
-        build_datasource_command=exports[2],
+        build_tool=build_tool,
+        execute_tool=execute_tool,
+        build_datasource_command=build_datasource_command,
     )
 
 

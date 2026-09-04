@@ -6,7 +6,6 @@ from lens.models import (
     Assistant,
     AssistantPluginBinding,
     Connection,
-    DataSource,
     ExecutionSnapshot,
     LensNode,
     Session,
@@ -14,11 +13,9 @@ from lens.models import (
 )
 from lens.plugins.providers.base import (
     DatasourceProviderError,
-    PluginRequestContext,
 )
 from lens.plugins.providers import get_datasource_provider
-from lens.plugins.registry import latest_plugin
-from lens.plugins.snapshots import create_datasource_sync_snapshot
+from lens.plugins.registry import installed_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 from lens.plugins.tool_snapshots import _resource_summary
 from lens.services import create_execution_run
@@ -26,55 +23,55 @@ from rest_framework.test import APIClient
 
 
 class JiraPluginManifestTests(TestCase):
-    """Verify the bundled Jira Cloud Plugin contract is installed."""
+    """Verify the bundled Jira Plugin contract is installed."""
 
     def test_bundled_jira_plugin_is_discoverable(self):
-        plugin = latest_plugin("jira")
+        plugin = installed_plugin("jira")
 
-        self.assertEqual(plugin.display_name, "Jira Cloud")
-        self.assertEqual(plugin.datasource_source_type, "jira")
+        self.assertEqual(plugin.version, "1.0.0")
+        self.assertEqual(plugin.display_name, "Jira")
+        self.assertIsNone(plugin.datasource_source_type)
+        self.assertIsNone(plugin.datasource)
+        self.assertIsNone(plugin.datasource_schema)
         self.assertEqual(
             [tool.key for tool in plugin.tools],
-            ["jira_get_issue", "jira_search_issues"],
+            [
+                "jira_get_issue",
+                "jira_search_issues",
+                "jira_activity_summary",
+            ],
         )
 
 
-class JiraDatasourceProviderTests(SimpleTestCase):
-    """Verify Jira Cloud implements the datasource Provider contract."""
+class JiraConnectionProviderTests(SimpleTestCase):
+    """Verify Jira implements the Connection Provider contract."""
 
     def setUp(self):
         self.provider = get_datasource_provider("jira")
         self.config = {"email": "admin@example.com"}
         self.scope = {"projects": ["SL", "OPS"]}
 
-    def test_accepts_project_within_connection_scope(self):
-        config = self.provider.validate_datasource_config(
-            self.scope,
-            {"project": "sl", "max_issues": 50},
-        )
-
-        self.assertEqual(config, {"project": "SL", "max_issues": 50})
-
-    def test_rejects_project_outside_connection_scope(self):
-        with self.assertRaisesMessage(DatasourceProviderError, "scope"):
-            self.provider.validate_datasource_config(
-                self.scope,
-                {"project": "OTHER"},
-            )
-
-    def test_accepts_only_atlassian_cloud_https_endpoint(self):
-        self.assertEqual(
-            self.provider.validate_connection(
-                "https://company.atlassian.net/",
-                self.config,
+    def test_accepts_cloud_and_self_hosted_root_endpoints(self):
+        endpoints = {
+            "https://company.atlassian.net/": (
+                "https://company.atlassian.net"
             ),
-            "https://company.atlassian.net",
-        )
+            "http://office.oneprocloud.com.cn:9005/": (
+                "http://office.oneprocloud.com.cn:9005"
+            ),
+        }
+
+        for endpoint, expected in endpoints.items():
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(
+                    self.provider.validate_connection(endpoint, self.config),
+                    expected,
+                )
 
         for endpoint in [
-            "http://company.atlassian.net",
-            "https://jira.internal.example",
+            "ftp://jira.internal.example",
             "https://company.atlassian.net/wiki",
+            "https://user@jira.internal.example",
         ]:
             with self.subTest(endpoint=endpoint):
                 with self.assertRaisesMessage(
@@ -82,6 +79,14 @@ class JiraDatasourceProviderTests(SimpleTestCase):
                     "endpoint",
                 ):
                     self.provider.validate_connection(endpoint, self.config)
+
+    def test_accepts_account_without_email_format(self):
+        endpoint = self.provider.validate_connection(
+            "https://company.atlassian.net",
+            {"email": "jira-admin"},
+        )
+
+        self.assertEqual(endpoint, "https://company.atlassian.net")
 
     def test_live_validation_uses_basic_auth_without_redirects(self):
         seen = {}
@@ -106,62 +111,101 @@ class JiraDatasourceProviderTests(SimpleTestCase):
         self.assertNotIn("api-token", seen["authorization"])
         self.assertEqual(result["account"]["account_id"], "account-1")
 
-    def test_discovers_only_explicitly_allowed_projects(self):
+    def test_self_hosted_validation_uses_v2_api(self):
+        seen = []
+
         def handler(request):
-            key = request.url.path.rsplit("/", 1)[-1]
+            seen.append(str(request.url))
             return httpx.Response(
                 200,
-                json={"key": key, "name": f"Project {key}"},
+                json={"name": "jira-admin", "displayName": "Admin"},
                 request=request,
             )
 
         with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            resources = self.provider.discover_resources(
-                self.scope,
+            result = self.provider.validate_live_connection(
                 "api-token",
-                endpoint="https://company.atlassian.net",
-                connection_config=self.config,
+                endpoint="http://office.oneprocloud.com.cn:9005",
+                connection_config={"email": "jira-admin"},
                 client=client,
-            )
-
-        items = resources["resources"]["projects"]["items"]
-        self.assertEqual([item["value"] for item in items], ["SL", "OPS"])
-
-    def test_discovery_returns_partial_results_and_warnings(self):
-        def handler(request):
-            project = request.url.path.rsplit("/", 1)[-1]
-            if project == "OPS":
-                return httpx.Response(404, request=request)
-            return httpx.Response(
-                200,
-                json={"key": "SL", "name": "SourceLens"},
-                request=request,
-            )
-
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            resources = self.provider.discover_resources(
-                self.scope,
-                "api-token",
-                endpoint="https://company.atlassian.net",
-                connection_config=self.config,
-                client=client,
-                request_context=PluginRequestContext(max_retries=0),
             )
 
         self.assertEqual(
-            resources["resources"]["projects"]["items"][0]["value"],
-            "SL",
+            seen,
+            [
+                "http://office.oneprocloud.com.cn:9005/"
+                "rest/api/2/myself"
+            ],
+        )
+        self.assertEqual(result["account"]["account_id"], "jira-admin")
+
+    def test_discovers_projects_visible_on_self_hosted_jira(self):
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(
+                200,
+                json=[
+                    {"key": "SL", "name": "SourceLens"},
+                    {"key": "OPS", "name": "Operations"},
+                ],
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_connection_resources(
+                "api-token",
+                endpoint="http://office.oneprocloud.com.cn:9005",
+                connection_config={"email": "jira-admin"},
+                query="source",
+                limit=50,
+                client=client,
+            )
+
+        self.assertEqual(
+            seen,
+            ["http://office.oneprocloud.com.cn:9005/rest/api/2/project"],
         )
         self.assertEqual(
-            resources["warnings"],
+            resources["resources"]["projects"]["items"],
             [
                 {
-                    "resource": "OPS",
-                    "label": "project",
-                    "code": "JIRA_NOT_FOUND",
+                    "value": "SL",
+                    "label": "SL · SourceLens",
+                    "metadata": {"name": "SourceLens"},
                 }
             ],
         )
+
+    def test_discovers_projects_visible_on_jira_cloud(self):
+        seen = {}
+
+        def handler(request):
+            seen["path"] = request.url.path
+            seen["params"] = dict(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "values": [{"key": "SL", "name": "SourceLens"}],
+                    "isLast": True,
+                },
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_connection_resources(
+                "api-token",
+                endpoint="https://company.atlassian.net",
+                connection_config=self.config,
+                query="source",
+                limit=25,
+                client=client,
+            )
+
+        self.assertEqual(seen["path"], "/rest/api/3/project/search")
+        self.assertEqual(seen["params"]["query"], "source")
+        self.assertEqual(resources["next_cursor"], "")
 
 
 class JiraToolProviderTests(SimpleTestCase):
@@ -202,6 +246,34 @@ class JiraToolProviderTests(SimpleTestCase):
         self.assertEqual(endpoint, "https://company.atlassian.net")
         self.assertEqual(arguments["project"], "SL")
 
+    def test_activity_summary_accepts_only_allowed_projects(self):
+        endpoint, arguments = self.provider.validate_request(
+            "https://company.atlassian.net",
+            {"projects": ["SL", "OPS"]},
+            "jira_activity_summary",
+            {
+                "projects": ["ops", "SL"],
+                "since": "2026-09-01T16:00:00Z",
+                "until": "2026-09-02T15:59:59Z",
+                "max_results": 50,
+            },
+        )
+
+        self.assertEqual(endpoint, "https://company.atlassian.net")
+        self.assertEqual(arguments["projects"], ["OPS", "SL"])
+
+        with self.assertRaisesMessage(ToolProviderError, "scope"):
+            self.provider.validate_request(
+                endpoint,
+                {"projects": ["SL"]},
+                "jira_activity_summary",
+                {
+                    "projects": ["OPS"],
+                    "since": "2026-09-01T16:00:00Z",
+                    "until": "2026-09-02T15:59:59Z",
+                },
+            )
+
     def test_audit_summary_keeps_only_jira_resource_identity(self):
         self.assertEqual(
             _resource_summary(
@@ -214,6 +286,17 @@ class JiraToolProviderTests(SimpleTestCase):
             {"project": "SL"},
         )
 
+        self.assertEqual(
+            _resource_summary(
+                {
+                    "projects": ["SL", "OPS"],
+                    "since": "2026-09-01T16:00:00Z",
+                    "until": "2026-09-02T15:59:59Z",
+                }
+            ),
+            {"projects": ["SL", "OPS"]},
+        )
+
 
 @override_settings(
     CACHES={
@@ -223,7 +306,7 @@ class JiraToolProviderTests(SimpleTestCase):
     }
 )
 class JiraPluginIntegrationTests(TestCase):
-    """Verify Jira connections, datasources, and execution snapshots."""
+    """Verify Jira Connections and Tool execution snapshots."""
 
     def setUp(self):
         self.admin = get_user_model().objects.create_user(
@@ -256,7 +339,7 @@ class JiraPluginIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         return Connection.objects.get(uuid=response.data["uuid"])
 
-    def test_api_creates_jira_datasource_and_snapshot_without_secret(self):
+    def test_api_rejects_jira_datasource(self):
         connection = self._create_connection()
         response = self.client.post(
             "/api/lens/admin/datasources/",
@@ -274,16 +357,29 @@ class JiraPluginIntegrationTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 201, response.data)
-        datasource = DataSource.objects.get(uuid=response.data["uuid"])
-        snapshot = create_datasource_sync_snapshot(datasource)
-
-        self.assertEqual(datasource.source_type, DataSource.SourceType.JIRA)
+        self.assertEqual(response.status_code, 400, response.data)
         self.assertEqual(
-            snapshot.resolved_config["connection_config"],
-            {"email": "admin@example.com"},
+            response.data["plugin_key"][0],
+            "Plugin does not support datasources",
         )
-        self.assertNotIn("jira-api-token", str(snapshot.resolved_config))
+
+    def test_manifest_exposes_jira_as_tool_only(self):
+        response = self.client.get(
+            "/api/lens/admin/plugins/jira/manifest/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data["datasource_source_type"])
+        self.assertIsNone(response.data["datasource"])
+        self.assertIsNone(response.data["datasource_schema"])
+        self.assertEqual(
+            [tool["key"] for tool in response.data["tools"]],
+            [
+                "jira_get_issue",
+                "jira_search_issues",
+                "jira_activity_summary",
+            ],
+        )
 
     def test_jira_tool_snapshot_accepts_non_repository_read_capability(self):
         connection = self._create_connection()

@@ -9,7 +9,7 @@ from django.test import TestCase, override_settings
 from lens.plugins.registry import (
     PluginRegistryError,
     discover_plugins,
-    latest_plugin,
+    installed_plugin,
 )
 from rest_framework.test import APIClient
 
@@ -19,9 +19,31 @@ User = get_user_model()
 class PluginRegistryTests(TestCase):
     """Verify trusted plugin manifest discovery."""
 
+    def test_discovers_versioned_plugin_without_a_version_directory(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            plugin_dir = Path(root) / "github"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "plugin.json").write_text(json.dumps(manifest))
+            (plugin_dir / "control.py").write_text("# test entrypoint\n")
+            (plugin_dir / "runtime.py").write_text("# test entrypoint\n")
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                plugins = discover_plugins()
+
+        self.assertEqual([plugin.key for plugin in plugins], ["github"])
+        self.assertEqual(plugins[0].version, "1.0.0")
+
     def test_duplicate_configured_root_is_scanned_once(self):
         with tempfile.TemporaryDirectory() as root:
-            plugin_dir = Path(root) / "github" / "1.0.0"
+            plugin_dir = Path(root) / "github"
             plugin_dir.mkdir(parents=True)
             with override_settings(LENS_PLUGIN_ROOTS=[root, root]):
                 with patch(
@@ -36,17 +58,19 @@ class PluginRegistryTests(TestCase):
         self.assertEqual(len(plugins), 1)
         load_plugin.assert_called_once()
 
-    def _write_manifest(self, root, version, manifest):
-        path = Path(root) / "github" / version
+    def _write_manifest(self, root, manifest):
+        manifest.setdefault("version", "1.0.0")
+        path = Path(root) / "github"
         path.mkdir(parents=True)
         (path / "plugin.json").write_text(json.dumps(manifest))
         (path / "control.py").write_text("# test entrypoint\n")
         (path / "runtime.py").write_text("# test entrypoint\n")
 
     def test_bundled_github_plugin_is_discoverable(self):
-        plugin = latest_plugin("github")
+        plugin = installed_plugin("github")
 
         self.assertEqual(plugin.key, "github")
+        self.assertEqual(plugin.version, "1.0.0")
         self.assertEqual(plugin.display_name, "GitHub")
         self.assertEqual(plugin.capability_family, "plugin")
         self.assertEqual(plugin.icon, "assets/icon.svg")
@@ -74,7 +98,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_guidance_topic_tool_not_in_manifest(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -104,7 +127,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError,
@@ -115,7 +138,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_unknown_plugin_capability_family(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "capability_family": "mcp",
             "handlers": {
@@ -124,7 +146,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError,
@@ -135,7 +157,6 @@ class PluginRegistryTests(TestCase):
     def test_accepts_bounded_resource_ids_and_field_dependencies(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -159,7 +180,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 plugin = discover_plugins()[0]
 
@@ -177,7 +198,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_unsafe_resource_identifier(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -195,7 +215,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError,
@@ -206,7 +226,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_unknown_resource_field_dependency(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -225,7 +244,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError,
@@ -233,10 +252,9 @@ class PluginRegistryTests(TestCase):
                 ):
                     discover_plugins()
 
-    def test_discovers_a_supported_installed_plugin_version(self):
+    def test_discovers_a_supported_installed_plugin(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -244,19 +262,36 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 plugins = discover_plugins()
 
         self.assertEqual(len(plugins), 1)
         self.assertEqual(plugins[0].key, "github")
-        self.assertEqual(plugins[0].version, "1.0.0")
         self.assertEqual(plugins[0].runtime_handler, "python_v1")
+
+    def test_rejects_a_manifest_without_a_semantic_version(self):
+        manifest = {
+            "key": "github",
+            "version": "latest",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "python_v1",
+                "datasource": "python_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(
+                    PluginRegistryError,
+                    "plugin version",
+                ):
+                    discover_plugins()
 
     def test_rejects_a_manifest_with_an_unapproved_handler(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "os.system",
@@ -264,7 +299,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(PluginRegistryError, "handler"):
                     discover_plugins()
@@ -272,7 +307,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_a_manifest_outside_its_directory_identity(self):
         manifest = {
             "key": "gitlab",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -280,7 +314,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError, "directory"
@@ -290,7 +324,6 @@ class PluginRegistryTests(TestCase):
     def test_admin_can_list_installed_plugins_without_handlers_or_paths(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -301,7 +334,7 @@ class PluginRegistryTests(TestCase):
         client = APIClient()
         client.force_authenticate(admin)
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 response = client.get("/api/lens/admin/plugins/")
 
@@ -348,7 +381,6 @@ class PluginRegistryTests(TestCase):
     def test_admin_can_list_read_only_plugin_tools(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -377,7 +409,7 @@ class PluginRegistryTests(TestCase):
         client = APIClient()
         client.force_authenticate(admin)
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 response = client.get("/api/lens/admin/plugins/github/tools/")
 
@@ -428,7 +460,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_an_icon_outside_the_plugin_package(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "icon": "../icon.svg",
             "handlers": {
@@ -437,7 +468,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(PluginRegistryError, "icon"):
                     discover_plugins()
@@ -445,7 +476,6 @@ class PluginRegistryTests(TestCase):
     def test_rejects_a_mutating_or_unknown_plugin_tool(self):
         manifest = {
             "key": "github",
-            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -462,7 +492,7 @@ class PluginRegistryTests(TestCase):
             ],
         }
         with tempfile.TemporaryDirectory() as root:
-            self._write_manifest(root, "1.0.0", manifest)
+            self._write_manifest(root, manifest)
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(PluginRegistryError, "tool"):
                     discover_plugins()

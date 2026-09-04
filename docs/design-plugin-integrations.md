@@ -84,19 +84,20 @@ ExecutionSnapshot
 
 ```text
 /opt/sourcelens/plugins/
-  github/1.0.0/
-  gitlab/1.0.0/
-  jira/1.0.0/
+  github/
+  gitlab/
+  jira/
 ```
 
 平台启动或显式刷新时扫描目录，读取 manifest，并通过 Registry 注册
-`plugin_key + version + protocol_version`。目录发现是部署扩展机制，不是授权边界；
+`plugin_key + plugin_version + protocol_version`。目录发现是部署扩展机制，
+不是授权边界；
 Registry 只加载平台允许的内置 handler，不允许 manifest 指定任意 Python import、
 shell command、远程组件或前端代码。
 
-Plugin 升级采用新旧版本并存：先安装、校验和启用新版本，再让新执行使用新版本；
-运行中的 ExecutionSnapshot 固定 Plugin 版本，旧版本待运行结束后再清理。控制端与
-LensNode 在调度/启动时校验 Plugin、版本和协议兼容性。
+当前安装布局为每个 key 激活一个目录，并通过内容哈希刷新模块缓存。控制端与
+LensNode 在调度/启动时校验 Plugin key、业务发布版本和协议兼容性；执行快照保留
+业务版本，为后续候选验证、灰度、回滚和多版本安装索引提供稳定扩展点。
 
 ### SecretMaterial
 
@@ -209,12 +210,12 @@ Manifest 应包含：
 - 身份、版本、展示名称、图标和说明；
 - credential/connection 字段类型、默认值、校验和脱敏规则；
 - capability、风险等级、读写属性和是否需要确认；V1 只允许只读工具；
-- DataSource 资源发现与同步声明；
-- DataSource 的资源选择、同步配置和索引输入 schema；
+- 可选的 DataSource 资源发现与同步声明；
+- 声明 DataSource 时所需的资源选择、同步配置和索引输入 schema；
 - Tool 名称、描述、输入/输出 JSON Schema 和所需 capability；
 - 运行时版本和兼容的 CLI/API 协议版本。
 
-同一个 Manifest 同时声明 Tool Provider 和 Datasource Provider。Plugin 项目可以
+同一个 Manifest 可独立声明 Tool 和 DataSource 能力。Plugin 项目可以
 独立维护代码、测试、文档和发布流程，SourceLens 主仓库只维护 Registry、通用
 Connection、DataSource、Task、Lease 和 schema renderer。
 
@@ -249,7 +250,7 @@ Connection scope、capability 或 Tool，也不能覆盖平台安全边界；真
 ExecutionSnapshot、Lease、Secret Material 和 Plugin Runtime。Registry 需要校验
 主题数量、文本长度、主题 key 唯一性，以及 `tool_keys` 必须引用同一 Manifest 中
 已声明的 Tool。虚拟 Skill 不得包含 Token、Secret、Connection UUID、Lease、内部
-endpoint 或其他运行时材料。其缓存内容至少受 `plugin_key + plugin_version +
+endpoint 或其他运行时材料。其缓存内容至少受 `plugin_key +
 allowed_scope` 哈希影响；更新 Plugin 或 Connection scope 后重新生成 Skill 快照。
 宿主不再注册 Plugin 专属的 `plugin_help` Tool，详细说明统一通过 Skill 文件读取。
 
@@ -634,8 +635,9 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
 - 已增加通用资源发现、依赖选项、能力筛选、`required_plugins` 和绑定校验；
 - GitHub Skills 可声明流程依赖并使用平台 Tool；GitLab/Jira Skill 包的实际迁移
   需要在各自 Skill 项目中移除 Token/任意 CLI 读取，属于独立发布任务；
-- GitLab/Jira Cloud 内置 Plugin 已完成各自 DataSource 与 Tool 垂直切片；Jira
-  Server/Data Center PAT 暂不属于 V1。
+- GitLab 内置 Plugin 同时提供 DataSource 与 Tool；Jira 仅提供 Tool。Jira Cloud
+  使用 API v3，自建 Jira 使用 API v2，均复用受控的 Basic account/token 认证和
+  Connection 项目 allowlist。
 
 ### Phase 3：扩展集成与受控能力
 
@@ -698,7 +700,7 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 - Plugin 内部并行请求已具备统一的并发上限、超时、取消、重试和部分失败结果协议；
 - 现有 GitHub/GitLab/Jira Skills 完成流程化迁移，移除自行读取 Token 和执行任意
   CLI 的逻辑（待各 Skill 项目发布）；
-- GitLab/Jira Cloud Provider 已完成各自的 DataSource 与 Tool 垂直切片；
+- GitLab Provider 提供 DataSource 与 Tool，Jira Provider 仅提供 Tool；
 - 现有 CLI 能在不改变业务行为的情况下作为 Plugin Runtime 后端执行器。
 - Plugin 可作为独立项目构建、测试和发布，并由企业部署安装到受控目录；普通用户
   无 Plugin 上传或安装权限；
@@ -708,7 +710,7 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 1. 第一阶段 Connection 是否只允许管理员创建和授权？
 2. GitHub V1 采用 fine-grained PAT 还是 GitHub App？
 3. GitHub/GitLab 的资源 scope 是 Connection 级限制，还是允许 DataSource 级细化？
-4. Jira 是否同时支持 Cloud OAuth、PAT 和 Server/Data Center Basic Auth？
+4. Jira 是否需要在现有 Basic account/token 之外增加 Cloud OAuth？
 5. 如何定义 interactive Run、Smart 子助手、定时同步和重试的 effective actor？
 6. 外部 DataSource 是否允许在 Connection scope 之下单独配置更窄的资源范围？
 7. Plugin Registry 的安装目录、制品校验方式和升级保留窗口如何配置？
@@ -718,7 +720,7 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 每个受信任的企业内置 Plugin 是可单独构建、测试、安装的目录项目：
 
 ```text
-plugins/<plugin-key>/<version>/
+plugins/<plugin-key>/
   plugin.json
   control.py
   runtime.py
@@ -726,10 +728,10 @@ plugins/<plugin-key>/<version>/
 
 `plugin.json` 只声明固定的 `python_v1` control/runtime handler，不能指定任意
 import、命令、前端代码或远程 URL。控制面和 LensNode 都仅按冻结的
-`plugin_key + plugin_version` 找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
+`plugin_key` 找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
 entrypoint、超限文件及导出身份不一致的包。
 
-`control.py` 导出数据源和 Tool Provider；数据源 Provider 额外声明
+`control.py` 导出 Connection Provider 和 Tool Provider；Connection Provider 声明
 `http_origins(endpoint, connection_config)`，让控制面为连接校验和资源发现注入
 受限客户端。`runtime.py` 导出：
 
@@ -741,6 +743,7 @@ PLUGIN_VERSION = "1.0.0"
 http_origins(endpoint)
 build_tool(definition, executor)
 execute_tool(tool_key, client, arguments, secret, endpoint, config)
+# Optional; required only when the Manifest declares Datasource support.
 build_datasource_command(snapshot, material, trigger)
 ```
 

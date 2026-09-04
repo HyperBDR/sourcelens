@@ -41,6 +41,22 @@ def _command(tool_key):
                 "required": ["project", "query"],
             },
         },
+        "gitlab_activity_summary": {
+            "key": "gitlab_activity_summary",
+            "description": "Summarize authorized GitLab activity.",
+            "capability": "repository.read",
+            "side_effect": "none",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "projects": {"type": "array"},
+                    "since": {"type": "string"},
+                    "until": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["projects", "since", "until"],
+            },
+        },
     }
     return {
         "run_uuid": "run-1",
@@ -59,6 +75,18 @@ def _command(tool_key):
 class GitLabRuntimeClient:
     """Provide control-plane and GitLab responses without real secrets."""
 
+    def __init__(
+        self,
+        endpoint="https://gitlab.example",
+        allowed_projects=None,
+    ):
+        self.endpoint = endpoint
+        self.allowed_projects = allowed_projects or [
+            "platform/sourcelens",
+            "platform/ops",
+        ]
+        self.provider_requests = []
+
     def post(self, url, **kwargs):
         if url.endswith("/plugin-runtime/tool-snapshots/"):
             payload = kwargs["json"]
@@ -71,6 +99,7 @@ class GitLabRuntimeClient:
                     "tool_key": payload["tool_key"],
                     "invocation_id": payload["call_id"],
                     "plugin_key": "gitlab",
+                    "plugin_version": "1.0.0",
                 },
             )
         if url.endswith("/plugin-runtime/leases/"):
@@ -86,7 +115,7 @@ class GitLabRuntimeClient:
                 200,
                 json={
                     "plugin_key": "gitlab",
-                    "endpoint": "https://gitlab.example",
+                    "endpoint": self.endpoint,
                     "value": "gitlab-secret",
                 },
             )
@@ -95,23 +124,31 @@ class GitLabRuntimeClient:
     def get(self, url, **kwargs):
         if "/plugin-runtime/snapshots/" in url:
             snapshot_uuid = url.rstrip("/").rsplit("/", 1)[-1]
-            is_search = "search" in snapshot_uuid
-            tool_key = (
-                "gitlab_search_code" if is_search else "gitlab_read_file"
-            )
-            arguments = (
-                {
+            if "activity" in snapshot_uuid:
+                tool_key = "gitlab_activity_summary"
+                arguments = {
+                    "projects": [
+                        "platform/sourcelens",
+                        "platform/ops",
+                    ],
+                    "since": "2026-09-01T00:00:00Z",
+                    "until": "2026-09-01T23:59:59Z",
+                    "max_results": 2,
+                }
+            elif "search" in snapshot_uuid:
+                tool_key = "gitlab_search_code"
+                arguments = {
                     "project": "platform/sourcelens",
                     "query": "PluginRuntime",
                     "max_results": 2,
                 }
-                if is_search
-                else {
+            else:
+                tool_key = "gitlab_read_file"
+                arguments = {
                     "project": "platform/sourcelens",
                     "path": "README.md",
                     "ref": "main",
                 }
-            )
             return httpx.Response(
                 200,
                 json={
@@ -120,8 +157,13 @@ class GitLabRuntimeClient:
                     "tool_key": tool_key,
                     "invocation_id": snapshot_uuid.removeprefix("snapshot-"),
                     "plugin_key": "gitlab",
+                    "plugin_version": "1.0.0",
                     "resolved_config": {
-                        "endpoint": "https://gitlab.example",
+                        "endpoint": self.endpoint,
+                        "connection_config": {},
+                        "allowed_scope": {
+                            "projects": self.allowed_projects,
+                        },
                         "arguments": arguments,
                     },
                 },
@@ -132,6 +174,7 @@ class GitLabRuntimeClient:
     def stream(self, method, url, **kwargs):
         assert method == "GET"
         assert kwargs["headers"]["PRIVATE-TOKEN"] == "gitlab-secret"
+        self.provider_requests.append((url, kwargs.get("params") or {}))
         if url.endswith("/raw"):
             yield httpx.Response(200, text="# GitLab project\n")
             return
@@ -143,6 +186,61 @@ class GitLabRuntimeClient:
                         "filename": "plugin_tools.py",
                         "path": "lensnode/plugin_tools.py",
                         "ref": "main",
+                    }
+                ],
+            )
+            return
+        if "/repository/commits" in url:
+            yield httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": "a" * 40,
+                        "title": "Implement activity summary",
+                        "author_name": "Zheng Wei",
+                        "authored_date": "2026-09-01T10:00:00Z",
+                        "committed_date": "2026-09-01T10:01:00Z",
+                        "web_url": f"{self.endpoint}/commit/one",
+                    },
+                    {
+                        "id": "b" * 40,
+                        "title": "Outside window",
+                        "committed_date": "2026-09-02T00:00:00Z",
+                    },
+                ],
+            )
+            return
+        if url.endswith("/merge_requests"):
+            yield httpx.Response(
+                200,
+                json=[
+                    {
+                        "iid": 12,
+                        "title": "Ship activity summary",
+                        "description": "x" * 3000,
+                        "state": "merged",
+                        "author": {
+                            "username": "zhengwei",
+                            "name": "Zheng Wei",
+                        },
+                        "updated_at": "2026-09-01T12:00:00Z",
+                        "merged_at": "2026-09-01T12:01:00Z",
+                    }
+                ],
+            )
+            return
+        if url.endswith("/issues"):
+            if "platform%2Fops" in url:
+                yield httpx.Response(500)
+                return
+            yield httpx.Response(
+                200,
+                json=[
+                    {
+                        "iid": 99,
+                        "title": "Track report coverage",
+                        "state": "opened",
+                        "updated_at": "2026-09-01T13:00:00Z",
                     }
                 ],
             )
@@ -204,3 +302,59 @@ def test_gitlab_search_code_returns_only_bounded_metadata():
             }
         ],
     }
+
+
+def test_gitlab_activity_summary_uses_python_http_for_all_projects():
+    client = GitLabRuntimeClient(
+        endpoint="http://gitlab.internal.example:8080",
+    )
+    tool = build_plugin_tools(
+        _command("gitlab_activity_summary"),
+        _config(),
+        client,
+    )[0]
+
+    result = json.loads(tool.func(
+        projects=["platform/sourcelens", "platform/ops"],
+        since="2026-09-01T00:00:00Z",
+        until="2026-09-01T23:59:59Z",
+        max_results=2,
+        runtime=SimpleNamespace(tool_call_id="activity-1"),
+    ))
+
+    assert result["ok"] is True
+    assert len(client.provider_requests) == 6
+    assert all(
+        url.startswith("http://gitlab.internal.example:8080/api/v4/")
+        for url, _params in client.provider_requests
+    )
+    sourcelens = result["projects"][0]
+    assert len(sourcelens["commits"]) == 1
+    assert len(sourcelens["merge_requests"][0]["description"]) == 2000
+    assert sourcelens["possibly_truncated"]["commits"] is True
+    assert result["projects"][1]["errors"] == {
+        "issues": "GITLAB_REQUEST_FAILED",
+    }
+    assert "gitlab-secret" not in json.dumps(result)
+
+
+def test_gitlab_activity_summary_rechecks_frozen_project_scope():
+    client = GitLabRuntimeClient(
+        allowed_projects=["platform/sourcelens"],
+    )
+    tool = build_plugin_tools(
+        _command("gitlab_activity_summary"),
+        _config(),
+        client,
+    )[0]
+
+    result = json.loads(tool.func(
+        projects=["platform/sourcelens", "platform/ops"],
+        since="2026-09-01T00:00:00Z",
+        until="2026-09-01T23:59:59Z",
+        max_results=2,
+        runtime=SimpleNamespace(tool_call_id="activity-scope-1"),
+    ))
+
+    assert result == {"ok": False, "error": "PLUGIN_SCOPE_MISMATCH"}
+    assert client.provider_requests == []

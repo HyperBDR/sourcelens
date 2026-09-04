@@ -60,7 +60,7 @@ from .models import (
     RunTraceExport,
     Session,
 )
-from .plugins.registry import latest_plugin
+from .plugins.registry import installed_plugin
 from .routing_descriptions import build_routing_description
 from .runtime_events import public_step_detail, sanitize_termination_detail
 from .session_lifecycle import lock_active_session
@@ -1737,7 +1737,7 @@ def build_loaded_plugins(assistant):
             continue
         plugin = plugins.get(connection.plugin_key)
         if plugin is None:
-            plugin = latest_plugin(connection.plugin_key)
+            plugin = installed_plugin(connection.plugin_key)
             plugins[connection.plugin_key] = plugin
         definitions = {
             tool.key: tool
@@ -3290,6 +3290,9 @@ def finish_lensnode_run(
     error="",
     outcome="",
     termination_detail=None,
+    final_content=None,
+    citations=None,
+    planned_evidence=None,
 ):
     """Mark a LensNode-dispatched run finished."""
 
@@ -3400,6 +3403,17 @@ def finish_lensnode_run(
     valid_outcomes = {choice for choice, _ in Run.Outcome.choices}
     run.outcome = outcome if outcome in valid_outcomes else default_outcome
     run.termination_detail = sanitize_termination_detail(termination_detail or {})
+    if final_content and run.output_message is not None:
+        run.output_message.content = final_content
+        run.output_message.run = run
+        run.output_message.save(update_fields=["content", "run"])
+    run_result_fields = []
+    if citations is not None:
+        run.citations = sanitize_run_citations(citations)
+        run_result_fields.append("citations")
+    if planned_evidence is not None:
+        run.planned_evidence = sanitize_planned_evidence(planned_evidence)
+        run_result_fields.append("planned_evidence")
     run.resume_by = None
     run.finished_at = now
     run.save(
@@ -3411,6 +3425,7 @@ def finish_lensnode_run(
             "resume_by",
             "finished_at",
             "updated_at",
+            *run_result_fields,
         ]
     )
 

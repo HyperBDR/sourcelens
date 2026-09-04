@@ -1,5 +1,5 @@
 from django.test import SimpleTestCase, TestCase
-from lens.plugins.registry import latest_plugin
+from lens.plugins.registry import installed_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 
 
@@ -7,6 +7,7 @@ GITHUB_READ_ONLY_TOOLS = [
     "github_read_file",
     "github_search_code",
     "github_repository_get",
+    "github_activity_summary",
     "github_branch_list",
     "github_commit_list",
     "github_commit_get",
@@ -27,8 +28,9 @@ class GitHubPluginManifestTests(TestCase):
     """Verify the bundled GitHub Plugin exposes bounded read-only tools."""
 
     def test_bundled_github_plugin_declares_read_only_business_tools(self):
-        plugin = latest_plugin("github")
+        plugin = installed_plugin("github")
 
+        self.assertEqual(plugin.version, "1.0.0")
         self.assertEqual(
             [tool.key for tool in plugin.tools],
             GITHUB_READ_ONLY_TOOLS,
@@ -75,10 +77,15 @@ class GitHubToolProviderTests(SimpleTestCase):
         )
 
     def test_every_manifest_tool_is_supported_by_control_plane(self):
-        plugin = latest_plugin("github")
+        plugin = installed_plugin("github")
         arguments = {
             "github_read_file": {"path": "README.md"},
             "github_search_code": {"query": "PluginRuntime"},
+            "github_activity_summary": {
+                "repositories": ["HyperBDR/sourcelens"],
+                "since": "2026-09-01T16:00:00Z",
+                "until": "2026-09-02T15:59:59Z",
+            },
             "github_commit_get": {"ref": "main"},
             "github_issue_get": {"number": 1},
             "github_issue_comments": {"number": 1},
@@ -100,10 +107,10 @@ class GitHubToolProviderTests(SimpleTestCase):
                     },
                 )
 
-                self.assertEqual(
-                    normalized["repository"],
-                    "HyperBDR/sourcelens",
-                )
+                repositories = normalized.get("repositories") or [
+                    normalized["repository"]
+                ]
+                self.assertEqual(repositories, ["HyperBDR/sourcelens"])
 
     def test_normalizes_numbered_resource_request(self):
         _endpoint, arguments = self.provider.validate_request(
@@ -137,6 +144,38 @@ class GitHubToolProviderTests(SimpleTestCase):
 
         self.assertEqual(arguments["ref"], "main")
         self.assertEqual(arguments["path"], "backend/lens")
+
+    def test_normalizes_activity_summary_request(self):
+        _endpoint, arguments = self.provider.validate_request(
+            "https://github.com",
+            self.scope,
+            "github_activity_summary",
+            {
+                "repositories": ["hyperbdr/sourcelens"],
+                "since": "2026-09-01T16:00:00Z",
+                "until": "2026-09-02T15:59:59Z",
+                "per_page": 10,
+            },
+        )
+
+        self.assertEqual(arguments["repositories"], ["hyperbdr/sourcelens"])
+        self.assertEqual(arguments["per_page"], 10)
+
+    def test_rejects_activity_repository_outside_connection_scope(self):
+        with self.assertRaisesMessage(ToolProviderError, "scope"):
+            self.provider.validate_request(
+                "https://github.com",
+                self.scope,
+                "github_activity_summary",
+                {
+                    "repositories": [
+                        "HyperBDR/sourcelens",
+                        "other/private",
+                    ],
+                    "since": "2026-09-01T16:00:00Z",
+                    "until": "2026-09-02T15:59:59Z",
+                },
+            )
 
     def test_rejects_repository_outside_connection_scope(self):
         with self.assertRaisesMessage(ToolProviderError, "scope"):

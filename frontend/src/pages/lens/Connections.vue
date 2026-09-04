@@ -257,7 +257,7 @@
 
     <BaseDrawer
       :show="drawerOpen"
-      width="3xl"
+      width="5xl"
       :title="
         mode === 'create'
           ? t('lensAdmin.connections.createTitle')
@@ -291,7 +291,11 @@
           </div>
         </div>
 
-        <section class="rounded-xl border border-line bg-surface p-4">
+        <div
+          class="connection-form-layout grid gap-5 md:grid-cols-[minmax(0,1fr)_18rem] md:items-start xl:grid-cols-[minmax(0,1fr)_20rem]"
+        >
+          <div class="space-y-5">
+            <section class="rounded-xl border border-line bg-surface p-4">
           <div class="mb-4">
             <h3 class="text-sm font-semibold text-ink-900">
               {{ t('lensAdmin.connections.basicSection') }}
@@ -340,9 +344,9 @@
               </div>
             </div>
           </div>
-        </section>
+            </section>
 
-        <section class="rounded-xl border border-line bg-surface p-4">
+            <section class="rounded-xl border border-line bg-surface p-4">
           <div class="mb-4">
             <h3 class="text-sm font-semibold text-ink-900">
               {{ t('lensAdmin.connections.accessSection') }}
@@ -385,7 +389,13 @@
           >
             {{ t('lensAdmin.connections.tokenEditHint') }}
           </p>
-        </section>
+            </section>
+          </div>
+
+          <FeishuConnectionGuide
+            v-if="form.plugin_key === 'feishu'"
+          />
+        </div>
 
         <p v-if="formError" class="text-sm text-danger-700">{{ formError }}</p>
       </div>
@@ -417,6 +427,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
+import FeishuConnectionGuide from '@/components/lens/FeishuConnectionGuide.vue'
 import ManifestSchemaForm from '@/components/lens/ManifestSchemaForm.vue'
 import {
   createConnection,
@@ -458,7 +469,6 @@ const connectionDetailOpen = ref(false)
 const detailConnection = ref(null)
 const detailScopeSearch = ref('')
 const collapsedDetailScopeGroups = ref({})
-
 const connectionResourceOptions = computed(() => ({
   [connectionResourceField.value?.[1]?.resource || '']: {
     items: connectionResourceCandidates.value

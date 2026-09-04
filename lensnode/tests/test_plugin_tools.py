@@ -181,6 +181,7 @@ class GitHubRuntimeClient:
                     "tool_key": tool_key,
                     "invocation_id": snapshot_uuid.removeprefix("snapshot-"),
                     "plugin_key": "github",
+                    "plugin_version": "1.0.0",
                     "resolved_config": {
                         "endpoint": "https://github.com",
                         "allowed_scope": {
@@ -467,6 +468,7 @@ def test_plugin_runtime_failure_is_returned_as_a_stable_error():
         GitHubRuntimeClient(),
         "connection-1",
         "github",
+        "1.0.0",
         "github_read_file",
         SimpleNamespace(tool_call_id="failure-1"),
         {"repository": "owner/repository", "path": "README.md"},

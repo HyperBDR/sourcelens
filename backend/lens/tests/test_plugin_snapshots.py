@@ -55,6 +55,7 @@ class PluginSnapshotTests(TestCase):
     def test_snapshot_contains_complete_resolved_sync_config(self):
         snapshot = create_datasource_sync_snapshot(self.datasource)
 
+        self.assertEqual(snapshot.plugin_key, "github")
         self.assertEqual(snapshot.plugin_version, "1.0.0")
         self.assertEqual(
             snapshot.secret_version, self.connection.secret_version
@@ -117,6 +118,7 @@ class PluginSnapshotTests(TestCase):
 
         payload = send.call_args.args[1]
         self.assertEqual(payload["type"], "plugin_datasource_sync")
+        self.assertEqual(payload["plugin_version"], "1.0.0")
         self.assertIn("snapshot_uuid", payload)
         self.assertNotIn("config", payload)
         self.assertNotIn("access_token", json.dumps(payload))

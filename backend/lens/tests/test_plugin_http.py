@@ -84,10 +84,106 @@ def test_temporary_client_is_closed_without_entering_the_pool():
     assert pool.client_count == 0
 
 
+def test_bound_client_accepts_declared_http_origin_with_custom_port():
+    clients = []
+
+    def factory(**options):
+        client = FakeHttpClient(**options)
+        clients.append(client)
+        return client
+
+    pool = PluginHttpClientPool(client_factory=factory)
+    client = pool.bind(
+        "jira",
+        "connection-1",
+        ["http://office.oneprocloud.com.cn:9005"],
+    )
+
+    with client.stream(
+        "GET",
+        "http://office.oneprocloud.com.cn:9005/rest/api/2/myself",
+    ):
+        pass
+
+    assert len(clients[0].requests) == 1
+
+
+def test_bound_client_accepts_bounded_json_post_for_read_workflow():
+    clients = []
+
+    def factory(**options):
+        client = FakeHttpClient(**options)
+        clients.append(client)
+        return client
+
+    pool = PluginHttpClientPool(client_factory=factory)
+    client = pool.bind(
+        "feishu",
+        "connection-1",
+        ["https://open.feishu.cn"],
+    )
+
+    with client.stream(
+        "POST",
+        (
+            "https://open.feishu.cn/open-apis/auth/v3/"
+            "tenant_access_token/internal"
+        ),
+        json={"app_id": "cli_example", "app_secret": "secret"},
+    ):
+        pass
+
+    assert clients[0].requests[0][0] == "POST"
+    assert clients[0].requests[0][2]["json"]["app_id"] == "cli_example"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"content": b"x" * (64 * 1024 + 1)},
+        {"content": "飞" * 22_000},
+        {"json": {"value": "x" * (64 * 1024)}},
+        {"content": "body", "json": {"value": "body"}},
+    ],
+)
+def test_bound_client_rejects_oversized_or_ambiguous_post_bodies(kwargs):
+    pool = PluginHttpClientPool()
+    client = pool.bind(
+        "feishu",
+        "connection-1",
+        ["https://open.feishu.cn"],
+    )
+
+    with pytest.raises(PluginHttpClientError):
+        with client.stream(
+            "POST",
+            "https://open.feishu.cn/open-apis/auth/token",
+            **kwargs,
+        ):
+            pass
+
+
+def test_bound_client_rejects_request_body_on_get():
+    pool = PluginHttpClientPool()
+    client = pool.bind(
+        "feishu",
+        "connection-1",
+        ["https://open.feishu.cn"],
+    )
+
+    with pytest.raises(PluginHttpClientError):
+        with client.stream(
+            "GET",
+            "https://open.feishu.cn/open-apis/wiki/node",
+            json={"token": "wik_one"},
+        ):
+            pass
+
+
 @pytest.mark.parametrize(
     ("method", "url", "kwargs"),
     [
-        ("POST", "https://api.github.com/user", {}),
+        ("DELETE", "https://api.github.com/user", {}),
         ("GET", "http://api.github.com/user", {}),
         ("GET", "https://other.example/user", {}),
         ("GET", "https://user:pass@api.github.com/user", {}),

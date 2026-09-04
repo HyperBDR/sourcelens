@@ -123,6 +123,35 @@ def test_executor_emits_streamed_output_delta():
     }
 
 
+def test_executor_repeats_long_final_output_in_terminal_frame():
+    final_answer = "完整报告" * 2500
+
+    class LongAnswerAgent(FakeAgent):
+        async def answer(self, *args, **kwargs):
+            result = await super().answer(*args, **kwargs)
+            return {**result, "answer": final_answer}
+
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = LongAnswerAgent()
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000018",
+                "task": "knowledge_qa",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"][-1]
+    assert done["final_content"] == final_answer
+    assert done["citations"][0]["id"] == "evidence-123"
+    assert done["planned_evidence"] == {"sufficient": True}
+
+
 def test_terminal_result_retains_checkpoint_until_acknowledged():
     executor = LensNodeExecutor.__new__(LensNodeExecutor)
     executor.agent = FakeAgent()

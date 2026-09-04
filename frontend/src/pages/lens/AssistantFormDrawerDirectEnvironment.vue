@@ -1235,7 +1235,11 @@ const collaborationMemberOptions = computed(() =>
 )
 
 const activePluginConnections = computed(() =>
-  props.pluginConnections.filter((connection) => connection.status === 'active')
+  props.pluginConnections.filter((connection) => {
+    if (connection.status !== 'active') return false
+    const manifest = props.pluginManifests?.[connection.plugin_key]
+    return Array.isArray(manifest?.tools) && manifest.tools.length > 0
+  })
 )
 
 const selectedPluginBindings = computed(() =>

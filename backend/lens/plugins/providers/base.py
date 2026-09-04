@@ -1,6 +1,6 @@
 """Stable contracts for Plugin datasource implementations."""
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from math import isfinite
@@ -127,6 +127,7 @@ class DatasourceProvider(ABC):
     """Validate and normalize datasource-specific resource configuration."""
 
     key = ""
+    requires_datasource_access_validation = False
 
     def validate_connection(self, endpoint, connection_config):
         """Return a normalized endpoint accepted by this provider."""
@@ -145,7 +146,7 @@ class DatasourceProvider(ABC):
         return connection_scope
 
     def http_origins(self, endpoint, connection_config=None):
-        """Return HTTPS origins approved for host-managed HTTP clients."""
+        """Return HTTP(S) origins approved for host-managed HTTP clients."""
 
         return (self.validate_connection(endpoint, connection_config),)
 
@@ -243,6 +244,31 @@ class DatasourceProvider(ABC):
             raise DatasourceProviderError("datasource source type is required")
         return value
 
-    @abstractmethod
     def validate_datasource_config(self, connection_scope, datasource_config):
         """Return normalized config that remains within connection scope."""
+
+        del connection_scope, datasource_config
+        raise DatasourceProviderError("PROVIDER_DATASOURCE_UNSUPPORTED")
+
+    def validate_datasource_access(
+        self,
+        secret,
+        datasource_config,
+        endpoint="",
+        connection_config=None,
+        client=None,
+        request_context=None,
+    ):
+        """Verify remote access to the configured datasource resources."""
+
+        del (
+            secret,
+            datasource_config,
+            endpoint,
+            connection_config,
+            client,
+            request_context,
+        )
+        raise DatasourceProviderError(
+            "PROVIDER_DATASOURCE_ACCESS_VALIDATION_UNSUPPORTED"
+        )

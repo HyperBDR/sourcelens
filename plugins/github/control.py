@@ -2,6 +2,7 @@
 
 import json
 import re
+from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit
 
@@ -44,6 +45,7 @@ GITHUB_TOOL_KEYS = frozenset(
         "github_read_file",
         "github_search_code",
         "github_repository_get",
+        "github_activity_summary",
         "github_branch_list",
         "github_commit_list",
         "github_commit_get",
@@ -569,12 +571,60 @@ class GitHubToolProvider:
                 endpoint,
                 {},
             )
+            allowed = _allowed_repositories(allowed_scope)
+            if tool_key == "github_activity_summary":
+                if not isinstance(arguments, dict):
+                    raise DatasourceProviderError(
+                        "arguments must be an object"
+                    )
+                repositories = arguments.get("repositories")
+                if (
+                    not isinstance(repositories, list)
+                    or not repositories
+                    or len(repositories) > GITHUB_MAX_REPOSITORIES
+                ):
+                    raise DatasourceProviderError(
+                        "repositories must contain 1 through 50 items"
+                    )
+                normalized_repositories = [
+                    _repository_name(repository)
+                    for repository in repositories
+                ]
+                identities = {
+                    repository.casefold()
+                    for repository in normalized_repositories
+                }
+                if len(identities) != len(normalized_repositories):
+                    raise DatasourceProviderError(
+                        "repositories must be unique"
+                    )
+                if not identities.issubset(allowed):
+                    raise DatasourceProviderError(
+                        "repository is outside connection scope"
+                    )
+                since = _tool_timestamp(arguments.get("since"), "since")
+                until = _tool_timestamp(arguments.get("until"), "until")
+                if since[1] > until[1]:
+                    raise DatasourceProviderError(
+                        "since must not be after until"
+                    )
+                return endpoint, {
+                    "repositories": normalized_repositories,
+                    "since": since[0],
+                    "until": until[0],
+                    "per_page": _tool_integer(
+                        arguments.get("per_page"),
+                        "per_page",
+                        1,
+                        100,
+                        50,
+                    ),
+                }
             repository = _repository_name(
                 arguments.get("repository")
                 if isinstance(arguments, dict)
                 else None
             )
-            allowed = _allowed_repositories(allowed_scope)
         except DatasourceProviderError as exc:
             raise ToolProviderError(str(exc)) from exc
         if repository.casefold() not in allowed:
@@ -691,6 +741,19 @@ def _tool_text(value, field, limit, required=False):
     ):
         raise ToolProviderError(f"{field} is invalid")
     return text
+
+
+def _tool_timestamp(value, field):
+    """Return one timezone-aware ISO-8601 Tool timestamp and parsed value."""
+
+    text = _tool_text(value, field, 64, required=True)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ToolProviderError(f"{field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ToolProviderError(f"{field} is invalid")
+    return text, parsed
 
 
 def _tool_path(value, required):

@@ -8,13 +8,11 @@ import subprocess
 import tarfile
 import time
 import zipfile
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
-
-import httpx
 
 from . import datasource_manifest as manifest_store
 from .datasource_adapters import DataSourceAdapterRegistry
@@ -44,6 +42,11 @@ FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
 FEISHU_EXPORT_POLL_INTERVAL_S = 2
 FEISHU_EXPORT_TIMEOUT_S = 600
+FEISHU_MAX_SYNC_ITEMS = 100000
+FEISHU_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{4,255}$")
+FEISHU_RESOURCE_KINDS = frozenset(
+    {"bitable", "docx", "folder", "sheet", "slides", "wiki"}
+)
 FEISHU_EXPORT_STATUS_MESSAGES = {
     0: "success",
     1: "initializing",
@@ -757,7 +760,6 @@ def datasource_adapter_registry():
     registry = DataSourceAdapterRegistry()
     registry.register(FunctionDataSourceAdapter("git", _sync_git))
     registry.register(FunctionDataSourceAdapter("feishu", _sync_feishu))
-    registry.register(FunctionDataSourceAdapter("jira", _sync_jira))
     return registry
 
 
@@ -1985,239 +1987,14 @@ def _git_item_signature(item):
     }
 
 
-def _sync_jira(command, workspace_path, emit):
-    """Export bounded Jira Cloud Issues into local Markdown files."""
-
-    config = command.get("config") or {}
-    target = normalize_target_path(command.get("target_path"), workspace_path)
-    issues_dir = target / "issues"
-    issues_dir.mkdir(parents=True, exist_ok=True)
-    issues = _jira_fetch_issues(
-        config,
-        client=command.get("provider_http_client"),
-    )
-    previous_paths = {
-        path.relative_to(target).as_posix()
-        for path in issues_dir.glob("*.md")
-        if path.is_file()
-    }
-    sync_items = []
-    current_paths = set()
-    for issue in issues:
-        key, markdown, metadata = _jira_issue_document(
-            issue,
-            config.get("project"),
-            config.get("endpoint"),
-        )
-        local_path = f"issues/{key}.md"
-        path = target / local_path
-        path.write_text(markdown, encoding="utf-8")
-        current_paths.add(local_path)
-        sync_items.append(
-            _manifest_item_to_sync_item(
-                {
-                    "source_id": f"jira:{key}",
-                    "source_type": "jira",
-                    "source_path": key,
-                    "local_path": local_path,
-                    "name": f"{key}.md",
-                    "kind": "issue",
-                    "extension": "md",
-                    "status": "synced",
-                    "metadata": metadata,
-                    "remote": {"key": key, "type": "jira_issue"},
-                },
-                target,
-            )
-        )
-    deleted_paths = sorted(previous_paths.difference(current_paths))
-    for local_path in deleted_paths:
-        (target / local_path).unlink(missing_ok=True)
-    stats = {
-        "scanned": len(issues),
-        "changed": len(sync_items),
-        "skipped": 0,
-        "deleted": len(deleted_paths),
-        "failed": 0,
-        "folders": 0,
-        "documents": len(sync_items),
-        "files": len(sync_items),
-        "by_extension": {"md": len(sync_items)},
-        "by_type": {"jira_issue": len(sync_items)},
-    }
-    _emit(
-        emit,
-        "manifest",
-        "done",
-        f"Jira sync completed with {len(sync_items)} Issues.",
-        category="summary",
-        progress_total=len(sync_items),
-        progress_current=len(sync_items),
-        progress_percent=100,
-        summary=stats,
-    )
-    return {
-        "synced": len(sync_items),
-        "target_path": str(target),
-        "_sync_items": sync_items,
-        "_changed_paths": sorted(current_paths),
-        "_deleted_paths": deleted_paths,
-        **stats,
-    }
 
 
-def _jira_fetch_issues(config, client=None):
-    """Fetch a bounded page of recently updated Jira Cloud Issues."""
-
-    endpoint = str(config.get("endpoint") or "").rstrip("/")
-    email = config.get("email")
-    token = config.get("access_token")
-    project = str(config.get("project") or "").upper()
-    max_issues = config.get("max_issues", 100)
-    parsed = parse.urlsplit(endpoint)
-    hostname = (parsed.hostname or "").lower()
-    if (
-        parsed.scheme != "https"
-        or not hostname.endswith(".atlassian.net")
-        or hostname == "atlassian.net"
-        or parsed.path not in {"", "/"}
-        or not isinstance(email, str)
-        or not email
-        or not isinstance(token, str)
-        or not token
-        or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", project)
-        or isinstance(max_issues, bool)
-        or not isinstance(max_issues, int)
-        or max_issues < 1
-        or max_issues > 100
-    ):
-        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
-    credential = base64.b64encode(
-        f"{email}:{token}".encode("utf-8")
-    ).decode("ascii")
-    try:
-        client_context = (
-            nullcontext(client)
-            if client is not None
-            else httpx.Client(timeout=30, follow_redirects=False)
-        )
-        with client_context as request_client:
-            with request_client.stream(
-                "GET",
-                f"{endpoint}/rest/api/3/search/jql",
-                params={
-                    "jql": f'project = "{project}" ORDER BY updated DESC',
-                    "maxResults": max_issues,
-                    "fields": (
-                        "summary,status,assignee,priority,updated,description"
-                    ),
-                },
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Basic {credential}",
-                    "User-Agent": "SourceLens-LensNode",
-                },
-                follow_redirects=False,
-            ) as response:
-                if response.is_redirect:
-                    raise DataSourceSyncError("JIRA_REDIRECT_REJECTED")
-                if response.status_code >= 400:
-                    raise DataSourceSyncError("JIRA_REQUEST_FAILED")
-                body = bytearray()
-                for chunk in response.iter_bytes():
-                    if len(body) + len(chunk) > 1_000_000:
-                        raise DataSourceSyncError("JIRA_RESPONSE_TOO_LARGE")
-                    body.extend(chunk)
-    except DataSourceSyncError:
-        raise
-    except httpx.HTTPError as exc:
-        raise DataSourceSyncError("JIRA_REQUEST_FAILED") from exc
-    try:
-        payload = json.loads(body)
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise DataSourceSyncError("JIRA_RESPONSE_INVALID") from exc
-    issues = payload.get("issues") if isinstance(payload, dict) else None
-    if not isinstance(issues, list):
-        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
-    return issues[:max_issues]
 
 
-def _jira_issue_document(issue, project, endpoint):
-    """Return a validated Jira Issue key, Markdown, and safe metadata."""
-
-    if not isinstance(issue, dict) or not isinstance(issue.get("fields"), dict):
-        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
-    key = issue.get("key")
-    fields = issue["fields"]
-    if (
-        not isinstance(key, str)
-        or not key.startswith(f"{project}-")
-        or not key.removeprefix(f"{project}-").isdigit()
-    ):
-        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
-    summary = str(fields.get("summary") or "")[:1000]
-    status = fields.get("status")
-    assignee = fields.get("assignee")
-    priority = fields.get("priority")
-    status_name = (
-        str(status.get("name") or "")[:160]
-        if isinstance(status, dict)
-        else ""
-    )
-    assignee_name = (
-        str(assignee.get("displayName") or "")[:160]
-        if isinstance(assignee, dict)
-        else ""
-    )
-    priority_name = (
-        str(priority.get("name") or "")[:160]
-        if isinstance(priority, dict)
-        else ""
-    )
-    updated = str(fields.get("updated") or "")[:64]
-    description = _jira_description_text(fields.get("description"))
-    issue_url = f"{str(endpoint).rstrip('/')}/browse/{key}"
-    markdown = (
-        f"# {key}: {summary}\n\n"
-        f"- Status: {status_name}\n"
-        f"- Assignee: {assignee_name}\n"
-        f"- Priority: {priority_name}\n"
-        f"- Updated: {updated}\n"
-        f"- URL: {issue_url}\n\n"
-        f"## Description\n\n{description}\n"
-    )
-    return key, markdown, {
-        "summary": summary,
-        "status": status_name,
-        "updated": updated,
-        "url": issue_url,
-    }
 
 
-def _jira_description_text(value):
-    """Flatten bounded text from Atlassian document format."""
 
-    text = []
-    captured = 0
 
-    def visit(node):
-        nonlocal captured
-        if captured >= 20_000:
-            return
-        if isinstance(node, dict):
-            item = node.get("text")
-            if isinstance(item, str):
-                bounded = item[: 20_000 - captured]
-                text.append(bounded)
-                captured += len(bounded)
-            for child in node.get("content") or []:
-                visit(child)
-        elif isinstance(node, list):
-            for child in node:
-                visit(child)
-
-    visit(value)
-    return "\n".join(text)
 
 
 def _sync_feishu(command, workspace_path, emit):
@@ -2243,7 +2020,17 @@ def _sync_feishu(command, workspace_path, emit):
         "Accept": "application/json",
         "Authorization": f"Bearer {token}",
     }
-    if (config.get("sync_mode") or "document_list") == "drive_folder":
+    sync_mode = config.get("sync_mode") or "document_list"
+    if sync_mode == "resource_list":
+        return _sync_feishu_resources(
+            config,
+            target,
+            headers,
+            emit,
+            max_workers,
+            cancel_event=command.get("cancel_event"),
+        )
+    if sync_mode == "drive_folder":
         return _sync_feishu_folder(config, target, headers, emit, max_workers)
     return _sync_feishu_documents(config, target, headers, emit, max_workers)
 
@@ -2351,6 +2138,470 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
         "_deleted_paths": [],
         **stats,
     }
+
+
+def _sync_feishu_resources(
+    config,
+    target,
+    headers,
+    emit,
+    max_workers=1,
+    cancel_event=None,
+):
+    """Synchronize mixed Feishu folders and explicit documents."""
+
+    resources = config.get("resources")
+    if (
+        not isinstance(resources, list)
+        or not 1 <= len(resources) <= 100
+    ):
+        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+    max_workers = max(1, int(max_workers or 1))
+    recursive = config.get("recursive", True) is not False
+    max_depth = int(config.get("max_depth") or 10)
+    incremental = config.get(
+        "feishu_incremental",
+        config.get("incremental", True),
+    ) is not False
+    delete_missing = config.get(
+        "feishu_delete_missing",
+        config.get("delete_missing", False),
+    ) is True
+    previous_manifest = _read_manifest(target)
+    previous_items = _manifest_items_by_token(previous_manifest)
+    pending_by_token = {}
+    manifest_items = []
+    seen_tokens = set()
+    scanned_folders = set()
+    scan_failures = []
+    deleted_paths = []
+    stats = {
+        "folders": 0,
+        "documents": 0,
+        "files": 0,
+        "scanned": 0,
+        "changed": 0,
+        "skipped": 0,
+        "deleted": 0,
+        "failed": 0,
+        "by_extension": {},
+        "by_type": {},
+    }
+    scan_queue = deque()
+    for resource in resources:
+        if not isinstance(resource, dict):
+            raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+        token = resource.get("token")
+        kind = resource.get("kind")
+        if (
+            not isinstance(token, str)
+            or not isinstance(kind, str)
+            or kind not in FEISHU_RESOURCE_KINDS
+            or not FEISHU_TOKEN_PATTERN.fullmatch(token)
+        ):
+            raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+        if kind == "folder":
+            root_dir = target / "folders" / _safe_filename(token)
+            root_dir.mkdir(parents=True, exist_ok=True)
+            scan_queue.append(
+                ("folder", token, root_dir, 1, token)
+            )
+        else:
+            scan_queue.append(
+                ("explicit", {"kind": kind, "token": token})
+            )
+
+    documents_dir = target / "documents"
+    documents_dir.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while scan_queue:
+            _check_feishu_cancel(cancel_event)
+            futures = {}
+            while scan_queue and len(futures) < max_workers:
+                task = scan_queue.popleft()
+                if task[0] == "folder":
+                    _, folder_token, _folder_dir, _depth, _root = task
+                    if folder_token in scanned_folders:
+                        continue
+                    scanned_folders.add(folder_token)
+                    future = executor.submit(
+                        _list_feishu_folder_children,
+                        folder_token,
+                        headers,
+                    )
+                else:
+                    future = executor.submit(
+                        _feishu_explicit_item,
+                        task[1],
+                        headers,
+                    )
+                futures[future] = task
+            for future in as_completed(futures):
+                _check_feishu_cancel(cancel_event)
+                task = futures[future]
+                try:
+                    result = future.result()
+                except DataSourceSyncError as exc:
+                    failed_token = (
+                        task[1] if task[0] == "folder"
+                        else task[1]["token"]
+                    )
+                    scan_failures.append(failed_token)
+                    stats["failed"] += 1
+                    _emit(
+                        emit,
+                        "scan_resource",
+                        "failed",
+                        f"Failed to scan Feishu resource {failed_token}.",
+                        category="summary",
+                        token=failed_token,
+                        error=str(exc),
+                    )
+                    continue
+                if task[0] == "folder":
+                    _, folder_token, folder_dir, depth, root_token = task
+                    stats["folders"] += 1
+                    _collect_feishu_folder_children(
+                        result,
+                        folder_dir,
+                        depth,
+                        root_token,
+                        scan_queue,
+                        pending_by_token,
+                        seen_tokens,
+                        stats,
+                        recursive,
+                        max_depth,
+                    )
+                    continue
+                resource = task[1]
+                item = result
+                token = _feishu_item_token(item)
+                root_id = f"{resource['kind']}:{resource['token']}"
+                existing = pending_by_token.get(token)
+                if existing is not None:
+                    existing["roots"].add(root_id)
+                    continue
+                pending_by_token[token] = {
+                    "item": item,
+                    "target_dir": documents_dir,
+                    "roots": {root_id},
+                    "from_folder": False,
+                }
+                seen_tokens.add(token)
+                stats["scanned"] += 1
+                _increment_counter(
+                    stats["by_type"],
+                    _feishu_item_type(item),
+                )
+                if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                    raise DataSourceSyncError(
+                        "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                    )
+
+    pending_items = []
+    for token, pending in pending_by_token.items():
+        item = pending["item"]
+        previous_item = previous_items.get(token)
+        target_dir = pending["target_dir"]
+        roots = sorted(pending["roots"])
+        has_change_metadata = bool(_feishu_item_sync_metadata(item))
+        can_skip = pending.get("from_folder") or has_change_metadata
+        if incremental and can_skip and _feishu_item_unchanged(
+            item,
+            previous_item,
+            target_dir,
+            target,
+        ):
+            manifest_item = _feishu_manifest_item_from_previous(
+                item,
+                previous_item,
+                target_dir,
+                target,
+            )
+            manifest_item["remote"] = {
+                **(manifest_item.get("remote") or {}),
+                "roots": roots,
+            }
+            manifest_items.append(manifest_item)
+            stats["skipped"] += 1
+            _increment_counter(
+                stats["by_extension"],
+                _manifest_item_extension(manifest_item),
+            )
+            continue
+        pending_items.append(
+            (item, target_dir, previous_item, roots)
+        )
+
+    stats["changed"] = len(pending_items)
+    _emit(
+        emit,
+        "sync_plan",
+        "running",
+        (
+            f"Prepared {stats['scanned']} unique Feishu items; "
+            f"{stats['changed']} need sync, {stats['skipped']} skipped."
+        ),
+        category="summary",
+        progress_total=stats["changed"],
+        progress_current=0,
+        progress_percent=100 if not pending_items else 0,
+        summary=stats,
+    )
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _sync_feishu_drive_item,
+                item,
+                target_dir,
+                target,
+                previous_item,
+                headers,
+                emit,
+                cancel_event,
+            ): (item, roots, previous_item)
+            for item, target_dir, previous_item, roots in pending_items
+        }
+        for future in as_completed(futures):
+            _check_feishu_cancel(cancel_event)
+            item, roots, previous_item = futures[future]
+            completed += 1
+            try:
+                manifest_item = future.result()
+                manifest_item["remote"] = {
+                    **(manifest_item.get("remote") or {}),
+                    "roots": roots,
+                }
+                manifest_items.append(manifest_item)
+                if manifest_item.get("kind") == "document":
+                    stats["documents"] += 1
+                else:
+                    stats["files"] += 1
+                _increment_counter(
+                    stats["by_extension"],
+                    _manifest_item_extension(manifest_item),
+                )
+            except DataSourceSyncError as exc:
+                if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                    raise
+                stats["failed"] += 1
+                manifest_items.append(
+                    {
+                        **(previous_item or {}),
+                        "token": _feishu_item_token(item),
+                        "name": _feishu_item_name(item),
+                        "type": _feishu_item_type(item),
+                        "status": "failed",
+                        "error": str(exc),
+                        "remote": {"roots": roots},
+                    }
+                )
+            _emit(
+                emit,
+                "sync_progress",
+                "running",
+                f"Synced {completed}/{stats['changed']} changed items.",
+                category="summary",
+                progress_total=stats["changed"],
+                progress_current=completed,
+                progress_percent=_progress_percent(
+                    completed,
+                    stats["changed"],
+                ),
+                summary=stats,
+            )
+
+    _finalize_feishu_missing_items(
+        target,
+        previous_items,
+        seen_tokens,
+        manifest_items,
+        deleted_paths,
+        stats,
+        delete_missing=delete_missing,
+        scan_complete=not scan_failures,
+    )
+    _write_manifest(
+        target,
+        {
+            "source_type": "feishu",
+            "sync_mode": "resource_list",
+            "incremental": incremental,
+            "delete_missing": delete_missing,
+            "scan_complete": not scan_failures,
+            "synced_at": utc_timestamp(),
+            "stats": stats,
+            "items": manifest_items,
+        },
+    )
+    total = stats["documents"] + stats["files"]
+    if total + stats["skipped"] == 0 and stats["failed"]:
+        raise DataSourceSyncError(
+            "LENS_SOURCE_SYNC_FAILED: all Feishu resources failed"
+        )
+    return {
+        **stats,
+        "synced": total,
+        "files": total,
+        "target_path": str(target),
+        "_sync_items": [
+            _manifest_item_to_sync_item(item, target)
+            for item in manifest_items
+            if _manifest_local_path(item)
+        ],
+        "_changed_paths": [
+            _manifest_local_path(item)
+            for item in manifest_items
+            if item.get("status") not in {"deleted", "failed", "skipped"}
+            and _manifest_local_path(item)
+        ],
+        "_deleted_paths": deleted_paths,
+    }
+
+
+def _collect_feishu_folder_children(
+    children,
+    folder_dir,
+    depth,
+    root_token,
+    folder_queue,
+    pending_by_token,
+    seen_tokens,
+    stats,
+    recursive,
+    max_depth,
+):
+    """Collect one scanned folder page into the global sync plan."""
+
+    for child in children:
+        if not isinstance(child, dict):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        token = _feishu_item_token(child)
+        if (
+            not isinstance(token, str)
+            or not FEISHU_TOKEN_PATTERN.fullmatch(token)
+        ):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        item_type = _feishu_item_type(child)
+        if item_type == "folder":
+            stats["scanned"] += 1
+            _increment_counter(stats["by_type"], item_type)
+            if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                raise DataSourceSyncError(
+                    "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                )
+            if recursive and depth < max_depth:
+                next_dir = folder_dir / _safe_filename(
+                    _feishu_item_name(child)
+                )
+                next_dir.mkdir(parents=True, exist_ok=True)
+                folder_queue.append(
+                    ("folder", token, next_dir, depth + 1, root_token)
+                )
+            continue
+        if token not in seen_tokens:
+            stats["scanned"] += 1
+            _increment_counter(stats["by_type"], item_type)
+            if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                raise DataSourceSyncError(
+                    "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                )
+        seen_tokens.add(token)
+        existing = pending_by_token.get(token)
+        if existing is None:
+            pending_by_token[token] = {
+                "item": child,
+                "target_dir": folder_dir,
+                "roots": {f"folder:{root_token}"},
+                "from_folder": True,
+            }
+        else:
+            existing["roots"].add(f"folder:{root_token}")
+            if not existing.get("from_folder"):
+                existing["item"] = child
+                existing["target_dir"] = folder_dir
+                existing["from_folder"] = True
+
+
+def _feishu_explicit_item(resource, headers):
+    """Return one Drive-like item for an explicit resource."""
+
+    if resource["kind"] == "wiki":
+        return _resolve_feishu_wiki_node(resource["token"], headers)
+    return {
+        "token": resource["token"],
+        "name": resource["token"],
+        "type": resource["kind"],
+    }
+
+
+def _resolve_feishu_wiki_node(token, headers):
+    """Resolve a Wiki node to its exportable object identity."""
+
+    query = parse.urlencode({"token": token})
+    payload = _http_json(
+        "https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node"
+        f"?{query}",
+        headers=headers,
+    )
+    node = (payload.get("data") or {}).get("node")
+    if not isinstance(node, dict):
+        raise DataSourceSyncError("FEISHU_WIKI_RESPONSE_INVALID")
+    object_token = node.get("obj_token")
+    object_type = str(node.get("obj_type") or "").lower()
+    if (
+        not isinstance(object_token, str)
+        or not FEISHU_TOKEN_PATTERN.fullmatch(object_token)
+        or not _is_feishu_exportable_type(object_type)
+    ):
+        raise DataSourceSyncError("FEISHU_WIKI_RESPONSE_INVALID")
+    return {
+        "token": object_token,
+        "name": node.get("title") or object_token,
+        "type": object_type,
+    }
+
+
+def _finalize_feishu_missing_items(
+    target,
+    previous_items,
+    seen_tokens,
+    manifest_items,
+    deleted_paths,
+    stats,
+    *,
+    delete_missing,
+    scan_complete,
+):
+    """Preserve or delete previous items according to scan completeness."""
+
+    for token, item in previous_items.items():
+        if token in seen_tokens:
+            continue
+        if not scan_complete:
+            manifest_items.append({**item, "status": "skipped"})
+            continue
+        if not delete_missing:
+            manifest_items.append({**item, "status": "skipped"})
+            stats["skipped"] += 1
+            continue
+        deleted_item = {**item, "status": "deleted"}
+        manifest_items.append(deleted_item)
+        stats["deleted"] += 1
+        local_path = _manifest_local_path(item)
+        if local_path:
+            deleted_paths.append(local_path)
+        if local_path:
+            _delete_manifest_file(target, local_path)
+
+
+def _check_feishu_cancel(cancel_event):
+    """Stop a mixed Feishu sync after cancellation is requested."""
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
 
 
 def _sync_feishu_document_item(doc_id, docs_dir, headers, emit):
@@ -2688,9 +2939,11 @@ def _sync_feishu_drive_item(
     previous_item,
     headers,
     emit,
+    cancel_event=None,
 ):
     """Synchronize one Feishu Drive file item."""
 
+    _check_feishu_cancel(cancel_event)
     token = _feishu_item_token(item)
     name = _feishu_item_name(item)
     item_type = _feishu_item_type(item)
@@ -2706,7 +2959,15 @@ def _sync_feishu_drive_item(
             item_type=item_type,
             item_name=name,
         )
-        exported = _export_feishu_document(token, item_type, headers)
+        if cancel_event is None:
+            exported = _export_feishu_document(token, item_type, headers)
+        else:
+            exported = _export_feishu_document(
+                token,
+                item_type,
+                headers,
+                cancel_event=cancel_event,
+            )
         filename = _export_filename(exported, name or token, item_type)
         path = _feishu_target_file_path(
             target_dir,
@@ -2756,7 +3017,9 @@ def _sync_feishu_drive_item(
         item_name=name,
     )
     filename = _safe_filename(name or token)
+    _check_feishu_cancel(cancel_event)
     raw = _download_feishu_file(token, headers)
+    _check_feishu_cancel(cancel_event)
     path = _feishu_target_file_path(
         target_dir,
         root_dir,
@@ -3134,6 +3397,7 @@ def _list_feishu_folder_children(folder_token, headers):
 
     items = []
     page_token = ""
+    seen_page_tokens = set()
     while True:
         query = {
             "folder_token": folder_token,
@@ -3153,14 +3417,22 @@ def _list_feishu_folder_children(folder_token, headers):
             or data.get("children")
             or []
         )
+        if not isinstance(batch, list):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
         items.extend(batch)
-        page_token = (
+        if len(items) > FEISHU_MAX_SYNC_ITEMS:
+            raise DataSourceSyncError("LENS_SOURCE_ITEM_LIMIT_EXCEEDED")
+        next_page_token = (
             data.get("next_page_token")
             or data.get("page_token")
             or ""
         )
-        if not data.get("has_more") or not page_token:
+        if not data.get("has_more") or not next_page_token:
             break
+        if next_page_token in seen_page_tokens:
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        seen_page_tokens.add(next_page_token)
+        page_token = next_page_token
     return items
 
 
@@ -3239,9 +3511,15 @@ def _feishu_export_extension(item_type):
     return mapping.get(export_type, "docx")
 
 
-def _export_feishu_document(file_token, item_type, headers):
+def _export_feishu_document(
+    file_token,
+    item_type,
+    headers,
+    cancel_event=None,
+):
     """Export one Feishu document-like item with the official Drive API."""
 
+    _check_feishu_cancel(cancel_event)
     export_type = _feishu_export_type(item_type)
     file_extension = _feishu_export_extension(item_type)
     ticket = _create_feishu_export_task(
@@ -3250,12 +3528,21 @@ def _export_feishu_document(file_token, item_type, headers):
         file_extension,
         headers,
     )
-    result = _poll_feishu_export_task(
-        ticket,
-        file_token,
-        export_type,
-        headers,
-    )
+    if cancel_event is None:
+        result = _poll_feishu_export_task(
+            ticket,
+            file_token,
+            export_type,
+            headers,
+        )
+    else:
+        result = _poll_feishu_export_task(
+            ticket,
+            file_token,
+            export_type,
+            headers,
+            cancel_event=cancel_event,
+        )
     status = _feishu_job_status(result)
     if status != FEISHU_EXPORT_SUCCESS_STATUS:
         detail = _feishu_export_status_detail(result)
@@ -3273,8 +3560,12 @@ def _export_feishu_document(file_token, item_type, headers):
             f"extension={file_extension} ticket={ticket} result={detail}"
         )
     try:
+        _check_feishu_cancel(cancel_event)
         content = _download_feishu_export_file(export_file_token, headers)
+        _check_feishu_cancel(cancel_event)
     except DataSourceSyncError as exc:
+        if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+            raise
         raise DataSourceSyncError(
             "LENS_SOURCE_EXPORT_DOWNLOAD_FAILED: "
             f"token={file_token} export_file_token={export_file_token} "
@@ -3314,7 +3605,13 @@ def _create_feishu_export_task(file_token, file_type, file_extension, headers):
     return ticket
 
 
-def _poll_feishu_export_task(ticket, file_token, file_type, headers):
+def _poll_feishu_export_task(
+    ticket,
+    file_token,
+    file_type,
+    headers,
+    cancel_event=None,
+):
     """Poll a Feishu Drive export task until it finishes."""
 
     query = parse.urlencode({"token": file_token, "type": file_type})
@@ -3325,6 +3622,7 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
     result = {}
     deadline = time.monotonic() + FEISHU_EXPORT_TIMEOUT_S
     while time.monotonic() < deadline:
+        _check_feishu_cancel(cancel_event)
         data = _http_json(url, headers=headers)
         data = data.get("data") or data
         result = data.get("result") or data
@@ -3333,6 +3631,7 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
             return result
         if status not in FEISHU_EXPORT_PENDING_STATUSES:
             return result
+        _check_feishu_cancel(cancel_event)
         time.sleep(FEISHU_EXPORT_POLL_INTERVAL_S)
     detail = _feishu_export_status_detail(result)
     raise DataSourceSyncError(

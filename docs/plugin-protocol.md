@@ -2,24 +2,23 @@
 
 状态：当前实现协议，适用于企业部署的受信任内置 Plugin。
 
-Plugin 是独立项目交付的集成包。它可以同时提供 Connection 管理、Datasource
-同步和面向大模型的 Tool，但这些能力都必须通过本协议声明和宿主校验。
+Plugin 是独立项目交付的集成包。它提供 Connection 管理，并可独立选择声明
+Datasource 同步或面向大模型的 Tool；声明的能力都必须由宿主校验。
 
 ## 1. 包结构
 
 宿主只从受控目录发现 Plugin，目录身份必须与 Manifest 一致：
 
 ```text
-/opt/sourcelens/plugins/<key>/<version>/
+/opt/sourcelens/plugins/<key>/
   plugin.json
   control.py
   runtime.py
   assets/
 ```
 
-`key` 使用小写字母开头的短标识，`version` 使用三段式 SemVer。Plugin 项目可以
-独立维护源码、测试、文档和发布流程；宿主不从 Manifest 加载任意 Python 模块、
-Shell 命令或远程前端代码。
+`key` 使用小写字母开头的短标识。Plugin 项目可以独立维护源码、测试、文档和
+发布流程；宿主不从 Manifest 加载任意 Python 模块、Shell 命令或远程前端代码。
 
 ## 2. Manifest 身份与能力族
 
@@ -42,6 +41,9 @@ Shell 命令或远程前端代码。
 V1 的 `capability_family` 取值为 `plugin`。它表示 Tool 由受信任的内置 Plugin
 Runtime 执行，而不是 MCP Server。实际业务授权仍由 Tool 的 `capability` 字段和
 Connection 的资源范围共同决定，例如 `repository.read`。
+
+`version` 是必填的 SemVer 业务发布版本。它用于执行归因、评分与诊断聚合、候选
+验证、灰度、回滚；`protocol_version` 只表示宿主接口兼容性，不能替代业务版本。
 
 `mcp` 只表示名称为 `mcp__...` 的 MCP Server Tool；Skill、Plugin 和 MCP 是三个
 不同的能力族。为兼容旧模型输出，宿主在路由修复阶段允许将旧的
@@ -111,22 +113,23 @@ Plugin 可以通过可选的 `assistant_guidance` 提供类似 Skill 的渐进�
 虚拟 Plugin Skill 是能力和资源导航，不是用户 Skill 的业务工作流指令，也不能
 改变 Connection scope、capability、Tool schema 或平台安全规则。它不包含 Token、
 Secret、Connection UUID、Lease、内部 endpoint 或其他运行时材料。其缓存键至少受
-`plugin_key + plugin_version + allowed_scope` 内容哈希影响，Connection scope 变化
+`plugin_key + allowed_scope` 内容哈希影响，Connection scope 变化
 后必须生成新的 Skill 内容。
 
 Registry 必须限制主题数量、文本长度和 `tool_keys`，并确认每个 Tool key 已在同一
 Manifest 声明。Guidance 是面向模型的不可信说明，不能覆盖系统规则、Connection
 scope、capability 或 Tool schema，也不能包含凭证、隐藏指令、任意 URL 或运行时路径。
-Guidance 与 Plugin 版本一同进入执行快照，Plugin 更新后重新加载。宿主不再注册
+Guidance 与 Plugin 定义一同进入执行快照，Plugin 更新后重新加载。宿主不再注册
 Plugin 专属的 `plugin_help` Tool；详细说明统一通过虚拟 Skill 文件渐进加载。
 
 ## 5. Runtime 入口
 
-`control.py` 的 Datasource Provider 必须实现
+`control.py` 的 Connection Provider 必须实现
 `http_origins(endpoint, connection_config)`，返回控制面连接校验和资源发现可访问的
 HTTPS origin。宿主据此注入受限客户端；Provider 不得自行创建或关闭客户端。
 
-`runtime.py` 必须导出以下固定符号：
+`runtime.py` 必须导出 Tool 相关固定符号；只有 Manifest 声明 DataSource 能力时，
+才必须额外导出 `build_datasource_command`：
 
 ```python
 PLUGIN_API_VERSION = 1
@@ -142,12 +145,14 @@ def build_tool(definition, executor):
 def execute_tool(key, client, arguments, secret, endpoint, config):
     """Execute one bounded operation and return JSON-safe data."""
 
+# Required only for Plugins with a declared Datasource capability.
 def build_datasource_command(config, output_dir, options):
     """Build one controlled Datasource synchronization command."""
 ```
 
-宿主会校验入口文件是受控目录中的普通文件，并按 `plugin_key + version + 内容哈希`
-缓存加载模块。Tool 注册后必须附带运行时元数据：
+宿主会校验入口文件是受控目录中的普通文件，且入口身份与 Manifest 的
+`key + version` 一致，并按 `plugin_key + plugin_version + 内容哈希` 缓存加载
+模块。Tool 注册后必须附带运行时元数据：
 
 ```text
 metadata.capability_family = "plugin"
@@ -176,7 +181,8 @@ metadata.capability = <Tool.capability>
 - 模型只能看到 Tool 名称、说明和输入 schema；
 - Token、Connection 配置中的敏感值和 Lease 内容不能进入模型上下文、Tool 参数、
   普通 Trace Event 或 Tool Result；
-- Snapshot 固定 Plugin、Manifest、Connection 配置、资源范围和 SecretVersion；
+- Snapshot 固定 `plugin_key + plugin_version + protocol_version`、Manifest、
+  Connection 配置、资源范围和 SecretVersion；
 - Provider 必须再次校验 endpoint、资源范围和参数；
 - 外部响应必须做结构校验、大小限制、正文截断和敏感字段过滤；
 - Tool 失败返回稳定错误码，不能把第三方原始异常或响应原样交给模型；
@@ -194,6 +200,11 @@ metadata.capability = <Tool.capability>
 会自动回退到 HTTP/1.1。回退不会导致 Plugin 失败，仍然可以复用 HTTP/1.1
 keep-alive 连接，但不会有同一条 HTTP/2 连接上的并发流复用。Plugin 不需要根据
 协议版本分支处理，也不应在 HTTP/2 协商失败后自行重复请求。
+
+客户端仅开放 `GET`、`HEAD` 和 `POST`。`POST` 请求体只能通过 `json` 或
+`content` 传入，编码后最大 64 KiB；宿主拒绝同时提供两类正文、覆盖 `Host`
+Header 或启用重定向。该能力用于 OAuth/应用凭证换取短时 Token 及只读导出任务，
+不代表模型 Tool 自动获得写权限。
 
 宿主仍强制 HTTPS、origin allowlist、无重定向和请求/响应上限。HTTP/2 只优化传输
 层，不能放宽 Connection scope、Tool capability 或 Provider 参数校验。
@@ -229,14 +240,23 @@ Datasource 与 Tool 共用 Connection，但执行契约分离：Datasource 保�
 同步策略和目标目录，Plugin 负责资源校验、内容读取和增量同步。资源发现遵循
 Manifest 声明的资源依赖；依赖字段变化后才请求对应的 Provider 选项。
 
+Plugin 可以只声明 Datasource 能力并令 `tools` 为空。Connection 也可以只保存
+可复用认证信息、使用空 `allowed_scope` 且不枚举资源；此时具体资源由
+`datasource_schema` 收集，并由 Provider 在保存时规范化。一个 DataSource
+包含多个入口时，应使用同一有界并发预算发现资源，按稳定资源标识全局去重后再
+进入有界下载阶段。
+
 Provider 的并发、超时、deadline、取消、Retry-After 和部分失败处理必须通过宿主
 提供的 `PluginRequestContext`，禁止自行创建不受限制的线程或请求池。
 
-## 9. 版本与兼容
+## 9. 协议兼容
 
 - `protocol_version` 只代表宿主与 Plugin 的接口版本，不代表业务 capability 版本；
-- 同一 `key + version` 在受控目录中只能有一个包；
-- 新版本通过新的目录身份并存安装，运行中的 Snapshot 固定旧版本；
+- `plugin_version` 是 SemVer 业务发布版本，当前四个内置 Plugin 均为 `1.0.0`；
+- 当前安装布局每个 `key` 只激活一个包，目录固定为 `plugins/<key>/`，但 Manifest、
+  Runtime、API 和执行快照必须保留 `plugin_version`；
+- 内容哈希用于识别同一版本目录中的精确代码内容，不取代 `plugin_version`；
+- 后续多版本管理可以扩展安装索引和 active/candidate 指针，无需修改执行快照身份；
 - 不兼容的入口、Manifest 或安全语义必须提升 `protocol_version`；
 - 新增字段优先采用可选字段和默认值，不能删除既有字段或改变其含义；
 - 宿主、Control Runtime、LensNode Runtime 必须拒绝未协商的协议版本。
@@ -251,4 +271,5 @@ Provider 的并发、超时、deadline、取消、Retry-After 和部分失败处
 4. 成功、超时、限流、取消、超限和第三方异常均返回稳定错误码；
 5. 测试输出、日志、Trace 和错误中不含 Token 或其他认证材料；
 6. 同一模型轮次的独立 Tool Call 可以安全并行，不共享可变凭证状态；
-7. Plugin 更新后内容哈希不会继续复用旧 Runtime 模块。
+7. Plugin 更新后内容哈希不会继续复用旧 Runtime 模块；
+8. Manifest、Control、Runtime 和执行快照中的 `plugin_version` 完全一致。

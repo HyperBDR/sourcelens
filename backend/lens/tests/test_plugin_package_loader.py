@@ -18,14 +18,14 @@ from lens.plugins.tool_providers import get_tool_provider
 
 
 class PluginPackageLoaderTests(SimpleTestCase):
-    """Verify fixed, versioned Python entrypoints for trusted packages."""
+    """Verify fixed Python entrypoints for trusted packages."""
 
     def _write_plugin(self, root, *, control_source=None, runtime_source=None):
-        path = Path(root) / "example" / "1.2.3"
+        path = Path(root) / "example"
         path.mkdir(parents=True)
         manifest = {
             "key": "example",
-            "version": "1.2.3",
+            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "control": "python_v1",
@@ -58,7 +58,7 @@ class PluginPackageLoaderTests(SimpleTestCase):
         source = """
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "example"
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.0.0"
 
 class Provider:
     key = "example"
@@ -82,7 +82,7 @@ TOOL_PROVIDER = Provider()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example", "1.2.3")
+                plugin = installed_plugin("example")
                 contract = load_control_contract(plugin)
 
         self.assertEqual(plugin.control_handler, "python_v1")
@@ -107,7 +107,7 @@ TOOL_PROVIDER = Provider()
         source = """
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "another-plugin"
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.0.0"
 DATASOURCE_PROVIDER = object()
 TOOL_PROVIDER = object()
 """
@@ -118,7 +118,29 @@ TOOL_PROVIDER = object()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                plugin = installed_plugin("example", "1.2.3")
+                plugin = installed_plugin("example")
+                with self.assertRaisesMessage(
+                    PluginPackageLoadError,
+                    "identity",
+                ):
+                    load_control_contract(plugin)
+
+    def test_rejects_control_contract_with_mismatched_version(self):
+        source = """
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "example"
+PLUGIN_VERSION = "1.0.1"
+DATASOURCE_PROVIDER = object()
+TOOL_PROVIDER = object()
+"""
+        with tempfile.TemporaryDirectory() as root:
+            self._write_plugin(
+                root,
+                control_source=source,
+                runtime_source="PLUGIN_API_VERSION = 1\n",
+            )
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                plugin = installed_plugin("example")
                 with self.assertRaisesMessage(
                     PluginPackageLoadError,
                     "identity",
@@ -142,11 +164,11 @@ TOOL_PROVIDER = object()
                 ):
                     discover_plugins()
 
-    def test_provider_registries_resolve_exact_plugin_package_version(self):
+    def test_provider_registries_resolve_installed_plugin_package(self):
         source = """
 PLUGIN_API_VERSION = 1
 PLUGIN_KEY = "example"
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.0.0"
 
 class Provider:
     key = "example"
@@ -170,8 +192,46 @@ TOOL_PROVIDER = Provider()
                 runtime_source="PLUGIN_API_VERSION = 1\n",
             )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                datasource = get_datasource_provider("example", "1.2.3")
-                tools = get_tool_provider("example", "1.2.3")
+                datasource = get_datasource_provider("example")
+                tools = get_tool_provider("example")
 
         self.assertEqual(datasource.key, "example")
         self.assertEqual(tools.key, "example")
+
+    def test_reloads_control_when_package_content_changes(self):
+        source = """
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "example"
+PLUGIN_VERSION = "1.0.0"
+
+class Provider:
+    key = "before"
+
+    def http_origins(self, *args): pass
+    def validate_connection(self, *args): pass
+    def validate_connection_scope(self, *args): pass
+    def validate_live_connection(self, *args, **kwargs): pass
+    def discover_resources(self, *args, **kwargs): pass
+    def validate_datasource_source_type(self, *args): pass
+    def validate_datasource_config(self, *args): pass
+    def validate_request(self, *args): pass
+
+DATASOURCE_PROVIDER = Provider()
+TOOL_PROVIDER = Provider()
+"""
+        with tempfile.TemporaryDirectory() as root:
+            path = self._write_plugin(
+                root,
+                control_source=source,
+                runtime_source="PLUGIN_API_VERSION = 1\n",
+            )
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                plugin = installed_plugin("example")
+                first = load_control_contract(plugin)
+                (path / "control.py").write_text(
+                    source.replace('key = "before"', 'key = "after"')
+                )
+                second = load_control_contract(plugin)
+
+        self.assertEqual(first.datasource_provider.key, "before")
+        self.assertEqual(second.datasource_provider.key, "after")

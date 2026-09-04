@@ -1,0 +1,131 @@
+{
+  "key": "jira",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "capability_family": "plugin",
+  "display_name": "Jira",
+  "icon": "assets/icon.svg",
+  "description": "Connect approved Jira Cloud or self-hosted projects as read-only assistant tools.",
+  "assistant_guidance": {
+    "summary": "Use Jira tools to search, inspect, and summarize activity in approved Jira projects.",
+    "when_to_use": [
+      "The user asks for current issue information from an approved Jira project.",
+      "The user asks to find issues by text or inspect one issue key.",
+      "The user asks for an engineering activity report over a time window."
+    ],
+    "topics": [
+      {
+        "key": "issues",
+        "summary": "Search issues within an approved project, then inspect a specific issue.",
+        "details": "Use the project scope selected by the Connection. Search results are bounded. Use jira_get_issue for a known issue key and jira_search_issues when the issue key is unknown.",
+        "tool_keys": ["jira_search_issues", "jira_get_issue"]
+      },
+      {
+        "key": "activity_reports",
+        "summary": "Collect compact issue activity across approved projects in one Tool call.",
+        "details": "For a time-bounded activity report, call jira_activity_summary once with all relevant approved projects. The Plugin makes fixed read-only Jira REST API requests in Python, rechecks Connection scope, filters the exact time window, and returns bounded evidence. Treat partial errors and possibly_truncated as coverage limitations instead of issuing per-project retries.",
+        "tool_keys": ["jira_activity_summary"]
+      }
+    ]
+  },
+  "handlers": {
+    "control": "python_v1",
+    "runtime": "python_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "format": "uri",
+        "title": "Jira endpoint",
+        "description": "Root HTTP(S) endpoint for Jira Cloud or a self-hosted Jira instance.",
+        "write_to": "endpoint"
+      },
+      "email": {
+        "type": "string",
+        "title": "Account",
+        "description": "Non-secret account identifier paired with the Jira API Token.",
+        "write_to": "config.email"
+      },
+      "secret_value": {
+        "type": "string",
+        "format": "password",
+        "title": "API Token",
+        "description": "A write-only Jira API Token with read access.",
+        "write_to": "secret_value"
+      },
+      "projects": {
+        "type": "array",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Allowed projects",
+        "description": "Explicit Jira project keys this connection may access.",
+        "write_to": "allowed_scope.projects",
+        "items": {"type": "string"}
+      }
+    },
+    "required": ["endpoint", "email", "secret_value", "projects"],
+    "additionalProperties": false
+  },
+  "tools": [
+    {
+      "key": "jira_get_issue",
+      "description": "Read one Issue from an approved Jira project.",
+      "capability": "issue.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "issue_key": {"type": "string"}
+        },
+        "required": ["issue_key"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "jira_search_issues",
+      "description": "Search Issues by text within one approved Jira project.",
+      "capability": "jira.issue.search",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "query": {"type": "string"},
+          "max_results": {"type": "integer"}
+        },
+        "required": ["project", "query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "jira_activity_summary",
+      "description": "Get compact Jira issue activity in one ISO-8601 time window across approved projects. Use this once for engineering reports instead of separate searches per project. The Plugin makes fixed read-only Jira REST API requests in Python and returns bounded projected fields only.",
+      "capability": "jira.issue.search",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "since": {"type": "string", "format": "date-time"},
+          "until": {"type": "string", "format": "date-time"},
+          "max_results": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": ["projects", "since", "until"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

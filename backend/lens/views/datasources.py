@@ -16,6 +16,15 @@ from lens.datasource_services import (
     check_datasource_path,
 )
 from lens.models import DataSource, ScheduledTask
+from lens.plugins.datasource_access import (
+    datasource_access_failure_detail,
+    validate_connection_datasource_access,
+)
+from lens.plugins.http import PluginHttpClientError
+from lens.plugins.providers import (
+    DatasourceProviderError,
+    get_datasource_provider,
+)
 from lens.periodic_tasks import ensure_datasource_periodic_task
 from lens.serializers import (
     DataSourceConversionRequestSerializer,
@@ -37,6 +46,7 @@ from lens.tasks import (
 )
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
@@ -158,6 +168,7 @@ class DataSourceViewSet(BaseAdminViewSet):
     def perform_create(self, serializer):
         """Create datasource, register schedule, and enqueue initial sync."""
 
+        self._validate_plugin_datasource_access(serializer)
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
         if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
@@ -179,8 +190,48 @@ class DataSourceViewSet(BaseAdminViewSet):
     def perform_update(self, serializer):
         """Update datasource and register its sync schedule."""
 
+        self._validate_plugin_datasource_access(serializer)
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
+
+    @staticmethod
+    def _validate_plugin_datasource_access(serializer):
+        """Reject Plugin datasource writes with unreadable resources."""
+
+        connection = serializer.validated_data.get(
+            "connection",
+            getattr(serializer.instance, "connection", None),
+        )
+        if connection is None:
+            return
+        provider_required = getattr(
+            get_datasource_provider(connection.plugin_key),
+            "requires_datasource_access_validation",
+            False,
+        )
+        if not provider_required:
+            return
+        try:
+            result = validate_connection_datasource_access(
+                connection,
+                serializer.validated_data.get(
+                    "datasource_config",
+                    getattr(
+                        serializer.instance,
+                        "datasource_config",
+                        None,
+                    ),
+                ),
+            )
+        except (DatasourceProviderError, PluginHttpClientError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        if not result.get("valid"):
+            raise ValidationError(
+                {
+                    "detail": datasource_access_failure_detail(result),
+                    "resources": result.get("resources") or [],
+                }
+            )
 
     @staticmethod
     def _enqueue_datasource_sync(datasource, task_id, trigger, user=None):

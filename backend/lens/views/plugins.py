@@ -13,6 +13,10 @@ from lens.models import (
     ExecutionSnapshot,
     PluginInvocation,
 )
+from lens.plugins.datasource_access import (
+    datasource_access_failure_detail,
+    validate_connection_datasource_access,
+)
 from lens.plugins.http import PluginHttpClientError, plugin_http_pool
 from lens.plugins.providers import (
     DatasourceProviderError,
@@ -21,7 +25,7 @@ from lens.plugins.providers import (
 from lens.plugins.registry import (
     PluginNotFoundError,
     discover_plugins,
-    latest_plugin,
+    installed_plugin,
 )
 from lens.plugins.tool_snapshots import (
     ACTIVE_RUN_STATUSES,
@@ -88,9 +92,11 @@ def _resource_option_selection(connection, resource, request):
     if not resource:
         return None
     try:
-        schema = latest_plugin(connection.plugin_key).datasource_schema
+        schema = installed_plugin(connection.plugin_key).datasource_schema
     except PluginNotFoundError as exc:
         raise DatasourceProviderError("PLUGIN_NOT_FOUND") from exc
+    if schema is None:
+        raise DatasourceProviderError("resource options are unsupported")
     fields = schema.get("properties", {})
     matches = [
         field
@@ -152,7 +158,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
         return f"/api/lens/admin/plugins/{plugin.key}/icon/"
 
     def list(self, request):
-        """List installed Plugin versions visible to administrators."""
+        """List installed Plugins visible to administrators."""
 
         return Response(
             [
@@ -176,11 +182,11 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
 
     @action(detail=True, methods=["get"], url_path="tools")
     def tools(self, request, key=None):
-        """List safe model-facing tools from the latest Plugin version."""
+        """List safe model-facing tools from the installed Plugin."""
 
         del request
         try:
-            plugin = latest_plugin(key)
+            plugin = installed_plugin(key)
         except PluginNotFoundError:
             return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
         return Response(
@@ -203,7 +209,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
 
         del request
         try:
-            plugin = latest_plugin(key)
+            plugin = installed_plugin(key)
         except PluginNotFoundError:
             return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
         return Response(
@@ -240,7 +246,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
 
         del request
         try:
-            plugin = latest_plugin(key)
+            plugin = installed_plugin(key)
         except PluginNotFoundError:
             return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
         if not plugin.icon:
@@ -430,6 +436,51 @@ class ConnectionViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({"status": "success", **result})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="validate-datasource",
+    )
+    def validate_datasource(self, request, *args, **kwargs):
+        """Validate access to each configured datasource resource."""
+
+        del args, kwargs
+        connection = self.get_object()
+        if (
+            not isinstance(request.data, dict)
+            or set(request.data) != {"datasource_config"}
+        ):
+            return Response({"detail": "REQUEST_INVALID"}, status=400)
+        try:
+            result = validate_connection_datasource_access(
+                connection,
+                request.data.get("datasource_config"),
+            )
+        except (
+            DatasourceProviderError,
+            PluginHttpClientError,
+            PluginNotFoundError,
+        ) as exc:
+            response = Response(
+                {"valid": False, "detail": str(exc), "resources": []},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+            response["Cache-Control"] = "no-store"
+            return response
+        response_status = (
+            status.HTTP_200_OK
+            if result.get("valid")
+            else status.HTTP_400_BAD_REQUEST
+        )
+        response_data = dict(result)
+        if not result.get("valid"):
+            response_data["detail"] = datasource_access_failure_detail(
+                result
+            )
+        response = Response(response_data, status=response_status)
+        response["Cache-Control"] = "no-store"
+        return response
 
     @action(detail=True, methods=["get"], url_path="resources")
     def resources(self, request, *args, **kwargs):
@@ -692,7 +743,10 @@ class PluginExecutionSnapshotView(
             "plugin_key": snapshot.plugin_key,
             "plugin_version": snapshot.plugin_version,
             "protocol_version": snapshot.protocol_version,
-            "resolved_config": _safe_snapshot_config(snapshot.resolved_config),
+            "resolved_config": _safe_snapshot_config(
+                snapshot.resolved_config,
+                allow_resource_tokens=snapshot.plugin_key == "feishu",
+            ),
         }
         if snapshot.kind == ExecutionSnapshot.Kind.DATASOURCE_SYNC:
             payload["datasource_uuid"] = str(snapshot.datasource.uuid)
@@ -713,17 +767,43 @@ class PluginExecutionSnapshotView(
         return response
 
 
-def _safe_snapshot_config(value):
+def _safe_snapshot_config(
+    value,
+    *,
+    allow_resource_tokens=False,
+    path=(),
+):
     """Remove credential-shaped keys before returning snapshot data."""
 
     if isinstance(value, dict):
+        resource_identity = (
+            allow_resource_tokens
+            and path == ("datasource_config", "resources")
+            and set(value) == {"kind", "token"}
+            and isinstance(value.get("kind"), str)
+            and isinstance(value.get("token"), str)
+        )
         return {
-            key: _safe_snapshot_config(nested)
+            key: _safe_snapshot_config(
+                nested,
+                allow_resource_tokens=allow_resource_tokens,
+                path=path + (key,),
+            )
             for key, nested in value.items()
-            if str(key).lower() not in SENSITIVE_KEYS
+            if (
+                str(key).lower() not in SENSITIVE_KEYS
+                or (resource_identity and key == "token")
+            )
         }
     if isinstance(value, list):
-        return [_safe_snapshot_config(item) for item in value]
+        return [
+            _safe_snapshot_config(
+                item,
+                allow_resource_tokens=allow_resource_tokens,
+                path=path,
+            )
+            for item in value
+        ]
     return value
 
 

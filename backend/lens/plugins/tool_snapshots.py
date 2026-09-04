@@ -156,11 +156,16 @@ def create_tool_execution_snapshot(
 def _resource_summary(arguments):
     """Return resource identities without storing Tool search or file input."""
 
-    return {
+    summary = {
         key: arguments[key]
         for key in ("repository", "project", "issue_key")
         if arguments.get(key)
     }
+    for key in ("repositories", "projects"):
+        values = arguments.get(key)
+        if isinstance(values, list):
+            summary[key] = values[:50]
+    return summary
 
 
 def _frozen_tool(loaded_plugins, connection_uuid, tool_key):

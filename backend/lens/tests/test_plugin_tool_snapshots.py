@@ -112,7 +112,7 @@ class PluginToolSnapshotTests(TestCase):
             ],
         }
         with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "github" / "1.0.0"
+            path = Path(root) / "github"
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
             (path / "control.py").write_text("PLUGIN_API_VERSION = 1\n")
@@ -164,6 +164,8 @@ class PluginToolSnapshotTests(TestCase):
         self.assertEqual(snapshot.run, run)
         self.assertIsNone(snapshot.datasource)
         self.assertEqual(snapshot.tool_key, "github_read_file")
+        self.assertEqual(snapshot.plugin_version, "1.0.0")
+        self.assertEqual(response.data["plugin_version"], "1.0.0")
         self.assertEqual(snapshot.invocation_id, "tool-call-1")
         self.assertEqual(
             snapshot.resolved_config["arguments"]["path"],
