@@ -28,7 +28,9 @@ SENSITIVE_CONFIG_KEYS = frozenset(
         "token",
     }
 )
-ALLOWED_CONFIG_KEYS = frozenset({"repository", "branch", "directory"})
+ALLOWED_CONFIG_KEYS = frozenset(
+    {"repository", "repositories", "branch", "directory"}
+)
 ALLOWED_SCOPE_KEYS = frozenset({"repositories"})
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_API_VERSION = "2022-11-28"
@@ -370,13 +372,28 @@ class GitHubDatasourceProvider(DatasourceProvider):
             raise DatasourceProviderError(
                 "datasource config contains unsupported fields"
             )
-        repository = _repository_name(datasource_config.get("repository"))
         allowed_repositories = _allowed_repositories(connection_scope)
-        if repository.casefold() not in allowed_repositories:
+        raw_repositories = datasource_config.get("repositories")
+        if raw_repositories is None:
+            raw_repositories = [datasource_config.get("repository")]
+        if (
+            not isinstance(raw_repositories, list)
+            or not raw_repositories
+            or len(raw_repositories) > GITHUB_MAX_REPOSITORIES
+        ):
+            raise DatasourceProviderError(
+                "repositories must contain 1 through 50 items"
+            )
+        repositories = [_repository_name(value) for value in raw_repositories]
+        if len({item.casefold() for item in repositories}) != len(repositories):
+            raise DatasourceProviderError("repositories must be unique")
+        if any(item.casefold() not in allowed_repositories for item in repositories):
             raise DatasourceProviderError(
                 "repository is outside connection scope"
             )
-        normalized = {"repository": repository}
+        normalized = {"repositories": repositories}
+        if "repository" in datasource_config and "repositories" not in datasource_config:
+            normalized = {"repository": repositories[0]}
         branch = _optional_nonempty_string(
             datasource_config.get("branch"), "branch"
         )

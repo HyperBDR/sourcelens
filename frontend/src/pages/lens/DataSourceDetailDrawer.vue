@@ -501,6 +501,7 @@ import {
   dataSourceBranch,
   dataSourceRepositories,
   dataSourceRepositoryUrl,
+  isOrganizationDataSource,
   isDataSourceSyncing
 } from './datasourceHelpers'
 import { useShortDateTime } from './useShortDateTime'
@@ -975,7 +976,7 @@ const datasourceResourceDetails = computed(() => {
           : authSchemeLabel(config.auth_scheme)
       )
     ]
-    if (!repositories.length) {
+    if (!isOrganizationDataSource(row)) {
       items.splice(
         1,
         0,

@@ -27,7 +27,9 @@ SENSITIVE_CONFIG_KEYS = frozenset(
         "token",
     }
 )
-ALLOWED_CONFIG_KEYS = frozenset({"project", "branch", "directory"})
+ALLOWED_CONFIG_KEYS = frozenset(
+    {"project", "projects", "branch", "directory"}
+)
 ALLOWED_SCOPE_KEYS = frozenset({"projects"})
 GITLAB_MAX_PROJECTS = 50
 GITLAB_MAX_BRANCHES = 100
@@ -296,16 +298,31 @@ class GitLabDatasourceProvider(DatasourceProvider):
             raise DatasourceProviderError(
                 "datasource config contains unsupported fields"
             )
-        project = _project_name(datasource_config.get("project"))
+        raw_projects = datasource_config.get("projects")
+        if raw_projects is None:
+            raw_projects = [datasource_config.get("project")]
+        if (
+            not isinstance(raw_projects, list)
+            or not raw_projects
+            or len(raw_projects) > GITLAB_MAX_PROJECTS
+        ):
+            raise DatasourceProviderError(
+                "projects must contain 1 through 50 items"
+            )
+        projects = [_project_name(value) for value in raw_projects]
+        if len({item.casefold() for item in projects}) != len(projects):
+            raise DatasourceProviderError("projects must be unique")
         allowed = {
             item.casefold()
             for item in self.validate_connection_scope(
                 connection_scope
             )["projects"]
         }
-        if project.casefold() not in allowed:
+        if any(item.casefold() not in allowed for item in projects):
             raise DatasourceProviderError("project is outside connection scope")
-        normalized = {"project": project}
+        normalized = {"projects": projects}
+        if "project" in datasource_config and "projects" not in datasource_config:
+            normalized = {"project": projects[0]}
         branch = _optional_text(
             datasource_config.get("branch"),
             "branch",

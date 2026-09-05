@@ -892,24 +892,46 @@ def build_datasource_command(snapshot, material, trigger):
     endpoint = _endpoint(resolved.get("endpoint"))
     _material(material, endpoint)
     datasource = resolved.get("datasource_config") or {}
-    repository = datasource.get("repository") if isinstance(datasource, dict) else ""
-    if not isinstance(repository, str) or not repository:
+    if not isinstance(datasource, dict):
         raise PluginRuntimeError("PLUGIN_CONFIG_INVALID")
-    _validate_repository_scope(repository, resolved.get("connection_scope"))
+    repositories = datasource.get("repositories")
+    if repositories is None:
+        repositories = [datasource.get("repository")]
+    if (
+        not isinstance(repositories, list)
+        or not repositories
+        or any(not isinstance(item, str) or not item for item in repositories)
+    ):
+        raise PluginRuntimeError("PLUGIN_CONFIG_INVALID")
+    for repository in repositories:
+        _validate_repository_scope(repository, resolved.get("connection_scope"))
+    config = {
+        "branch": datasource.get("branch") or "",
+        "directory": datasource.get("directory") or "",
+        "auth_scheme": "token",
+        "access_token": material["value"],
+        "allow_submodules": False,
+    }
+    if "repositories" in datasource:
+        config["repositories"] = [
+            {
+                "repo_url": f"{endpoint}/{repository}.git",
+                "branch": datasource.get("branch") or "",
+                "directory": datasource.get("directory") or "",
+                "target_subdir": quote(repository, safe=""),
+                "enabled": True,
+            }
+            for repository in repositories
+        ]
+    else:
+        config["repo_url"] = f"{endpoint}/{repositories[0]}.git"
     return {
         "source_type": "git",
         "datasource_uuid": snapshot.get("datasource_uuid"),
         "target_path": resolved.get("target_path"),
         "sync_policy": resolved.get("sync_policy") or {},
         "trigger": trigger,
-        "config": {
-            "repo_url": f"{endpoint}/{repository}.git",
-            "branch": datasource.get("branch") or "",
-            "directory": datasource.get("directory") or "",
-            "auth_scheme": "token",
-            "access_token": material["value"],
-            "allow_submodules": False,
-        },
+        "config": config,
     }
 
 

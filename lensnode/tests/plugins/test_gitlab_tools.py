@@ -5,6 +5,68 @@ from types import SimpleNamespace
 import httpx
 
 from lensnode.plugin_tools import build_plugin_tools
+from lensnode.plugin_package_loader import load_runtime_contract
+
+
+GITLAB_RUNTIME = load_runtime_contract("gitlab", "1.0.0")
+
+
+def test_builds_multi_project_datasource_command():
+    command = GITLAB_RUNTIME.build_datasource_command(
+        {
+            "datasource_uuid": "ds-1",
+            "resolved_config": {
+                "endpoint": "https://gitlab.example.com",
+                "connection_scope": {
+                    "projects": ["platform/a", "platform/b"]
+                },
+                "datasource_config": {
+                    "projects": ["platform/a", "platform/b"],
+                    "branch": "main",
+                },
+                "target_path": "/workspace/repos",
+                "sync_policy": {},
+            },
+        },
+        {
+            "plugin_key": "gitlab",
+            "endpoint": "https://gitlab.example.com",
+            "value": "secret",
+        },
+        "manual",
+    )
+
+    assert [item["repo_url"] for item in command["config"]["repositories"]] == [
+        "https://gitlab.example.com/platform/a.git",
+        "https://gitlab.example.com/platform/b.git",
+    ]
+    assert [
+        item["target_subdir"] for item in command["config"]["repositories"]
+    ] == ["platform%2Fa", "platform%2Fb"]
+
+
+def test_multi_project_datasource_resolves_each_default_branch():
+    command = GITLAB_RUNTIME.build_datasource_command(
+        {
+            "datasource_uuid": "ds-1",
+            "resolved_config": {
+                "endpoint": "https://gitlab.example.com",
+                "connection_scope": {"projects": ["platform/a"]},
+                "datasource_config": {"projects": ["platform/a"]},
+                "target_path": "/workspace/repos",
+                "sync_policy": {},
+            },
+        },
+        {
+            "plugin_key": "gitlab",
+            "endpoint": "https://gitlab.example.com",
+            "value": "secret",
+        },
+        "manual",
+    )
+
+    assert command["config"]["branch"] == ""
+    assert command["config"]["repositories"][0]["branch"] == ""
 
 
 def _command(tool_key):

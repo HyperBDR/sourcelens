@@ -17,6 +17,8 @@ test('Plugin data sources use installed manifests and Connections', async () => 
   assert.match(page, /payload\.plugin_key = form\.value\.plugin_key/)
   assert.match(page, /payload\.connection_uuid = form\.value\.connection_uuid/)
   assert.match(page, /payload\.datasource_config = buildPluginDatasourceConfig/)
+  assert.match(page, /config\.repositories = \[config\.repository\]/)
+  assert.match(page, /config\.projects = \[config\.project\]/)
   assert.match(page, /payload\.credential_uuid = null/)
   assert.match(page, /getConnectionResources/)
   assert.doesNotMatch(page, /GitHub resources are available/)
@@ -252,6 +254,11 @@ test('Feishu datasource creation uses the Plugin while legacy rows remain editab
     drawer,
     /props\.mode === 'edit' && props\.form\.source_type === 'feishu'/
   )
+  assert.match(
+    drawer,
+    /props\.mode === 'edit' &&\s*props\.form\.source_type === 'gitlab'/
+  )
+  assert.match(drawer, /!props\.form\.connection_uuid/)
   assert.match(
     drawer,
     /if \(isPluginSourceType\(props\.form\.source_type\)\) \{\s*return Boolean\([\s\S]*schemaRequiredFieldsHaveValues/

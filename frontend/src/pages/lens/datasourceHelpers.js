@@ -18,14 +18,22 @@ export function formatDocIds(docIds) {
 export function dataSourceRepository(row) {
   const config = row.config || {}
   const datasourceConfig = row.datasource_config || {}
+  const resources = Array.isArray(datasourceConfig.repositories)
+    ? datasourceConfig.repositories
+    : Array.isArray(datasourceConfig.projects)
+      ? datasourceConfig.projects
+      : []
+  const firstResource = resources[0]
   if (
     row.source_type === 'git' ||
     datasourceConfig.repository ||
-    datasourceConfig.project
+    datasourceConfig.project ||
+    firstResource
   ) {
     return (
       datasourceConfig.repository ||
       datasourceConfig.project ||
+      firstResource ||
       config.organization_url ||
       config.repo_url ||
       EMPTY_VALUE
@@ -55,12 +63,29 @@ export function dataSourceRepositoryUrl(row, connectionEndpoint = '') {
 }
 
 export function dataSourceRepositories(row) {
+  const datasourceConfig = row?.datasource_config || {}
+  const pluginResources = Array.isArray(datasourceConfig.repositories)
+    ? datasourceConfig.repositories
+    : Array.isArray(datasourceConfig.projects)
+      ? datasourceConfig.projects
+      : []
+  if (pluginResources.length) {
+    return pluginResources.map((resource) =>
+      typeof resource === 'string'
+        ? {
+            name: resource,
+            path: resource,
+            branch: datasourceConfig.branch || ''
+          }
+        : resource
+    )
+  }
   const repositories = row?.config?.repositories
   return Array.isArray(repositories) ? repositories : []
 }
 
 export function isOrganizationDataSource(row) {
-  return dataSourceRepositories(row).length > 0
+  return dataSourceRepositories(row).length > 1
 }
 
 export function dataSourceBranch(row) {

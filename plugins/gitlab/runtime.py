@@ -378,9 +378,50 @@ def build_datasource_command(snapshot, material, trigger):
     if not isinstance(material, dict) or material.get("plugin_key") != PLUGIN_KEY or str(material.get("endpoint") or "").rstrip("/") != endpoint or not material.get("value"):
         raise PluginRuntimeError("PLUGIN_MATERIAL_MISMATCH")
     datasource = resolved.get("datasource_config") or {}
-    project = datasource.get("project") if isinstance(datasource, dict) else ""
-    if not isinstance(project, str) or not project: raise PluginRuntimeError("PLUGIN_CONFIG_INVALID")
-    return {"source_type": "git", "datasource_uuid": snapshot.get("datasource_uuid"), "target_path": resolved.get("target_path"), "sync_policy": resolved.get("sync_policy") or {}, "trigger": trigger, "config": {"repo_url": f"{endpoint}/{project}.git", "branch": datasource.get("branch") or "main", "directory": datasource.get("directory") or "", "auth_scheme": "token", "access_token": material["value"]}}
+    if not isinstance(datasource, dict):
+        raise PluginRuntimeError("PLUGIN_CONFIG_INVALID")
+    projects = datasource.get("projects")
+    if projects is None:
+        projects = [datasource.get("project")]
+    if (
+        not isinstance(projects, list)
+        or not projects
+        or any(not isinstance(item, str) or not item for item in projects)
+    ):
+        raise PluginRuntimeError("PLUGIN_CONFIG_INVALID")
+    scope = resolved.get("connection_scope") or {}
+    allowed = {
+        str(item).casefold() for item in scope.get("projects", [])
+    }
+    if any(item.casefold() not in allowed for item in projects):
+        raise PluginRuntimeError("PLUGIN_SCOPE_VIOLATION")
+    config = {
+        "branch": datasource.get("branch") or "",
+        "directory": datasource.get("directory") or "",
+        "auth_scheme": "token",
+        "access_token": material["value"],
+    }
+    if "projects" in datasource:
+        config["repositories"] = [
+            {
+                "repo_url": f"{endpoint}/{project}.git",
+                "branch": datasource.get("branch") or "",
+                "directory": datasource.get("directory") or "",
+                "target_subdir": quote(project, safe=""),
+                "enabled": True,
+            }
+            for project in projects
+        ]
+    else:
+        config["repo_url"] = f"{endpoint}/{projects[0]}.git"
+    return {
+        "source_type": "git",
+        "datasource_uuid": snapshot.get("datasource_uuid"),
+        "target_path": resolved.get("target_path"),
+        "sync_policy": resolved.get("sync_policy") or {},
+        "trigger": trigger,
+        "config": config,
+    }
 
 
 def _endpoint(value):

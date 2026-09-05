@@ -91,18 +91,19 @@
   "datasource_schema": {
     "type": "object",
     "properties": {
-      "project": {
-        "type": "string",
+      "projects": {
+        "type": "array",
+        "items": {"type": "string"},
         "format": "provider-resource",
         "resource": "projects",
-        "title": "Project"
+        "title": "Projects",
+        "minItems": 1,
+        "maxItems": 50
       },
       "branch": {
         "type": "string",
-        "format": "provider-resource-option",
-        "resource": "branches",
-        "depends_on": "project",
-        "title": "Branch"
+        "title": "Branch",
+        "description": "Optional branch, tag, or commit ref shared by all projects."
       },
       "directory": {
         "type": "string",
@@ -111,7 +112,7 @@
         "description": "Optional project-relative directory to sync."
       }
     },
-    "required": ["project"],
+    "required": ["projects"],
     "additionalProperties": false
   },
   "tools": [

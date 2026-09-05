@@ -12,6 +12,71 @@ from lensnode.plugin_runtime import PluginRuntimeError
 GITHUB_RUNTIME = load_runtime_contract("github", "1.0.0")
 
 
+def test_builds_multi_repository_datasource_command():
+    command = GITHUB_RUNTIME.build_datasource_command(
+        {
+            "datasource_uuid": "ds-1",
+            "resolved_config": {
+                "endpoint": "https://github.com",
+                "connection_scope": {
+                    "repositories": ["oneprolabs/a", "oneprolabs/b"]
+                },
+                "datasource_config": {
+                    "repositories": ["oneprolabs/a", "oneprolabs/b"],
+                    "branch": "main",
+                },
+                "target_path": "/workspace/repos",
+                "sync_policy": {},
+            },
+        },
+        {
+            "plugin_key": "github",
+            "endpoint": "https://github.com",
+            "value": "secret",
+        },
+        "manual",
+    )
+
+    assert [item["repo_url"] for item in command["config"]["repositories"]] == [
+        "https://github.com/oneprolabs/a.git",
+        "https://github.com/oneprolabs/b.git",
+    ]
+    assert [
+        item["target_subdir"] for item in command["config"]["repositories"]
+    ] == ["oneprolabs%2Fa", "oneprolabs%2Fb"]
+
+
+def test_multi_repository_target_subdirs_remain_unique_for_same_names():
+    command = GITHUB_RUNTIME.build_datasource_command(
+        {
+            "datasource_uuid": "ds-1",
+            "resolved_config": {
+                "endpoint": "https://github.com",
+                "connection_scope": {
+                    "repositories": ["team-a/common", "team_b/common"]
+                },
+                "datasource_config": {
+                    "repositories": ["team-a/common", "team_b/common"]
+                },
+                "target_path": "/workspace/repos",
+                "sync_policy": {},
+            },
+        },
+        {
+            "plugin_key": "github",
+            "endpoint": "https://github.com",
+            "value": "secret",
+        },
+        "manual",
+    )
+
+    target_subdirs = [
+        item["target_subdir"] for item in command["config"]["repositories"]
+    ]
+    assert target_subdirs == ["team-a%2Fcommon", "team_b%2Fcommon"]
+    assert len(set(target_subdirs)) == 2
+
+
 def _execute(tool_key, arguments, handler):
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         return GITHUB_RUNTIME.execute_tool(

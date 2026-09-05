@@ -60,6 +60,23 @@ class GitLabDatasourceProviderTests(TestCase):
         self.assertEqual(config["project"], "platform/backend/sourcelens")
         self.assertEqual(config["directory"], "docs")
 
+    def test_accepts_multiple_projects(self):
+        config = self.provider.validate_datasource_config(
+            {"projects": ["platform/a", "platform/b"]},
+            {
+                "projects": ["platform/a", "platform/b"],
+                "branch": "main",
+            },
+        )
+
+        self.assertEqual(
+            config,
+            {
+                "projects": ["platform/a", "platform/b"],
+                "branch": "main",
+            },
+        )
+
     def test_rejects_project_outside_connection_scope(self):
         with self.assertRaisesMessage(DatasourceProviderError, "scope"):
             self.provider.validate_datasource_config(
