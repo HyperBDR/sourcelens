@@ -25,7 +25,7 @@ def populate_content_languages(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [("lens", "0046_assistant_fixed_collaboration")]
+    dependencies = [("lens", "0047_plugin_integrations")]
 
     operations = [
         migrations.AddField(
