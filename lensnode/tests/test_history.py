@@ -4,9 +4,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
+import httpx
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from lensnode import agent_runtime
@@ -67,6 +73,96 @@ def test_runtime_answer_composes_execution_phases(monkeypatch):
 
     assert result == {"answer": "done"}
     assert calls == ["prepare", "route", "build", "execute", "cleanup"]
+
+
+def test_general_chat_uses_route_classifier_before_agent_loop(monkeypatch):
+    events = []
+    runtime = agent_runtime.LensDeepAgentRuntime(SimpleNamespace())
+    state = SimpleNamespace(
+        command={"task": "general_chat", "question": "hello"},
+        runtime_mode=SimpleNamespace(
+            execution_gates=True,
+            general_chat=True,
+        ),
+        resume_state=None,
+        run_uuid="run-1",
+        resources=SimpleNamespace(skill_paths=[], context_skill_contents=[]),
+        required_capabilities=None,
+        evidence_requirement=None,
+        emit_agent_event=lambda *args: events.append(args),
+        emit_user_event=lambda *args: events.append(args),
+        persist_execution_state=lambda: None,
+        history_assistant_turns=0,
+        notify_checkpoint_ready=lambda: None,
+        checkpoint_ready=False,
+        model=SimpleNamespace(),
+        question="hello",
+        tools=[],
+        mcp_tools=[],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_select_general_chat_route",
+        lambda *_args, **_kwargs: {
+            "route": "plan_execute",
+            "intent": "action",
+            "complexity": "complex",
+            "required_capabilities": [],
+            "evidence_requirement": "none",
+        },
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_seed_run_checkpoint",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assert runtime._route_runtime(state) is None
+    assert state.route_decision["route"] == "plan_execute"
+    assert state.command["runtime_route"] == "plan_execute"
+    assert state.evidence_requirement == "none"
+    assert state.required_capabilities == []
+    assert any(event[0] == "workflow.route.selected" for event in events)
+
+
+def test_plan_route_requires_initial_plan_before_business_tool():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["plugin"],
+        require_initial_plan=True,
+    )
+    assert middleware._requires_initial_plan("github_repository_get") is True
+
+
+def test_plan_outcome_uses_required_capability_failures():
+    middleware = SimpleNamespace(
+        successful_evidence=[],
+        successful_capabilities=set(),
+        failed_capabilities={"plugin"},
+        recovered_capabilities=set(),
+        failure_records={
+            ("github_repository_get", "request", "hash"): {
+                "capability": "plugin",
+                "error_type": "request",
+                "tool": "github_repository_get",
+                "source": "plugin:github_repository_get",
+                "scope": "unresolved",
+            }
+        },
+        exhaustion_details=[],
+        termination_detail={},
+    )
+
+    outcome, detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["plugin"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "partial"
+    assert detail["reason"] == "execution_failed"
+    assert detail["capability"] == "plugin"
 
 
 def test_direct_answer_route_redacts_runtime_details(monkeypatch):
@@ -184,6 +280,49 @@ class _FakeStreamAgent:
         for index in range(self._new_ai_turns):
             messages = messages + [_Msg("ai", f"answer {index + 1}")]
             yield {"messages": list(messages)}
+
+
+class _MalformedTodoThenAnswerAgent:
+    """Return one malformed todo call, then a corrected final answer."""
+
+    def __init__(self):
+        self.calls = []
+
+    def stream(self, inp, stream_mode=None, config=None):
+        del stream_mode, config
+        self.calls.append(inp)
+        if len(self.calls) == 1:
+            yield {
+                "messages": [
+                    AIMessage(
+                        content="",
+                        invalid_tool_calls=[
+                            {
+                                "name": "write_todos",
+                                "args": '{"todos":[{"content":"broken"}',
+                                "id": "call-1",
+                                "error": "Invalid JSON arguments",
+                            }
+                        ],
+                    )
+                ]
+            }
+            return
+        yield {"messages": [AIMessage(content="corrected answer")]}
+
+
+def test_malformed_write_todos_is_retried_inside_agent_loop():
+    agent = _MalformedTodoThenAnswerAgent()
+    answer, truncated, reason = _run_agent_with_turn_limit(
+        agent,
+        [{"role": "user", "content": "do a complex task"}],
+        max_turns=3,
+    )
+
+    assert answer == "corrected answer"
+    assert truncated is False
+    assert reason is None
+    assert len(agent.calls) == 2
 
 
 def test_resume_checkpoint_is_validated_before_loading_resources(monkeypatch):
@@ -1246,6 +1385,295 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert model.options["temperature"] == 0
     # Route classification is a control call: light reasoning budget only.
     assert model.options["reasoning_effort"] == "none"
+    assert "max_tokens" not in model.options
+
+
+def test_route_selection_retries_truncated_reasoning_with_compact_prompt():
+    class Model:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            if len(self.calls) == 1:
+                request = httpx.Request("POST", "http://gateway/ai/")
+                response = httpx.Response(
+                    502,
+                    request=request,
+                    json={
+                        "code": "MODEL_EMPTY_RESPONSE",
+                        "finish_reason": "length",
+                        "has_reasoning_content": True,
+                    },
+                )
+                raise httpx.HTTPStatusError(
+                    "Bad Gateway",
+                    request=request,
+                    response=response,
+                )
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"complex",'
+                    '"route":"plan_execute",'
+                    '"required_capabilities":'
+                    '["skill","plugin","artifact_delivery"],'
+                    '"evidence_requirement":"artifact"}'
+                )
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "整理这份工程材料",
+        history=[
+            {"role": "user", "content": "分析工程材料"},
+            {
+                "role": "assistant",
+                "content": "当前运行处于直接回答模式。",
+            },
+        ],
+        context_skill_contents=[
+            "Engineering report. Read current GitHub activity and deliver "
+            "an HTML report with save_deliverable."
+        ],
+        available_tools=[
+            SimpleNamespace(name="run_skill_script"),
+            SimpleNamespace(
+                name="github_commit_list",
+                metadata={"capability_family": "plugin"},
+            ),
+            SimpleNamespace(name="save_deliverable"),
+        ],
+    )
+
+    assert decision["route"] == "plan_execute"
+    assert decision["evidence_requirement"] == "artifact"
+    assert len(model.calls) == 2
+    first_messages, first_options = model.calls[0]
+    retry_messages, retry_options = model.calls[1]
+    assert "max_tokens" not in first_options
+    assert "max_tokens" not in retry_options
+    assert len(retry_messages[0].content) < len(first_messages[0].content)
+    assert len(retry_messages) == 2
+    assert retry_messages[-1]["content"] == "整理这份工程材料"
+
+
+def test_route_selection_uses_evidence_fallback_after_retry_failure():
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            request = httpx.Request("POST", "http://gateway/ai/")
+            response = httpx.Response(
+                502,
+                request=request,
+                json={
+                    "code": "MODEL_EMPTY_RESPONSE",
+                    "finish_reason": "length",
+                    "has_reasoning_content": True,
+                },
+            )
+            raise httpx.HTTPStatusError(
+                "Bad Gateway",
+                request=request,
+                response=response,
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "查询昨天的提交记录",
+        context_skill_contents=[
+            "Inspect current engineering activity from available sources."
+        ],
+        available_tools=[
+            SimpleNamespace(name="run_skill_script"),
+            SimpleNamespace(
+                name="github_commit_list",
+                metadata={"capability_family": "plugin"},
+            ),
+            SimpleNamespace(name="save_deliverable"),
+        ],
+    )
+
+    assert model.calls == 2
+    assert decision == {
+        "intent": "action",
+        "complexity": "simple",
+        "route": "direct_execute",
+        "required_capabilities": ["skill", "plugin"],
+        "evidence_requirement": "tool_result",
+        "fallback_reason": "route_classification_failed",
+    }
+
+
+def test_route_selection_uses_classifier_for_external_synthesis():
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            raise RuntimeError("classifier unavailable")
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "汇总昨天的研发工作并生成报告",
+        context_skill_contents=[],
+        available_tools=[
+            SimpleNamespace(
+                name="github_commit_list",
+                metadata={"capability_family": "plugin"},
+            ),
+            SimpleNamespace(name="save_deliverable"),
+        ],
+        has_bound_skills=False,
+    )
+
+    assert model.calls == 1
+    assert decision == {
+        "intent": "action",
+        "complexity": "complex",
+        "route": "plan_execute",
+        "required_capabilities": [
+            "plugin",
+        ],
+        "evidence_requirement": "tool_result",
+        "fallback_reason": "route_classification_failed",
+    }
+
+
+def test_route_selection_keeps_explanation_on_model_path_with_tools():
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational","complexity":"simple",'
+                    '"route":"direct_answer",'
+                    '"required_capabilities":[],'
+                    '"evidence_requirement":"none"}'
+                )
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "解释一下什么是工程效能",
+        context_skill_contents=["Engineering report Skill."],
+        available_tools=[
+            SimpleNamespace(
+                name="github_commit_list",
+                metadata={"capability_family": "plugin"},
+            ),
+            SimpleNamespace(name="save_deliverable"),
+        ],
+        has_bound_skills=False,
+    )
+
+    assert model.calls == 1
+    assert decision["route"] == "direct_answer"
+    assert decision["evidence_requirement"] == "none"
+
+
+def test_route_selection_keeps_pure_model_fallback_direct():
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            raise RuntimeError("classifier unavailable")
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "解释什么是持续集成",
+        context_skill_contents=[],
+        available_tools=[],
+    )
+
+    assert model.calls == 1
+    assert decision == {
+        "intent": "informational",
+        "complexity": "simple",
+        "route": "direct_answer",
+        "required_capabilities": [],
+        "evidence_requirement": "none",
+        "fallback_reason": "route_classification_failed",
+    }
+
+
+def test_wrapup_synthesis_uses_a_bounded_non_reasoning_call():
+    class Model:
+        def __init__(self):
+            self.options = None
+
+        def invoke(self, _messages, **kwargs):
+            self.options = kwargs
+            return SimpleNamespace(content="done")
+
+    model = Model()
+
+    answer = _synthesize_wrapup_answer(
+        model,
+        [HumanMessage(content="evidence")],
+        "English",
+        None,
+        reason="token_budget_wrapup",
+    )
+
+    assert answer == "done"
+    assert model.options == {
+        "runtime_final_synthesis": True,
+        "max_tokens": 4096,
+        "reasoning_effort": "none",
+    }
+
+
+def test_wrapup_synthesis_compacts_large_history_before_invoke():
+    class Model:
+        def __init__(self):
+            self.messages = None
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            return SimpleNamespace(content="done")
+
+    model = Model()
+    messages = [SystemMessage(content="system instructions")]
+    for index in range(80):
+        messages.extend(
+            [
+                AIMessage(content=f"analysis {index} " + "x" * 1800),
+                ToolMessage(
+                    content=(
+                        f"tool evidence {index} " + "y" * 1800
+                    ),
+                    tool_call_id=f"call-{index}",
+                ),
+            ]
+        )
+
+    _synthesize_wrapup_answer(
+        model,
+        messages,
+        "English",
+        None,
+        reason="token_budget_wrapup",
+    )
+
+    assert len(model.messages) == 3
+    assert sum(
+        len(str(message.content)) for message in model.messages
+    ) <= 40000
+    assert "tool evidence 79" in model.messages[-2].content
 
 
 def test_route_selection_includes_current_images_in_classifier_input():
@@ -1363,6 +1791,68 @@ def test_route_selection_does_not_derive_an_unbound_skill_capability():
 
     assert decision["route"] == "capability_unavailable"
     assert decision["required_capabilities"] == []
+
+
+def test_route_selection_recognizes_explicit_plugin_tool_capability():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational",'
+                    '"complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["plugin"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    plugin_tool = SimpleNamespace(
+        name="github_commit_list",
+        metadata={"capability_family": "plugin"},
+    )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询 oneprolabs/sourcelens 的提交记录",
+        available_tools=[plugin_tool],
+        has_bound_skills=False,
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["required_capabilities"] == ["plugin"]
+
+
+def test_route_selection_repairs_legacy_mcp_to_plugin_capability():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational",'
+                    '"complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["mcp"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    plugin_tool = SimpleNamespace(
+        name="github_commit_list",
+        metadata={"capability_family": "plugin"},
+    )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询 oneprolabs/sourcelens 的提交记录",
+        available_tools=[plugin_tool],
+        has_bound_skills=False,
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["required_capabilities"] == ["plugin"]
+    assert decision["capability_repair"] == {
+        "discarded": ["mcp"],
+        "derived": ["plugin"],
+    }
 
 
 def test_route_selection_requires_delivery_for_artifact_evidence():
@@ -2788,6 +3278,62 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
+def test_legacy_plugin_guidance_is_not_injected_into_general_chat():
+    prompt = _general_chat_system_prompt(
+        {
+            "task": "general_chat",
+            "question": "查看仓库信息",
+            "loaded_plugins": [
+                {
+                    "plugin_key": "github",
+                    "plugin_display_name": "GitHub",
+                    "assistant_guidance": {
+                        "summary": "Inspect approved repositories.",
+                        "when_to_use": ["Current repository questions."],
+                        "topics": [
+                            {
+                                "key": "repository",
+                                "summary": "Read repository metadata.",
+                                "details": "Detailed instructions stay deferred.",
+                                "tool_keys": ["github_repository_get"],
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "Plugin guidance index" not in prompt
+    assert "Inspect approved repositories." not in prompt
+    assert "Detailed instructions stay deferred." not in prompt
+    assert "plugin_help" not in prompt
+
+
+def test_legacy_plugin_guidance_is_not_injected_into_knowledge_prompt():
+    prompt = _knowledge_system_prompt(
+        {"prompt": "Answer from workspace evidence."},
+        {
+            "task": "knowledge_qa",
+            "question": "查看仓库信息",
+            "loaded_plugins": [
+                {
+                    "plugin_key": "github",
+                    "plugin_display_name": "GitHub",
+                    "assistant_guidance": {
+                        "summary": "Inspect approved repositories.",
+                        "topics": [],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert "Plugin guidance index" not in prompt
+    assert "Inspect approved repositories." not in prompt
+    assert prompt.endswith("tool boundary.\n")
+
+
 def test_business_prompt_contract_covers_code_skills_and_collaboration():
     code_prompt = _knowledge_system_prompt(
         {"prompt": "Analyze source evidence."},
@@ -3992,6 +4538,38 @@ def test_capability_boundary_counts_raw_mcp_success_as_evidence():
     assert "HWINSTAD2025071509" not in json.dumps(evidence)
 
 
+def test_capability_boundary_counts_plugin_success_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["plugin"],
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(
+            name="github_commit_list",
+            metadata={"capability_family": "plugin"},
+        ),
+        tool_call={
+            "name": "github_commit_list",
+            "id": "call-1",
+            "args": {"repository": "oneprolabs/sourcelens"},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"items":[]}',
+            name="github_commit_list",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert middleware.success_count == 1
+    assert middleware.successful_capabilities == {"plugin"}
+    assert middleware.successful_evidence[0]["source"] == (
+        "plugin:github_commit_list"
+    )
+
+
 def test_finalization_ignores_success_without_invocation_provenance():
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
         required_capabilities=["skill"]
@@ -4991,6 +5569,113 @@ def test_resume_does_not_reemit_checkpointed_tool_events():
     ]
 
 
+def test_initial_plan_streams_complete_steps_before_tool_finishes():
+    class Model:
+        def __init__(self):
+            self.on_tool_call_delta = None
+
+    class Agent:
+        def __init__(self, model):
+            self.model = model
+
+        def stream(self, _inp, stream_mode=None, config=None):
+            del stream_mode, config
+            self.model.on_tool_call_delta(
+                {
+                    "index": 0,
+                    "id": "call-plan",
+                    "name": "write_todos",
+                    "arguments": (
+                        '{"todos":['
+                        '{"content":"Inspect","status":"in_progress"},'
+                    ),
+                }
+            )
+            self.model.on_tool_call_delta(
+                {
+                    "index": 0,
+                    "id": "call-plan",
+                    "name": "write_todos",
+                    "arguments": (
+                        '{"todos":['
+                        '{"content":"Inspect","status":"in_progress"},'
+                        '{"content":"Deliver","status":"pending"}]}'
+                    ),
+                }
+            )
+            yield {
+                "messages": [
+                    _Msg(
+                        "ai",
+                        "Plan ready",
+                        tool_calls=[
+                            {
+                                "id": "call-plan",
+                                "name": "write_todos",
+                                "args": {
+                                    "todos": [
+                                        {
+                                            "content": "Inspect",
+                                            "status": "in_progress",
+                                        },
+                                        {
+                                            "content": "Deliver",
+                                            "status": "pending",
+                                        },
+                                    ]
+                                },
+                            }
+                        ],
+                    )
+                ]
+            }
+
+    model = Model()
+    events = []
+
+    _run_agent_with_turn_limit(
+        Agent(model),
+        [],
+        max_turns=5,
+        model=model,
+        emit_event=lambda name, detail: events.append((name, detail)),
+    )
+
+    plans = [
+        detail["payload"]
+        for name, detail in events
+        if name == "workflow.plan.updated"
+    ]
+    assert plans == [
+        {
+            "revision": 1,
+            "steps": [
+                {
+                    "id": "step-1",
+                    "title": "Inspect",
+                    "status": "in_progress",
+                }
+            ],
+        },
+        {
+            "revision": 2,
+            "steps": [
+                {
+                    "id": "step-1",
+                    "title": "Inspect",
+                    "status": "in_progress",
+                },
+                {
+                    "id": "step-2",
+                    "title": "Deliver",
+                    "status": "pending",
+                },
+            ],
+        },
+    ]
+    assert model.on_tool_call_delta is None
+
+
 def test_stream_error_recovers_from_checkpoint_without_duplicate_events():
     checkpoint_message = _Msg(
         "ai",
@@ -5031,6 +5716,7 @@ def test_stream_error_recovers_from_checkpoint_without_duplicate_events():
         thread={"configurable": {"thread_id": "run-1"}},
         emit_event=lambda name, detail: events.append((name, detail)),
         stream_recovery_attempts=1,
+        stream_recovery_backoff_s=0,
         on_stream_recovery=lambda: output_resets.append(True),
     )
 
@@ -5049,6 +5735,49 @@ def test_stream_error_recovers_from_checkpoint_without_duplicate_events():
         "tool.lookup.invoke"
     ) == 1
     assert [name for name, _detail in events].count("llm.response") == 2
+
+
+def test_stream_error_retries_with_backoff_budget():
+    errors = [
+        GatewayStreamError("MODEL_STREAM_ERROR", "first failure"),
+        GatewayStreamError("MODEL_STREAM_ERROR", "second failure"),
+    ]
+
+    class Agent:
+        def __init__(self):
+            self.inputs = []
+
+        def stream(self, inp, stream_mode=None, config=None):
+            del stream_mode, config
+            self.inputs.append(inp)
+            if len(self.inputs) <= len(errors):
+                raise errors[len(self.inputs) - 1]
+            yield {"messages": [_Msg("ai", "recovered")]}
+
+    agent = Agent()
+    events = []
+
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        [{"role": "user", "content": "question"}],
+        max_turns=5,
+        thread={"configurable": {"thread_id": "run-1"}},
+        emit_event=lambda name, detail: events.append((name, detail)),
+        stream_recovery_attempts=2,
+        stream_recovery_backoff_s=0,
+    )
+
+    assert answer == "recovered"
+    assert truncated is False
+    assert termination_reason is None
+    assert len(agent.inputs) == 3
+    recovery_events = [
+        detail
+        for name, detail in events
+        if name == "deepagents.stream.recovering"
+    ]
+    assert [item["attempt"] for item in recovery_events] == [1, 2]
+    assert [item["backoff_s"] for item in recovery_events] == [0, 0]
 
 
 @pytest.mark.parametrize(
@@ -5258,6 +5987,34 @@ def test_synthesize_wrapup_answer_strips_dangling_call_and_returns_content():
     )
 
 
+def test_empty_wrapup_excludes_prior_direct_answer_control_text():
+    model = _FakeWrapupModel("recovered")
+    current = [
+        _Msg("human", "query"),
+        _Msg("ai", "当前处于直接回答模式，不能调用工具。"),
+        _Msg(
+            "human",
+            "你上一轮没有输出可见答案。不要调用任何工具，请直接回答。",
+        ),
+        _Msg("ai", ""),
+    ]
+
+    answer = _synthesize_wrapup_answer(
+        model,
+        current,
+        "Chinese",
+        None,
+        reason="empty",
+    )
+
+    assert answer == "recovered"
+    history_text = "\n".join(
+        str(message.content) for message in model.invoked_with[:-1]
+    )
+    assert "直接回答模式" not in history_text
+    assert "上一轮没有输出可见答案" not in history_text
+
+
 def test_synthesize_wrapup_answer_returns_empty_on_failure():
     answer = _synthesize_wrapup_answer(
         _FailingModel(), [_Msg("human", "q")], "English", None
@@ -5377,7 +6134,11 @@ def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
     assert "budget synthesis" in answer
     assert "token budget" not in answer.lower()
     assert "Token 调查预算" not in answer
-    assert model.invoked_kwargs == {"runtime_final_synthesis": True}
+    assert model.invoked_kwargs == {
+        "runtime_final_synthesis": True,
+        "max_tokens": 4096,
+        "reasoning_effort": "none",
+    }
 
 
 def test_empty_terminal_response_recovers_once_without_tools():
@@ -5698,7 +6459,7 @@ def test_simple_general_chat_route_keeps_subagents_disabled(
     )
 
     assert captured["subagents"] == []
-    assert "skills" not in captured or captured["skills"] is None
+    assert captured["skills"] == ["skills/income"]
     assert any(
         isinstance(item, agent_runtime._NoTaskMiddleware)
         and not item.allow_task_tool
@@ -5714,6 +6475,153 @@ def test_general_chat_prompt_adds_subagent_guidance_for_plan_execute():
 
     assert "task subagent is available" in prompt
     assert "multiple task calls in one message" in prompt
+
+
+def test_general_chat_prompt_prefers_batch_activity_tool_for_reports():
+    prompt = agent_runtime._general_chat_system_prompt(
+        {
+            "question": "获取昨天的工作报告",
+            "runtime_route": "plan_execute",
+            "loaded_plugins": [
+                {"tools": [{"key": "github_activity_summary"}]}
+            ],
+        },
+        ["Produce an engineering activity report."],
+    )
+
+    assert "github_activity_summary" in prompt
+    assert "do not delegate one subagent per repository" in prompt
+    assert "Do not call another GitHub list or detail Tool" in prompt
+
+
+def test_report_execution_contract_includes_every_available_batch_source():
+    prompt = agent_runtime._general_chat_system_prompt(
+        {
+            "question": "生成昨天的工程报告",
+            "runtime_route": "plan_execute",
+            "loaded_plugins": [
+                {"tools": [{"key": "jira_activity_summary"}]},
+                {"tools": [{"key": "gitlab_activity_summary"}]},
+            ],
+        },
+        ["Produce an engineering activity report."],
+    )
+
+    assert "jira_activity_summary" in prompt
+    assert "gitlab_activity_summary" in prompt
+    assert "once per available source" in prompt
+
+
+def test_explicit_activity_report_uses_high_confidence_plan_route():
+    decision = agent_runtime._high_confidence_report_route(
+        {
+            "question": "获取昨天的工作报告",
+            "loaded_plugins": [
+                {"tools": [{"key": "github_activity_summary"}]}
+            ],
+        }
+    )
+
+    assert decision == {
+        "intent": "action",
+        "complexity": "complex",
+        "route": "plan_execute",
+        "required_capabilities": ["plugin"],
+        "evidence_requirement": "tool_result",
+    }
+
+
+def test_jira_or_gitlab_batch_tool_enables_high_confidence_report_route():
+    for tool_key in ("jira_activity_summary", "gitlab_activity_summary"):
+        decision = agent_runtime._high_confidence_report_route(
+            {
+                "question": "生成昨天的工作报告",
+                "loaded_plugins": [{"tools": [{"key": tool_key}]}],
+            }
+        )
+
+        assert decision["route"] == "plan_execute"
+
+
+def test_activity_report_hides_non_batch_github_tools():
+    builtin = SimpleNamespace(name="save_deliverable", metadata={})
+    batch = SimpleNamespace(
+        name="github_activity_summary",
+        metadata={"plugin_key": "github"},
+    )
+    detail = SimpleNamespace(
+        name="github_pull_request_get",
+        metadata={"plugin_key": "github"},
+    )
+    jira = SimpleNamespace(
+        name="jira_issue_list",
+        metadata={"plugin_key": "jira"},
+    )
+
+    tools = agent_runtime._report_scoped_tools(
+        {
+            "question": "获取昨天的工作报告",
+            "runtime_route": "plan_execute",
+            "loaded_plugins": [
+                {"tools": [{"key": "github_activity_summary"}]}
+            ],
+        },
+        [builtin, batch, detail, jira],
+    )
+
+    assert tools == [builtin, batch, jira]
+
+
+def test_activity_report_hides_non_batch_tools_for_each_batch_source():
+    builtin = SimpleNamespace(name="save_deliverable", metadata={})
+    jira_batch = SimpleNamespace(
+        name="jira_activity_summary",
+        metadata={"plugin_key": "jira"},
+    )
+    jira_detail = SimpleNamespace(
+        name="jira_get_issue",
+        metadata={"plugin_key": "jira"},
+    )
+    gitlab_batch = SimpleNamespace(
+        name="gitlab_activity_summary",
+        metadata={"plugin_key": "gitlab"},
+    )
+    gitlab_detail = SimpleNamespace(
+        name="gitlab_search_code",
+        metadata={"plugin_key": "gitlab"},
+    )
+
+    tools = agent_runtime._report_scoped_tools(
+        {
+            "question": "获取昨天的工作报告",
+            "runtime_route": "plan_execute",
+            "loaded_plugins": [
+                {"tools": [{"key": "jira_activity_summary"}]},
+                {"tools": [{"key": "gitlab_activity_summary"}]},
+            ],
+        },
+        [builtin, jira_batch, jira_detail, gitlab_batch, gitlab_detail],
+    )
+
+    assert tools == [builtin, jira_batch, gitlab_batch]
+
+
+def test_activity_report_disables_repository_subagents():
+    runtime = agent_runtime.LensDeepAgentRuntime(SimpleNamespace())
+    state = SimpleNamespace(
+        command={
+            "task": "general_chat",
+            "question": "获取昨天的工作报告",
+            "runtime_route": "plan_execute",
+            "loaded_plugins": [
+                {"tools": [{"key": "github_activity_summary"}]}
+            ],
+        },
+        runtime_mode=SimpleNamespace(general_chat=True),
+        route_decision={"route": "plan_execute"},
+    )
+
+    assert runtime._subagents_enabled(state) is False
 
 
 def test_general_chat_prompt_omits_subagent_guidance_for_simple_routes():

@@ -1,17 +1,24 @@
 """Admin observability views and helpers for Q&A runs."""
 
+import asyncio
+import base64
+import hashlib
+import json
 import uuid as uuid_lib
 
 from agentcore_metering.adapters.django.models import LLMUsage
+from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models import Count, Max, Min, Q, TextField
 from django.db.models.functions import Cast
+from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.access import get_effective_feature_keys
 from accounts.permissions import HasRequiredFeature
 from lens.attachments import get_session_image_attachments
 from lens.citations import public_run_citations
@@ -27,6 +34,7 @@ from lens.runtime_events import (
 )
 from lens.serializers import MessageAttachmentSerializer, RunOutputFileSerializer
 from lens.services import (
+    TERMINAL_RUN_STATUSES,
     cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
@@ -34,6 +42,13 @@ from lens.services import (
     supports_run_admission_checkpoint,
     supports_run_checkpoint_resume,
 )
+
+from .base import _authenticate_stream_request
+
+TRAJECTORY_STREAM_BATCH_SIZE = 500
+TRAJECTORY_STREAM_POLL_INTERVAL_SECONDS = 0.3
+TRAJECTORY_STREAM_PING_INTERVAL_SECONDS = 15
+TRAJECTORY_STREAM_TERMINAL_QUIET_POLLS = 3
 
 
 def _admin_safe_int(value, default, *, minimum=1, maximum=None):
@@ -505,20 +520,77 @@ def _configured_resource_name(candidates, resources, identity_keys):
     return ""
 
 
+def _configured_plugin_resources(loaded_plugins):
+    """Return secret-free Plugin identities and their frozen tool keys."""
+
+    resources = []
+    for item in loaded_plugins or []:
+        if not isinstance(item, dict):
+            continue
+        plugin_key = str(item.get("plugin_key") or "").strip()[:64]
+        plugin_name = str(
+            item.get("plugin_display_name") or plugin_key
+        ).strip()[:160]
+        plugin_version = str(item.get("plugin_version") or "").strip()[:64]
+        tool_keys = []
+        for tool in item.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            tool_key = str(tool.get("key") or "").strip()[:180]
+            if tool_key and tool_key not in tool_keys:
+                tool_keys.append(tool_key)
+        if not plugin_key or not plugin_name:
+            continue
+        resources.append(
+            {
+                "plugin_key": plugin_key,
+                "plugin_name": plugin_name,
+                "plugin_version": plugin_version,
+                "tool_keys": tool_keys,
+            }
+        )
+    return resources
+
+
+def _is_plugin_virtual_skill(item):
+    """Return whether a loaded Skill is the context view of a Plugin."""
+
+    if not isinstance(item, dict):
+        return False
+    definition = item.get("definition")
+    return item.get("skill_kind") == "plugin_virtual" or (
+        isinstance(definition, dict)
+        and definition.get("plugin_virtual") is True
+    )
+
+
 def _classify_resource_call(
     name,
     payload,
     configured_skills,
     configured_mcps,
+    configured_plugins,
 ):
     """Return the resource type and display name for one observed call."""
 
     candidates = set(_resource_identity_candidates(payload))
     resource_type = "tool"
     resource_name = name
+    plugin_name = ""
     skill_keys = ("skill_uuid", "skill_package_name", "skill_name")
     mcp_keys = ("mcp_uuid", "mcp_name")
-    if name.startswith("mcp__"):
+    plugin = next(
+        (
+            item
+            for item in configured_plugins
+            if name in item.get("tool_keys", [])
+        ),
+        None,
+    )
+    if plugin:
+        resource_type = "plugin"
+        plugin_name = plugin["plugin_name"]
+    elif name.startswith("mcp__"):
         resource_type = "mcp"
         configured_name = _configured_resource_name(
             candidates,
@@ -555,13 +627,14 @@ def _classify_resource_call(
             )
             or name
         )
-    return resource_type, resource_name
+    return resource_type, resource_name, plugin_name
 
 
 def _resource_call_from_step_event(
     event,
     configured_skills,
     configured_mcps,
+    configured_plugins,
 ):
     """Return one resource call from a persisted step event, if applicable."""
 
@@ -578,28 +651,36 @@ def _resource_call_from_step_event(
         payload["skill_name"] = event["skill"]
     if event.get("server"):
         payload["mcp_name"] = event["server"]
-    resource_type, resource_name = _classify_resource_call(
+    resource_type, resource_name, plugin_name = _classify_resource_call(
         name,
         payload,
         configured_skills,
         configured_mcps,
+        configured_plugins,
     )
-    return {
+    call = {
         "resource_type": resource_type,
         "name": resource_name,
         "invocation_id": str(
             event.get("invocation_id") or event.get("call_id") or ""
         ).strip(),
     }
+    if plugin_name:
+        call["plugin_name"] = plugin_name
+    return call
 
 
 def _admin_run_resource_usage(run, execution):
     """Summarize configured resources and distinct observed tool calls."""
 
+    loaded_skills = execution.loaded_skills if execution else []
     configured_skills = sanitize_loaded_skills(
-        execution.loaded_skills if execution else []
+        [item for item in loaded_skills if not _is_plugin_virtual_skill(item)]
     )
     configured_mcps = sanitize_loaded_mcps(execution.loaded_mcps if execution else [])
+    configured_plugins = _configured_plugin_resources(
+        execution.loaded_plugins if execution else []
+    )
     calls = {}
     resources = {}
 
@@ -609,7 +690,7 @@ def _admin_run_resource_usage(run, execution):
         else:
             name = item.get("mcp_name")
         name = name or "-"
-        key = (resource_type, name)
+        key = (resource_type, "", name)
         resources.setdefault(
             key,
             {
@@ -625,8 +706,8 @@ def _admin_run_resource_usage(run, execution):
     for item in configured_mcps:
         add_configured_resource("mcp", item)
 
-    def add_call(resource_type, resource_name):
-        key = (resource_type, resource_name)
+    def add_call(resource_type, resource_name, plugin_name=""):
+        key = (resource_type, plugin_name, resource_name)
         item = calls.setdefault(
             key,
             {
@@ -635,16 +716,21 @@ def _admin_run_resource_usage(run, execution):
                 "calls": 0,
             },
         )
+        if plugin_name:
+            item["plugin_name"] = plugin_name
         item["calls"] += 1
         if key in resources:
             resources[key]["calls"] += 1
         else:
-            resources[key] = {
+            resource = {
                 "resource_type": resource_type,
                 "name": resource_name,
-                "configured": False,
+                "configured": resource_type == "plugin",
                 "calls": 1,
             }
+            if plugin_name:
+                resource["plugin_name"] = plugin_name
+            resources[key] = resource
 
     step_calls = []
     for step in run.steps.all():
@@ -659,6 +745,7 @@ def _admin_run_resource_usage(run, execution):
                 event,
                 configured_skills,
                 configured_mcps,
+                configured_plugins,
             )
             if call:
                 step_calls.append(call)
@@ -671,7 +758,11 @@ def _admin_run_resource_usage(run, execution):
                 continue
             if invocation_id:
                 seen_invocations.add(invocation_id)
-            add_call(call["resource_type"], call["name"])
+            add_call(
+                call["resource_type"],
+                call["name"],
+                call.get("plugin_name", ""),
+            )
     else:
         seen_call_ids = set()
         events = run.trace_events.filter(
@@ -683,20 +774,26 @@ def _admin_run_resource_usage(run, execution):
             if not name or event.call_id in seen_call_ids:
                 continue
             seen_call_ids.add(event.call_id)
-            resource_type, resource_name = _classify_resource_call(
+            resource_type, resource_name, plugin_name = _classify_resource_call(
                 name,
                 payload,
                 configured_skills,
                 configured_mcps,
+                configured_plugins,
             )
-            add_call(resource_type, resource_name)
+            add_call(resource_type, resource_name, plugin_name)
 
     return {
         "configured_skills": configured_skills,
         "configured_mcps": configured_mcps,
+        "configured_plugins": configured_plugins,
         "calls": list(calls.values()),
         "resources": list(resources.values()),
-        "configured_count": len(configured_skills) + len(configured_mcps),
+        "configured_count": (
+            len(configured_skills)
+            + len(configured_mcps)
+            + len(configured_plugins)
+        ),
         "called_resource_count": sum(item["calls"] > 0 for item in resources.values()),
         "total_calls": sum(item["calls"] for item in calls.values()),
     }
@@ -1357,6 +1454,341 @@ def _run_trace_summary(
     return summary
 
 
+def _trajectory_context(run_uuid):
+    """Load one run and the trace/progress runs visible from it."""
+
+    try:
+        run = Run.objects.select_related(
+            "execution",
+            "session__assistant",
+            "input_message",
+            "parent_run__execution",
+            "parent_run__session__assistant",
+            "parent_run__input_message",
+        ).get(uuid=run_uuid)
+    except Run.DoesNotExist:
+        return None
+    trace_runs = [run]
+    trace_runs.extend(
+        run.delegated_runs.select_related(
+            "execution",
+            "session__assistant",
+            "input_message",
+        ).all()
+    )
+    progress_root = run.parent_run or run
+    if progress_root.id == run.id:
+        progress_runs = trace_runs
+    else:
+        progress_runs = [progress_root]
+        progress_runs.extend(
+            progress_root.delegated_runs.select_related(
+                "execution",
+                "session__assistant",
+                "input_message",
+            ).all()
+        )
+    return run, trace_runs, progress_root, progress_runs
+
+
+def _encode_trajectory_cursor(event):
+    """Return an opaque cursor for one durably persisted event."""
+
+    if event is None:
+        return ""
+    value = json.dumps(
+        {
+            "created_at": event.created_at.isoformat(),
+            "uuid": str(event.uuid),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _decode_trajectory_cursor(cursor):
+    """Decode one opaque trajectory cursor or raise ValueError."""
+
+    if not cursor:
+        return None
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        value = json.loads(
+            base64.urlsafe_b64decode(cursor + padding).decode("utf-8")
+        )
+        created_at = parse_datetime(value["created_at"])
+        event_uuid = uuid_lib.UUID(value["uuid"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid trajectory cursor") from exc
+    if created_at is None or timezone.is_naive(created_at):
+        raise ValueError("Invalid trajectory cursor")
+    return created_at, event_uuid
+
+
+def _trajectory_cursor_belongs_to_run(run_uuid, cursor):
+    """Return whether a cursor names an event in the requested trace."""
+
+    if not cursor:
+        return True
+    context = _trajectory_context(run_uuid)
+    if context is None:
+        return False
+    _run, trace_runs, _progress_root, _progress_runs = context
+    created_at, event_uuid = _decode_trajectory_cursor(cursor)
+    return RunTraceEvent.objects.filter(
+        run__in=trace_runs,
+        created_at=created_at,
+        uuid=event_uuid,
+    ).exists()
+
+
+def _trajectory_revision(run, trace_runs, latest_cursor):
+    """Return a deterministic revision for current trace and run state."""
+
+    run_states = []
+    for trace_run in trace_runs:
+        execution = (
+            trace_run.execution if hasattr(trace_run, "execution") else None
+        )
+        run_states.append(
+            {
+                "uuid": str(trace_run.uuid),
+                "status": trace_run.status,
+                "outcome": trace_run.outcome,
+                "updated_at": trace_run.updated_at.isoformat(),
+                "executor_status": execution.status if execution else "",
+                "executor_finished_at": (
+                    execution.finished_at.isoformat()
+                    if execution and execution.finished_at
+                    else ""
+                ),
+            }
+        )
+    body = json.dumps(
+        {
+            "root": str(run.uuid),
+            "cursor": latest_cursor,
+            "runs": run_states,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()[:24]
+
+
+def _trajectory_run_state(run):
+    """Return the live run fields needed by the trajectory client."""
+
+    execution = run.execution if hasattr(run, "execution") else None
+    return {
+        "uuid": str(run.uuid),
+        "status": run.status,
+        "executor_status": execution.status if execution else run.status,
+        "outcome": run.outcome,
+        "updated_at": run.updated_at.isoformat(),
+    }
+
+
+def _trajectory_event_matches(event, filters):
+    """Return whether an event matches the bounded trajectory filters."""
+
+    event_type = filters.get("event_type", "")
+    if event_type and event.event_type != event_type:
+        return False
+    category = filters.get("category", "")
+    if category and not event.event_type.startswith(f"{category}."):
+        return False
+    call_id = filters.get("call_id", "")
+    if (
+        call_id
+        and event.call_id != call_id
+        and event.parent_call_id != call_id
+    ):
+        return False
+    keyword = filters.get("q", "")
+    if keyword:
+        haystack = " ".join(
+            [
+                event.event_type or "",
+                event.call_id or "",
+                event.parent_call_id or "",
+                str(event.payload or ""),
+            ]
+        ).lower()
+        if keyword not in haystack:
+            return False
+    return True
+
+
+def _trajectory_stream_snapshot(
+    run_uuid,
+    cursor,
+    filters,
+    *,
+    display_sequence=0,
+    known_revision="",
+    include_summary=False,
+):
+    """Build one resumable trajectory stream snapshot from durable state."""
+
+    context = _trajectory_context(run_uuid)
+    if context is None:
+        return None
+    run, trace_runs, progress_root, progress_runs = context
+    trace_runs_by_id = {item.id: item for item in trace_runs}
+    all_events = RunTraceEvent.objects.filter(run__in=trace_runs)
+    events = all_events
+    decoded_cursor = _decode_trajectory_cursor(cursor)
+    if decoded_cursor is not None:
+        cursor_created_at, cursor_uuid = decoded_cursor
+        if display_sequence == 0:
+            display_sequence = all_events.filter(
+                Q(created_at__lt=cursor_created_at)
+                | Q(created_at=cursor_created_at, uuid__lte=cursor_uuid)
+            ).count()
+        events = events.filter(
+            Q(created_at__gt=cursor_created_at)
+            | Q(created_at=cursor_created_at, uuid__gt=cursor_uuid)
+        )
+    pending = list(
+        events.order_by("created_at", "uuid")[
+            : TRAJECTORY_STREAM_BATCH_SIZE + 1
+        ]
+    )
+    raw_batch = pending[:TRAJECTORY_STREAM_BATCH_SIZE]
+    rows = [
+        _trace_event_response(
+            event,
+            trace_run=trace_runs_by_id[event.run_id],
+            root_run=run,
+            display_sequence=sequence,
+        )
+        for sequence, event in enumerate(
+            raw_batch,
+            start=display_sequence + 1,
+        )
+        if _trajectory_event_matches(event, filters)
+    ]
+    latest_event = all_events.order_by("created_at", "uuid").last()
+    next_event = raw_batch[-1] if raw_batch else None
+    latest_cursor = _encode_trajectory_cursor(latest_event)
+    next_cursor = _encode_trajectory_cursor(next_event) or cursor
+    state_runs = {
+        trace_run.id: trace_run for trace_run in [*trace_runs, *progress_runs]
+    }
+    revision = _trajectory_revision(
+        run,
+        sorted(state_runs.values(), key=lambda item: str(item.uuid)),
+        latest_cursor,
+    )
+    return {
+        "events": rows,
+        "cursor": next_cursor,
+        "latest_cursor": latest_cursor,
+        "display_sequence": display_sequence + len(raw_batch),
+        "has_more": len(pending) > TRAJECTORY_STREAM_BATCH_SIZE,
+        "revision": revision,
+        "run": _trajectory_run_state(run),
+        "summary": (
+            _run_trace_summary(
+                run,
+                trace_runs,
+                progress_root=progress_root,
+                progress_runs=progress_runs,
+            )
+            if include_summary or revision != known_revision
+            else None
+        ),
+        "terminal": run.status in TERMINAL_RUN_STATUSES,
+    }
+
+
+async def stream_admin_run_trajectory_events_async(
+    run_uuid,
+    *,
+    cursor="",
+    revision="",
+    filters=None,
+    display_sequence=0,
+    poll_interval=TRAJECTORY_STREAM_POLL_INTERVAL_SECONDS,
+    terminal_quiet_polls=TRAJECTORY_STREAM_TERMINAL_QUIET_POLLS,
+):
+    """Yield resumable admin trajectory updates from the database."""
+
+    current_cursor = cursor
+    current_revision = revision
+    current_sequence = display_sequence
+    current_summary = None
+    filters = filters or {}
+    last_ping_at = timezone.now()
+    quiet_polls = 0
+    event_type = "sync"
+
+    while True:
+        snapshot = await sync_to_async(_trajectory_stream_snapshot)(
+            run_uuid,
+            current_cursor,
+            filters,
+            display_sequence=current_sequence,
+            known_revision=current_revision,
+            include_summary=event_type == "sync",
+        )
+        if snapshot is None:
+            return
+        changed = (
+            bool(snapshot["events"])
+            or snapshot["cursor"] != current_cursor
+            or snapshot["revision"] != current_revision
+        )
+        if event_type == "sync" or changed:
+            current_summary = snapshot["summary"] or current_summary
+            payload = {
+                "type": event_type,
+                "previous_revision": current_revision,
+                "revision": snapshot["revision"],
+                "cursor": snapshot["cursor"],
+                "sequence": snapshot["display_sequence"],
+                "events": snapshot["events"],
+                "summary": current_summary,
+                "run": snapshot["run"],
+            }
+            yield payload
+            current_revision = snapshot["revision"]
+            current_cursor = snapshot["cursor"]
+            current_sequence = snapshot["display_sequence"]
+            event_type = "append"
+
+        if snapshot["has_more"]:
+            quiet_polls = 0
+            continue
+
+        if snapshot["terminal"]:
+            quiet_polls = 0 if changed else quiet_polls + 1
+            if quiet_polls >= terminal_quiet_polls:
+                yield {
+                    "type": "done",
+                    "previous_revision": current_revision,
+                    "revision": snapshot["revision"],
+                    "cursor": snapshot["cursor"],
+                    "sequence": snapshot["display_sequence"],
+                    "events": [],
+                    "summary": current_summary,
+                    "run": snapshot["run"],
+                }
+                return
+        else:
+            quiet_polls = 0
+
+        now = timezone.now()
+        if (
+            now - last_ping_at
+        ).total_seconds() >= TRAJECTORY_STREAM_PING_INTERVAL_SECONDS:
+            last_ping_at = now
+            yield {"type": "ping", "ts": now.isoformat()}
+        await asyncio.sleep(poll_interval)
+
+
 class AdminRunTrajectoryView(APIView):
     """Admin-only paginated trajectory for one Q&A run."""
 
@@ -1366,18 +1798,13 @@ class AdminRunTrajectoryView(APIView):
     def get(self, request, run_uuid):
         """Return filtered events and unfiltered run summary."""
 
-        try:
-            run = Run.objects.select_related(
-                "session__assistant",
-                "input_message",
-                "parent_run__session__assistant",
-                "parent_run__input_message",
-            ).get(uuid=run_uuid)
-        except Run.DoesNotExist:
+        context = _trajectory_context(run_uuid)
+        if context is None:
             return Response(
                 {"detail": "Run not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        run, trace_runs, progress_root, progress_runs = context
         params = request.query_params
         page_size = _admin_safe_int(
             params.get("page_size"),
@@ -1389,28 +1816,14 @@ class AdminRunTrajectoryView(APIView):
             0,
             minimum=0,
         )
-        trace_runs = [run]
-        trace_runs.extend(
-            run.delegated_runs.select_related(
-                "session__assistant",
-                "input_message",
-            ).all()
+        trace_runs_by_id = {
+            trace_run.id: trace_run for trace_run in trace_runs
+        }
+        ordered_events = list(
+            RunTraceEvent.objects.filter(
+                run__in=trace_runs,
+            ).order_by("created_at", "uuid")
         )
-        trace_runs_by_id = {trace_run.id: trace_run for trace_run in trace_runs}
-        progress_root = run.parent_run or run
-        if progress_root.id == run.id:
-            progress_runs = trace_runs
-        else:
-            progress_runs = [progress_root]
-            progress_runs.extend(
-                progress_root.delegated_runs.select_related(
-                    "session__assistant",
-                    "input_message",
-                ).all()
-            )
-        ordered_events = RunTraceEvent.objects.filter(
-            run__in=trace_runs,
-        ).order_by("created_at", "run_id", "sequence", "uuid")
         trace_events = [
             (sequence, event, trace_runs_by_id[event.run_id])
             for sequence, event in enumerate(ordered_events, start=1)
@@ -1419,7 +1832,9 @@ class AdminRunTrajectoryView(APIView):
         event_type = (params.get("event_type") or "").strip()[:128]
         if event_type:
             trace_events = [
-                item for item in trace_events if item[1].event_type == event_type
+                item
+                for item in trace_events
+                if item[1].event_type == event_type
             ]
         category = (params.get("category") or "").strip().lower()[:128]
         if category:
@@ -1433,7 +1848,8 @@ class AdminRunTrajectoryView(APIView):
             trace_events = [
                 item
                 for item in trace_events
-                if item[1].call_id == call_id or item[1].parent_call_id == call_id
+                if item[1].call_id == call_id
+                or item[1].parent_call_id == call_id
             ]
         keyword = (params.get("q") or "").strip()[:256]
         if keyword:
@@ -1453,6 +1869,8 @@ class AdminRunTrajectoryView(APIView):
         total = len(trace_events)
         rows = trace_events[:page_size]
         next_after_sequence = rows[-1][0] if rows else None
+        latest_event = ordered_events[-1] if ordered_events else None
+        stream_cursor = _encode_trajectory_cursor(latest_event)
         return Response(
             {
                 "results": [
@@ -1469,6 +1887,19 @@ class AdminRunTrajectoryView(APIView):
                 "after_sequence": after_sequence,
                 "next_after_sequence": next_after_sequence,
                 "has_more": total > len(rows),
+                "stream_cursor": stream_cursor,
+                "stream_sequence": len(ordered_events),
+                "revision": _trajectory_revision(
+                    run,
+                    sorted(
+                        {
+                            item.id: item
+                            for item in [*trace_runs, *progress_runs]
+                        }.values(),
+                        key=lambda item: str(item.uuid),
+                    ),
+                    stream_cursor,
+                ),
                 "summary": _run_trace_summary(
                     run,
                     trace_runs,
@@ -1477,3 +1908,64 @@ class AdminRunTrajectoryView(APIView):
                 ),
             }
         )
+
+
+async def admin_run_trajectory_stream_view(request, run_uuid):
+    """Stream durable trajectory updates to authorized administrators."""
+
+    user = await sync_to_async(_authenticate_stream_request)(request)
+    if user is None:
+        return HttpResponse("Unauthorized", status=401)
+    feature_keys = await sync_to_async(get_effective_feature_keys)(user)
+    if "admin_console" not in feature_keys:
+        return HttpResponse("Forbidden", status=403)
+
+    cursor = (request.GET.get("cursor") or "").strip()[:1024]
+    try:
+        _decode_trajectory_cursor(cursor)
+    except ValueError:
+        return HttpResponse("Invalid trajectory cursor", status=400)
+    context_exists = await sync_to_async(
+        lambda: _trajectory_context(run_uuid) is not None
+    )()
+    if not context_exists:
+        return HttpResponse("Not found", status=404)
+    if not await sync_to_async(_trajectory_cursor_belongs_to_run)(
+        run_uuid,
+        cursor,
+    ):
+        return HttpResponse("Invalid trajectory cursor", status=400)
+
+    revision = (request.GET.get("revision") or "").strip()[:128]
+    display_sequence = _admin_safe_int(
+        request.GET.get("sequence"),
+        0,
+        minimum=0,
+    )
+    filters = {
+        "event_type": (request.GET.get("event_type") or "").strip()[:128],
+        "category": (
+            (request.GET.get("category") or "").strip().lower()[:128]
+        ),
+        "call_id": (request.GET.get("call_id") or "").strip()[:128],
+        "q": (request.GET.get("q") or "").strip().lower()[:256],
+    }
+
+    async def event_stream():
+        async for event in stream_admin_run_trajectory_events_async(
+            run_uuid,
+            cursor=cursor,
+            revision=revision,
+            filters=filters,
+            display_sequence=display_sequence,
+        ):
+            payload = json.dumps(event, ensure_ascii=False)
+            yield f"data: {payload}\n\n".encode("utf-8")
+
+    response = StreamingHttpResponse(
+        event_stream(),
+        content_type="text/event-stream; charset=utf-8",
+    )
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response

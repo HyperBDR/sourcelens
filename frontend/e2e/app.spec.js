@@ -86,7 +86,9 @@ test.describe('Settings', () => {
     await page.goto('/settings/profile')
     await page.waitForLoadState('networkidle')
 
-    await expect(page).toHaveURL(/\/(settings\/profile|lens\/assistants\/[^/]+\/chat)/)
+    await expect(page).toHaveURL(
+      /\/(settings\/profile|lens\/assistants\/[^/]+\/chat)/
+    )
     await expect(page.locator('h1, h2').first()).toBeVisible({ timeout: 10000 })
   })
 })

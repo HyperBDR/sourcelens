@@ -286,6 +286,9 @@
         :skills="skills"
         :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
+        :plugin-connections="pluginConnections"
+        :plugin-manifests="pluginManifests"
+        :plugin-icon-urls="pluginIconUrls"
         :llm-config-options="llmConfigOptions"
         :saving="saving"
         :form-error="formError"
@@ -338,7 +341,7 @@ import {
   Lock as LockIcon,
   Server
 } from '@lucide/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
@@ -350,11 +353,15 @@ import {
   archiveAssistant,
   createAssistant,
   getAssistant,
+  getPluginIcon,
+  getPluginManifest,
   listAssistants,
+  listConnections,
   listGlobalSettings,
   listLensNodes,
   listMcpServers,
   listEnvironmentVariableSets,
+  listPlugins,
   listSkills,
   restoreAssistant,
   updateAssistant
@@ -404,6 +411,9 @@ const lensnodes = ref([])
 const skills = ref([])
 const environmentVariableSets = ref([])
 const mcps = ref([])
+const pluginConnections = ref([])
+const pluginManifests = ref({})
+const pluginIconUrls = ref({})
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
 let formResourcesPromise = null
@@ -518,13 +528,22 @@ async function loadFormResources() {
     await formResourcesPromise
     return
   }
-  if (lensnodes.value.length || skills.value.length || mcps.value.length) return
+  if (
+    lensnodes.value.length ||
+    skills.value.length ||
+    mcps.value.length ||
+    pluginConnections.value.length
+  ) {
+    return
+  }
 
   formResourcesPromise = Promise.all([
     listLensNodes(),
     listSkills(),
     listEnvironmentVariableSets(),
     listMcpServers(),
+    listConnections({ status: 'active' }),
+    listPlugins(),
     llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
   ])
     .then(
@@ -533,6 +552,8 @@ async function loadFormResources() {
         skillRows,
         environmentVariableSetRows,
         mcpRows,
+        connectionRows,
+        installedPlugins,
         llmRows
       ]) => {
         lensnodes.value = normalizeList(lensnodeRows)
@@ -541,13 +562,46 @@ async function loadFormResources() {
           environmentVariableSetRows
         )
         mcps.value = normalizeList(mcpRows)
+        pluginConnections.value = normalizeList(connectionRows)
         llmConfigOptions.value = normalizeList(llmRows)
+        const plugins = normalizeList(installedPlugins)
+        return Promise.all([
+          Promise.all(plugins.map((plugin) => getPluginManifest(plugin.key))),
+          loadPluginIcons(plugins)
+        ]).then(([manifests]) => {
+          pluginManifests.value = Object.fromEntries(
+            manifests.map((manifest) => [manifest.key, manifest])
+          )
+        })
       }
     )
     .finally(() => {
       formResourcesPromise = null
     })
   await formResourcesPromise
+}
+
+async function loadPluginIcons(plugins) {
+  revokePluginIconUrls()
+  const entries = await Promise.all(
+    plugins.map(async (plugin) => {
+      if (!plugin.icon_url) return [plugin.key, '']
+      try {
+        const blob = await getPluginIcon(plugin.key)
+        return [plugin.key, URL.createObjectURL(blob)]
+      } catch {
+        return [plugin.key, '']
+      }
+    })
+  )
+  pluginIconUrls.value = Object.fromEntries(entries)
+}
+
+function revokePluginIconUrls() {
+  Object.values(pluginIconUrls.value).forEach((url) => {
+    if (url) URL.revokeObjectURL(url)
+  })
+  pluginIconUrls.value = {}
 }
 
 async function switchArchiveView(archived) {
@@ -656,6 +710,7 @@ function defaultForm() {
     mcp_uuids: [],
     mcp_environment_set_uuids: {},
     mcp_environment_drafts: {},
+    plugin_bindings: [],
     visibility: 'private',
     access_group_ids: [],
     access_user_ids: [],
@@ -736,6 +791,10 @@ function formFromRow(row) {
         ])
     ),
     mcp_environment_drafts: {},
+    plugin_bindings: (row.plugin_bindings || []).map((binding) => ({
+      connection_uuid: binding.connection_uuid,
+      enabled: binding.enabled !== false
+    })),
     visibility: row.visibility || 'public',
     access_group_ids: (row.access_grants || [])
       .filter((g) => g.type === 'group')
@@ -806,7 +865,9 @@ function buildPayload() {
       form.value.capability === 'general_chat' ? [] : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
-    max_concurrency: Number(form.value.max_concurrency) || 5,
+    ...(mode.value === 'edit'
+      ? { max_concurrency: Number(form.value.max_concurrency) || 5 }
+      : {}),
     multimodal_model_ref: form.value.multimodal_model_ref || null,
     settings: buildAssistantSettings(),
     workspace_guide: {
@@ -834,6 +895,13 @@ function buildPayload() {
         form.value.mcp_environment_drafts?.[uuid]
       )
     }),
+    plugin_bindings:
+      form.value.mode === 'direct'
+        ? (form.value.plugin_bindings || []).map((binding) => ({
+            connection_uuid: binding.connection_uuid,
+            enabled: binding.enabled !== false
+          }))
+        : [],
     visibility: form.value.visibility || 'public',
     access_grants: buildAccessGrants(),
     status: form.value.status || 'active'
@@ -929,6 +997,7 @@ async function restore(row) {
 }
 
 onMounted(load)
+onBeforeUnmount(revokePluginIconUrls)
 </script>
 
 <style scoped>

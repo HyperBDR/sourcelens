@@ -1,0 +1,181 @@
+{
+  "key": "gitlab",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "capability_family": "plugin",
+  "display_name": "GitLab",
+  "icon": "assets/icon.svg",
+  "description": "Connect approved GitLab.com or self-managed projects with a personal access token to synchronize repository files and inspect code, commits, merge requests, and issues through read-only assistant tools.",
+  "assistant_guidance": {
+    "summary": "Use GitLab tools to inspect approved projects, repository files, and time-bounded engineering activity.",
+    "when_to_use": [
+      "The user asks for current information from an approved GitLab project.",
+      "The user asks to inspect or search code in an approved project.",
+      "The user asks for an engineering activity report over a time window."
+    ],
+    "topics": [
+      {
+        "key": "project_files",
+        "summary": "Read a file or search code inside an approved GitLab project.",
+        "details": "Use the namespace/project value selected by the Connection. Do not invent a project outside the Connection allowlist. Use a branch, tag, or commit ref when the user specifies one.",
+        "tool_keys": ["gitlab_read_file", "gitlab_search_code"]
+      },
+      {
+        "key": "activity_reports",
+        "summary": "Collect compact commits, merge requests, and issues across approved projects in one Tool call.",
+        "details": "For a time-bounded activity report, call gitlab_activity_summary once with all relevant approved projects. The Plugin makes fixed read-only GitLab REST API requests in Python, rechecks Connection scope, filters the exact time window, and returns bounded evidence. Treat partial errors and possibly_truncated as coverage limitations instead of issuing per-project retries.",
+        "tool_keys": ["gitlab_activity_summary"]
+      }
+    ]
+  },
+  "datasource_source_type": "git",
+  "datasource": {
+    "key": "gitlab_project",
+    "display_name": "GitLab project",
+    "description": "Synchronize repository files from an explicitly authorized GitLab.com or self-managed project into a LensNode workspace. Issues and merge requests remain available through read-only tools and are not synchronized as datasource content.",
+    "source_type": "git",
+    "resources": [
+      {
+        "key": "projects",
+        "display_name": "Projects"
+      },
+      {
+        "key": "branches",
+        "display_name": "Branches",
+        "depends_on": "projects"
+      }
+    ],
+    "runtime": {
+      "supports_incremental": true,
+      "supports_cancel": true,
+      "output": "workspace"
+    }
+  },
+  "handlers": {
+    "control": "python_v1",
+    "runtime": "python_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "format": "uri",
+        "title": "GitLab endpoint",
+        "description": "Public or self-managed root HTTP(S) GitLab endpoint.",
+        "default": "https://gitlab.com",
+        "write_to": "endpoint"
+      },
+      "secret_value": {
+        "type": "string",
+        "format": "password",
+        "title": "Personal access token",
+        "description": "A write-only token with read_api and read_repository access to the approved projects.",
+        "write_to": "secret_value"
+      },
+      "projects": {
+        "type": "array",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Allowed projects",
+        "description": "Explicit namespace/project values this connection may access.",
+        "write_to": "allowed_scope.projects",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": ["endpoint", "secret_value", "projects"],
+    "additionalProperties": false
+  },
+  "datasource_schema": {
+    "type": "object",
+    "properties": {
+      "project": {
+        "type": "string",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Project"
+      },
+      "branch": {
+        "type": "string",
+        "format": "provider-resource-option",
+        "resource": "branches",
+        "depends_on": "project",
+        "title": "Branch"
+      },
+      "directory": {
+        "type": "string",
+        "format": "repository-path",
+        "title": "Directory",
+        "description": "Optional project-relative directory to sync."
+      }
+    },
+    "required": ["project"],
+    "additionalProperties": false
+  },
+  "tools": [
+    {
+      "key": "gitlab_read_file",
+      "description": "Read a UTF-8 text file from an approved GitLab project.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "path": {"type": "string"},
+          "ref": {"type": "string"}
+        },
+        "required": ["project", "path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "gitlab_search_code",
+      "description": "Search code within an approved GitLab project and return bounded file metadata.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "query": {"type": "string"},
+          "path": {"type": "string"},
+          "ref": {"type": "string"},
+          "max_results": {"type": "integer"}
+        },
+        "required": ["project", "query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "gitlab_activity_summary",
+      "description": "Get compact commits, merge requests, and issues in one ISO-8601 time window across approved GitLab projects. Use this once for engineering reports. The Plugin makes fixed read-only GitLab REST API requests in Python and returns bounded projections.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "since": {"type": "string", "format": "date-time"},
+          "until": {"type": "string", "format": "date-time"},
+          "max_results": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": ["projects", "since", "until"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

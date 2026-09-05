@@ -23,10 +23,7 @@ async function mockAdminChat(
       await route.continue()
       return
     }
-    if (
-      deleteSessionOnAdminNavigation &&
-      path === '/api/v1/management/users'
-    ) {
+    if (deleteSessionOnAdminNavigation && path === '/api/v1/management/users') {
       sessionDeleted = true
     }
     if (path === '/api/lens/sessions' && request.method() === 'POST') {

@@ -11,9 +11,82 @@ import {
   eventCategory,
   groupTrajectoryRows,
   isSubagentEvent,
+  mergeTrajectoryEvents,
+  shouldKeepTrajectoryStream,
   sortTrajectoryEvents,
-  timelineLane
+  timelineLane,
+  trajectoryEventKey,
+  applyTrajectoryStreamUpdate
 } from '../src/admin/pages/lens/runTrajectory.js'
+
+test('trajectory stream merges immutable events by run and event identity', () => {
+  const existing = [
+    {
+      trace_run_uuid: 'parent',
+      event_id: 'same-id',
+      sequence: 1,
+      payload: { state: 'old' }
+    }
+  ]
+  const incoming = [
+    {
+      trace_run_uuid: 'parent',
+      event_id: 'same-id',
+      sequence: 1,
+      payload: { state: 'new' }
+    },
+    {
+      trace_run_uuid: 'child',
+      event_id: 'same-id',
+      sequence: 2
+    }
+  ]
+
+  assert.equal(trajectoryEventKey(existing[0]), 'parent:same-id')
+  assert.deepEqual(mergeTrajectoryEvents(existing, incoming), incoming)
+})
+
+test('trajectory stream rejects a revision gap and requests resync', () => {
+  const current = {
+    events: [{ trace_run_uuid: 'parent', event_id: 'one', sequence: 1 }],
+    summary: { event_count: 1 },
+    revision: 'revision-1',
+    cursor: 'cursor-1'
+  }
+
+  const result = applyTrajectoryStreamUpdate(current, {
+    type: 'append',
+    previous_revision: 'missing-revision',
+    revision: 'revision-3',
+    cursor: 'cursor-3',
+    events: [{ trace_run_uuid: 'parent', event_id: 'three', sequence: 3 }]
+  })
+
+  assert.equal(result.requiresResync, true)
+  assert.deepEqual(result.events, current.events)
+  assert.equal(result.revision, current.revision)
+})
+
+test('trajectory stream stays connected until terminal completion is confirmed', () => {
+  assert.equal(
+    shouldKeepTrajectoryStream({
+      active: true,
+      runUuid: 'run-1',
+      runStatus: 'done',
+      awaitingDone: true
+    }),
+    true
+  )
+  assert.equal(
+    shouldKeepTrajectoryStream({
+      active: true,
+      runUuid: 'run-1',
+      runStatus: 'done',
+      awaitingDone: false
+    }),
+    false
+  )
+})
 
 test('child Run progress excludes the coordinator and keeps task context', () => {
   const progress = childRunProgress({

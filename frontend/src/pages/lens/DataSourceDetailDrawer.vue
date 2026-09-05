@@ -30,154 +30,193 @@
     </template>
 
     <div v-if="datasource">
-      <div v-show="activeTab === 'basic'" class="space-y-6">
-        <section>
-          <h3 class="mb-4 text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceDetail.basicInfo') }}
-          </h3>
-          <dl class="grid grid-cols-1 gap-4">
-            <div>
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
-              >
-                {{ t('lensAdmin.fields.name') }}
-              </dt>
-              <dd class="break-words text-sm font-medium text-ink-900">
-                {{ datasource.name || emptyValue }}
-              </dd>
-            </div>
-            <div>
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
-              >
-                UUID
-              </dt>
-              <dd
-                class="break-words font-mono text-xs font-medium text-ink-900"
-              >
-                {{ datasource.uuid }}
-              </dd>
-            </div>
-            <div>
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
-              >
-                {{ t('lensAdmin.fields.status') }}
-              </dt>
-              <dd>
-                <StatusBadge :status="datasource.status" />
-              </dd>
-            </div>
-          </dl>
-        </section>
-
-        <section class="border-t border-line pt-6">
-          <h3 class="mb-4 text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceDetail.connection') }}
-          </h3>
-          <dl class="grid grid-cols-1 gap-4">
-            <div v-for="item in datasourceConnectionDetails" :key="item.label">
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
-              >
+      <div v-show="activeTab === 'basic'" class="space-y-4">
+        <section
+          class="datasource-overview-block rounded-xl border border-line bg-surface p-4"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceDetail.basicInfo') }}
+            </h3>
+            <StatusBadge :status="datasource.status" />
+          </div>
+          <dl
+            class="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
+          >
+            <div
+              v-for="item in datasourceOverviewDetails"
+              :key="item.label"
+              class="min-w-0 bg-surface-sunken px-3 py-2.5"
+              :class="item.wide ? 'col-span-2' : ''"
+            >
+              <dt class="text-[11px] font-medium text-ink-500">
                 {{ item.label }}
               </dt>
               <dd
-                class="break-words text-sm font-medium text-ink-900"
+                class="mt-1 truncate text-sm font-medium text-ink-900"
                 :class="item.mono ? 'font-mono text-xs' : ''"
+                :title="item.value"
               >
                 {{ item.value }}
               </dd>
             </div>
           </dl>
-          <div v-if="organizationRepositories.length" class="mt-5">
-            <h4
-              class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-600"
+        </section>
+
+        <section
+          class="datasource-resource-block rounded-xl border border-line bg-surface p-4"
+        >
+          <h3 class="text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceDetail.resourceAndTarget') }}
+          </h3>
+          <dl
+            class="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
+          >
+            <div
+              v-for="item in datasourceResourceDetails"
+              :key="item.label"
+              class="min-w-0 bg-surface-sunken px-3 py-2.5"
+              :class="item.wide ? 'col-span-2' : ''"
             >
-              {{ t('lensAdmin.datasourceDetail.repositories') }}
-            </h4>
-            <div class="space-y-2">
-              <div
-                v-for="repo in organizationRepositories"
-                :key="repo.repo_url || repo.name || repo.path"
-                class="rounded-md border border-line bg-surface-sunken px-3 py-2"
+              <dt class="text-[11px] font-medium text-ink-500">
+                {{ item.label }}
+              </dt>
+              <dd
+                class="mt-1 break-words text-sm font-medium text-ink-900"
+                :class="item.mono ? 'font-mono text-xs' : ''"
               >
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span
-                    class="inline-flex max-w-full items-center rounded-md border border-primary-200 bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700"
-                    :title="repo.name || repo.path || repo.repo_url"
-                  >
-                    <span class="max-w-56 truncate">
-                      {{ repo.name || repo.path || repo.repo_url }}
-                    </span>
-                  </span>
-                  <span
-                    v-if="repo.branch"
-                    class="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
-                  >
-                    {{ repo.branch || emptyValue }}
-                  </span>
-                </div>
                 <a
-                  v-if="repo.repo_url"
-                  class="mt-1.5 block break-all font-mono text-xs text-brand-600 hover:text-brand-700"
-                  :href="repo.repo_url"
+                  v-if="item.href"
+                  class="line-clamp-2 break-all text-brand-600 hover:text-brand-700"
+                  :href="item.href"
+                  :title="item.value"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {{ repo.repo_url }}
+                  {{ item.value }}
                 </a>
+                <template v-else>{{ item.value }}</template>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="organizationRepositories.length" class="mt-3 space-y-2">
+            <div
+              v-for="repo in organizationRepositories"
+              :key="repo.repo_url || repo.name || repo.path"
+              class="rounded-lg border border-line bg-surface-sunken px-3 py-2"
+            >
+              <div class="flex min-w-0 items-center gap-2">
+                <span
+                  class="min-w-0 flex-1 truncate text-xs font-medium text-ink-800"
+                  :title="repo.name || repo.path || repo.repo_url"
+                >
+                  {{ repo.name || repo.path || repo.repo_url }}
+                </span>
+                <span
+                  v-if="repo.branch"
+                  class="max-w-40 shrink-0 truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
+                  :title="repo.branch"
+                >
+                  {{ repo.branch }}
+                </span>
               </div>
+              <a
+                v-if="repo.repo_url"
+                class="mt-1 block truncate font-mono text-xs text-brand-600 hover:text-brand-700"
+                :href="repo.repo_url"
+                :title="repo.repo_url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ repo.repo_url }}
+              </a>
             </div>
           </div>
         </section>
 
         <section
           v-if="datasource.source_type !== 'managed_workspace'"
-          class="border-t border-line pt-6"
+          class="datasource-sync-block rounded-xl border border-line bg-surface p-4"
         >
-          <h3 class="mb-4 text-sm font-semibold text-ink-900">
+          <h3 class="text-sm font-semibold text-ink-900">
             {{ t('lensAdmin.datasourceDetail.sync') }}
           </h3>
-          <dl class="grid grid-cols-1 gap-4">
-            <div v-for="item in datasourceSyncDetails" :key="item.label">
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
-              >
+          <dl class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div
+              v-for="item in datasourceSyncDetails"
+              :key="item.label"
+              class="min-w-0 rounded-lg bg-surface-sunken px-3 py-2.5"
+              :class="item.wide ? 'col-span-2 sm:col-span-3' : ''"
+            >
+              <dt class="text-[11px] font-medium text-ink-500">
                 {{ item.label }}
               </dt>
               <dd
-                class="break-words text-sm font-medium text-ink-900"
+                class="mt-1 truncate text-sm font-medium text-ink-900"
                 :class="item.mono ? 'font-mono text-xs' : ''"
+                :title="item.value"
               >
                 {{ item.value }}
               </dd>
             </div>
           </dl>
+          <div
+            v-if="datasourceSyncError"
+            class="mt-3 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2.5"
+          >
+            <p class="text-[11px] font-medium text-danger-600">
+              {{ t('lensAdmin.datasourceDetail.lastError') }}
+            </p>
+            <p class="mt-1 break-words font-mono text-xs text-danger-700">
+              {{ datasourceSyncError }}
+            </p>
+          </div>
         </section>
 
         <section
           v-if="datasource.source_type !== 'managed_workspace'"
-          class="border-t border-line pt-6"
+          class="datasource-retrieval-block rounded-xl border border-line bg-surface p-4"
         >
-          <h3 class="mb-4 text-sm font-semibold text-ink-900">
+          <h3 class="text-sm font-semibold text-ink-900">
             {{ t('lensAdmin.datasourceDetail.retrieval') }}
           </h3>
-          <dl class="grid grid-cols-1 gap-4">
-            <div v-for="item in datasourceRetrievalDetails" :key="item.label">
-              <dt
-                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
+          <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <article
+              v-for="group in datasourceRetrievalGroups"
+              :key="group.key"
+              class="rounded-lg bg-surface-sunken p-3"
+              :class="group.wide ? 'sm:col-span-2' : ''"
+            >
+              <h4 class="text-xs font-semibold text-ink-800">
+                {{ group.title }}
+              </h4>
+              <dl
+                class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3"
+                :class="group.wide ? 'sm:grid-cols-4' : ''"
               >
-                {{ item.label }}
-              </dt>
-              <dd
-                class="break-words text-sm font-medium text-ink-900"
-                :class="item.mono ? 'font-mono text-xs' : ''"
-              >
-                {{ item.value }}
-              </dd>
-            </div>
-          </dl>
+                <div
+                  v-for="item in group.items"
+                  :key="item.label"
+                  class="min-w-0"
+                  :class="item.wide ? 'col-span-2' : ''"
+                >
+                  <dt class="text-[11px] leading-4 text-ink-500">
+                    {{ item.label }}
+                  </dt>
+                  <dd
+                    class="mt-1 break-words text-xs font-medium text-ink-800"
+                    :class="[
+                      item.mono ? 'font-mono' : '',
+                      item.enabled === true ? 'text-success-700' : '',
+                      item.enabled === false ? 'text-ink-500' : ''
+                    ]"
+                  >
+                    {{ item.value }}
+                  </dd>
+                </div>
+              </dl>
+            </article>
+          </div>
         </section>
       </div>
       <div v-show="activeTab === 'details'" class="space-y-6">
@@ -186,7 +225,7 @@
         >
           <ul class="divide-y divide-line bg-surface">
             <li
-              class="grid grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 bg-surface-sunken px-4 py-2 text-center text-xs font-semibold uppercase tracking-wider text-ink-600"
+              class="hidden grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 bg-surface-sunken px-4 py-2 text-center text-xs font-semibold uppercase tracking-wider text-ink-600 sm:grid"
             >
               <span>{{
                 t('lensAdmin.datasourceDetail.details.colTaskName')
@@ -229,7 +268,63 @@
                 "
               >
                 <div
-                  class="grid grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 px-4 py-2 text-center text-sm"
+                  class="px-3 py-3 sm:hidden"
+                  :class="
+                    tasksLoading
+                      ? 'cursor-not-allowed opacity-60'
+                      : 'cursor-pointer'
+                  "
+                  @click="toggleTaskExpand(task)"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <span
+                      class="min-w-0 flex-1 truncate text-sm font-medium text-ink-900"
+                      :title="task.task_name"
+                    >
+                      {{ task.task_name || '-' }}
+                    </span>
+                    <div class="flex shrink-0 items-center gap-2">
+                      <StatusBadge :status="mapTaskStatus(task.status)" />
+                      <span
+                        class="text-ink-400 transition-transform duration-150"
+                        :class="expandedTaskId === task.id ? 'rotate-90' : ''"
+                        >▸</span
+                      >
+                    </div>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-3 gap-2">
+                    <div class="min-w-0">
+                      <dt class="text-[11px] text-ink-500">
+                        {{
+                          t('lensAdmin.datasourceDetail.details.colStartedAt')
+                        }}
+                      </dt>
+                      <dd class="mt-0.5 truncate text-xs text-ink-800">
+                        {{ formatDateTime(task.started_at) }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[11px] text-ink-500">
+                        {{ t('lensAdmin.datasourceDetail.details.colTrigger') }}
+                      </dt>
+                      <dd class="mt-0.5 truncate text-xs text-ink-800">
+                        {{ formatTrigger(task) }}
+                      </dd>
+                    </div>
+                    <div class="min-w-0">
+                      <dt class="text-[11px] text-ink-500">
+                        {{
+                          t('lensAdmin.datasourceDetail.details.colDuration')
+                        }}
+                      </dt>
+                      <dd class="mt-0.5 truncate text-xs text-ink-800">
+                        {{ formatDuration(task.duration) }}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+                <div
+                  class="hidden grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 px-4 py-2 text-center text-sm sm:grid"
                   :class="
                     tasksLoading
                       ? 'cursor-not-allowed opacity-60'
@@ -339,6 +434,44 @@
     <div v-else class="py-12 text-center text-sm text-ink-500">
       {{ t('lensAdmin.datasourceDetail.selectHint') }}
     </div>
+    <template v-if="datasource" #footer>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <BaseButton
+          variant="outline"
+          @click="$emit('toggle-enabled', datasource)"
+        >
+          {{
+            datasource.status === 'active'
+              ? t('lensAdmin.actions.disableDatasource')
+              : t('lensAdmin.actions.enableDatasource')
+          }}
+        </BaseButton>
+        <div class="flex flex-wrap gap-2">
+          <BaseButton
+            v-if="datasource.source_type === 'managed_workspace'"
+            variant="outline"
+            @click="$emit('upload', datasource)"
+            >{{ t('lensAdmin.actions.uploadFile') }}</BaseButton
+          >
+          <BaseButton
+            v-else-if="isDataSourceSyncing(datasource)"
+            variant="danger"
+            @click="$emit('cancel-sync', datasource)"
+            >{{ t('lensAdmin.actions.cancelSync') }}</BaseButton
+          >
+          <BaseButton
+            v-else
+            variant="outline"
+            :disabled="datasource.status !== 'active'"
+            @click="$emit('sync', datasource)"
+            >{{ t('lensAdmin.actions.sync') }}</BaseButton
+          >
+          <BaseButton variant="primary" @click="$emit('edit', datasource)">{{
+            t('common.edit')
+          }}</BaseButton>
+        </div>
+      </div>
+    </template>
   </BaseDrawer>
 </template>
 
@@ -365,8 +498,9 @@ import {
   normalizeList
 } from './adminHelpers'
 import {
+  dataSourceBranch,
   dataSourceRepositories,
-  formatDocIds,
+  dataSourceRepositoryUrl,
   isDataSourceSyncing
 } from './datasourceHelpers'
 import { useShortDateTime } from './useShortDateTime'
@@ -377,7 +511,14 @@ const props = defineProps({
   lensnodes: { type: Array, default: () => [] }
 })
 
-defineEmits(['close'])
+defineEmits([
+  'cancel-sync',
+  'close',
+  'edit',
+  'sync',
+  'toggle-enabled',
+  'upload'
+])
 
 const { t } = useI18n()
 const formatDateTime = useShortDateTime()
@@ -735,13 +876,18 @@ function lensNodeName(value) {
   return found?.name || uuid || emptyValue
 }
 
-function detailItem(label, value, mono = false) {
+function detailItem(label, value, mono = false, options = {}) {
   const normalized = Array.isArray(value) ? value.join(', ') : value
   return {
     label,
     value: normalized || emptyValue,
-    mono
+    mono,
+    ...options
   }
+}
+
+function settingItem(label, value, enabled = null, options = {}) {
+  return detailItem(label, value, false, { enabled, ...options })
 }
 
 function booleanLabel(value) {
@@ -759,65 +905,107 @@ function modelLabel(modelRef) {
   })
 }
 
-const datasourceConnectionDetails = computed(() => {
+const datasourceOverviewDetails = computed(() => {
+  const row = props.datasource
+  if (!row) return []
+  return [
+    detailItem(t('lensAdmin.fields.name'), row.name),
+    detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+    detailItem(
+      t('lensAdmin.datasourceDetail.connection'),
+      row.connection_name ||
+        (row.connection
+          ? compactUuid(
+              typeof row.connection === 'object'
+                ? row.connection.uuid
+                : row.connection
+            )
+          : t('lensAdmin.datasourceDetail.legacyConnection'))
+    ),
+    detailItem('UUID', row.uuid, true)
+  ]
+})
+
+const datasourceResourceDetails = computed(() => {
   const row = props.datasource
   if (!row) return []
   const config = row.config || {}
   if (row.source_type === 'managed_workspace') {
     return [
-      detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+      detailItem(
+        t('lensAdmin.fields.lensnode'),
+        row.lensnode_name || lensNodeName(row.lensnode)
+      ),
+      detailItem(
+        t('lensAdmin.availability.title'),
+        t(`lensAdmin.availability.${row.availability_status || 'unknown'}`)
+      ),
+      detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true, {
+        wide: true
+      }),
+      detailItem(
+        t('lensAdmin.availability.checkedAt'),
+        formatDateTime(row.availability_checked_at)
+      ),
+      detailItem(
+        t('lensAdmin.availability.message'),
+        row.availability_message,
+        false,
+        { wide: true }
+      )
+    ]
+  }
+  if (row.source_type === 'git') {
+    const repositories = dataSourceRepositories(row)
+    const repositoryUrl = dataSourceRepositoryUrl(row, row.connection_endpoint)
+    const items = [
+      detailItem(t('lensAdmin.fields.repoUrl'), repositoryUrl, true, {
+        href: isHttpUrl(repositoryUrl) ? repositoryUrl : '',
+        wide: true
+      }),
       detailItem(
         t('lensAdmin.fields.lensnode'),
         row.lensnode_name || lensNodeName(row.lensnode)
       ),
       detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
       detailItem(
-        t('lensAdmin.availability.title'),
-        t(`lensAdmin.availability.${row.availability_status || 'unknown'}`)
-      ),
-      detailItem(
-        t('lensAdmin.availability.checkedAt'),
-        formatDateTime(row.availability_checked_at)
-      ),
-      detailItem(t('lensAdmin.availability.message'), row.availability_message)
-    ]
-  }
-  if (row.source_type === 'git') {
-    const repositories = dataSourceRepositories(row)
-    const items = [
-      detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
-      detailItem(
-        t('lensAdmin.fields.repoUrl'),
-        config.organization_url || config.repo_url,
-        true
-      ),
-      detailItem(
         t('lensAdmin.fields.authScheme'),
-        authSchemeLabel(config.auth_scheme)
-      ),
-      detailItem(
-        t('lensAdmin.datasourceDetail.credential'),
-        row.credential_configured
-          ? t('common.status.enabled')
-          : t('common.status.disabled')
+        row.connection
+          ? t('lensAdmin.datasourceDetail.connectionManaged')
+          : authSchemeLabel(config.auth_scheme)
       )
     ]
     if (!repositories.length) {
       items.splice(
-        2,
+        1,
         0,
-        detailItem(t('lensAdmin.fields.branch'), config.branch || 'main', true)
+        detailItem(t('lensAdmin.fields.branch'), dataSourceBranch(row), true)
       )
     }
     return items
   }
+  const resourceUrls = Array.isArray(row.datasource_config?.resource_urls)
+    ? row.datasource_config.resource_urls
+    : [config.folder_url, config.document_url].filter(Boolean)
   return [
-    detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+    ...resourceUrls.map((url, index) =>
+      detailItem(
+        resourceUrls.length > 1
+          ? `${t('lensAdmin.fields.url')} ${index + 1}`
+          : t('lensAdmin.fields.url'),
+        url,
+        true,
+        { href: isHttpUrl(url) ? url : '', wide: true }
+      )
+    ),
     detailItem(t('lensAdmin.fields.syncScope'), feishuScopeLabel()),
-    detailItem(t('lensAdmin.fields.folderUrl'), config.folder_url, true),
-    detailItem(t('lensAdmin.fields.folderToken'), config.folder_token, true),
-    detailItem(t('lensAdmin.fields.documentUrl'), config.document_url, true),
-    detailItem(t('lensAdmin.fields.docIds'), formatDocIds(config.doc_ids), true)
+    detailItem(
+      t('lensAdmin.fields.lensnode'),
+      row.lensnode_name || lensNodeName(row.lensnode)
+    ),
+    detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true, {
+      wide: true
+    })
   ].filter((item) => item.value !== emptyValue)
 })
 
@@ -830,11 +1018,6 @@ const datasourceSyncDetails = computed(() => {
   if (!row) return []
   return [
     detailItem(
-      t('lensAdmin.fields.lensnode'),
-      row.lensnode_name || lensNodeName(row.lensnode)
-    ),
-    detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
-    detailItem(
       t('lensAdmin.fields.syncInterval'),
       formatSyncPolicy(row.sync_policy)
     ),
@@ -843,9 +1026,12 @@ const datasourceSyncDetails = computed(() => {
       formatDateTime(row.last_synced_at)
     ),
     detailItem(
-      t('lensAdmin.datasourceDetail.lastError'),
-      lensNodeErrorMessage(row.last_error, t) || row.last_error,
-      true
+      t('lensAdmin.table.nextSync'),
+      formatDateTime(row.sync_state?.next_run_at)
+    ),
+    detailItem(
+      t('lensAdmin.datasourceDetail.lastStatus'),
+      syncStatusLabel(row.sync_state?.last_status)
     ),
     detailItem(
       t('lensAdmin.datasourceDetail.createdAt'),
@@ -858,69 +1044,130 @@ const datasourceSyncDetails = computed(() => {
   ]
 })
 
-const datasourceRetrievalDetails = computed(() => {
+const datasourceSyncError = computed(() => {
+  const row = props.datasource
+  return lensNodeErrorMessage(row?.last_error, t) || row?.last_error || ''
+})
+
+function syncStatusLabel(status) {
+  const normalized = String(status || '').toLowerCase()
+  const statusKey = {
+    running: 'processing',
+    success: 'success',
+    failed: 'failed',
+    processing: 'processing',
+    pending: 'pending',
+    cancelled: 'cancelled'
+  }[normalized]
+  if (statusKey) {
+    return t(`common.status.${statusKey}`)
+  }
+  return status || emptyValue
+}
+
+const datasourceRetrievalGroups = computed(() => {
   const conversion = props.datasource?.sync_policy?.conversion || {}
   return [
-    detailItem(
-      t('lensAdmin.datasourceWizard.convertDocuments'),
-      booleanLabel(conversion.document)
-    ),
-    detailItem(
-      t('lensAdmin.fields.documentModel'),
-      modelLabel(conversion.document_model_ref)
-    ),
-    detailItem(
-      t('lensAdmin.datasourceWizard.convertImages'),
-      booleanLabel(conversion.image)
-    ),
-    detailItem(
-      t('lensAdmin.fields.visionModel'),
-      modelLabel(conversion.vision_model_ref)
-    ),
-    detailItem(
-      t('lensAdmin.datasourceWizard.convertEmbeddedImages'),
-      booleanLabel(conversion.embedded_image)
-    ),
-    detailItem(
-      t('lensAdmin.fields.maxFileSizeMb'),
-      conversion.max_file_size_mb || 100
-    ),
-    detailItem(t('lensAdmin.fields.maxPages'), conversion.max_pages || 500),
-    detailItem(t('lensAdmin.fields.maxImages'), conversion.max_images || 100),
-    detailItem(
-      t('lensAdmin.datasourceWizard.pdfExtractImages'),
-      booleanLabel(conversion.pdf_extract_images !== false)
-    ),
-    detailItem(
-      t('lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages'),
-      booleanLabel(conversion.pdf_extract_images_on_text_pages)
-    ),
-    detailItem(
-      t('lensAdmin.datasourceWizard.pdfRenderScannedPages'),
-      booleanLabel(conversion.pdf_render_scanned_pages)
-    ),
-    detailItem(
-      t('lensAdmin.fields.pdfMaxPages'),
-      conversion.pdf_max_pages || 30
-    ),
-    detailItem(
-      t('lensAdmin.fields.pdfMaxImagesPerPage'),
-      conversion.pdf_max_images_per_page || 3
-    ),
-    detailItem(
-      t('lensAdmin.fields.pdfRenderDpi'),
-      conversion.pdf_render_dpi || 144
-    ),
-    detailItem(
-      t('lensAdmin.fields.pdfMinTextChars'),
-      conversion.pdf_min_text_chars || 30
-    ),
-    detailItem(
-      t('lensAdmin.fields.pdfMinImageAreaRatio'),
-      conversion.pdf_min_image_area_ratio || 0.08
-    )
+    {
+      key: 'document',
+      title: t('lensAdmin.datasourceDetail.processing.document'),
+      items: [
+        settingItem(
+          t('lensAdmin.datasourceWizard.convertDocuments'),
+          booleanLabel(conversion.document),
+          Boolean(conversion.document),
+          { wide: true }
+        ),
+        settingItem(
+          t('lensAdmin.fields.documentModel'),
+          modelLabel(conversion.document_model_ref),
+          null,
+          { wide: true }
+        ),
+        settingItem(
+          t('lensAdmin.fields.maxFileSizeMb'),
+          conversion.max_file_size_mb || 100
+        ),
+        settingItem(t('lensAdmin.fields.maxPages'), conversion.max_pages || 500)
+      ]
+    },
+    {
+      key: 'image',
+      title: t('lensAdmin.datasourceDetail.processing.image'),
+      items: [
+        settingItem(
+          t('lensAdmin.datasourceWizard.convertImages'),
+          booleanLabel(conversion.image),
+          Boolean(conversion.image)
+        ),
+        settingItem(
+          t('lensAdmin.datasourceWizard.convertEmbeddedImages'),
+          booleanLabel(conversion.embedded_image),
+          Boolean(conversion.embedded_image)
+        ),
+        settingItem(
+          t('lensAdmin.fields.visionModel'),
+          modelLabel(conversion.vision_model_ref),
+          null,
+          { wide: true }
+        ),
+        settingItem(
+          t('lensAdmin.fields.maxImages'),
+          conversion.max_images || 100
+        )
+      ]
+    },
+    {
+      key: 'pdf',
+      title: t('lensAdmin.datasourceDetail.processing.pdf'),
+      wide: true,
+      items: [
+        settingItem(
+          t('lensAdmin.datasourceWizard.pdfExtractImages'),
+          booleanLabel(conversion.pdf_extract_images !== false),
+          conversion.pdf_extract_images !== false
+        ),
+        settingItem(
+          t('lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages'),
+          booleanLabel(conversion.pdf_extract_images_on_text_pages),
+          Boolean(conversion.pdf_extract_images_on_text_pages)
+        ),
+        settingItem(
+          t('lensAdmin.datasourceWizard.pdfRenderScannedPages'),
+          booleanLabel(conversion.pdf_render_scanned_pages),
+          Boolean(conversion.pdf_render_scanned_pages),
+          { wide: true }
+        ),
+        settingItem(
+          t('lensAdmin.fields.pdfMaxPages'),
+          conversion.pdf_max_pages || 30
+        ),
+        settingItem(
+          t('lensAdmin.fields.pdfMaxImagesPerPage'),
+          conversion.pdf_max_images_per_page || 3
+        ),
+        settingItem(
+          t('lensAdmin.fields.pdfRenderDpi'),
+          conversion.pdf_render_dpi || 144
+        ),
+        settingItem(
+          t('lensAdmin.fields.pdfMinTextChars'),
+          conversion.pdf_min_text_chars || 30
+        ),
+        settingItem(
+          t('lensAdmin.fields.pdfMinImageAreaRatio'),
+          conversion.pdf_min_image_area_ratio || 0.08,
+          null,
+          { wide: true }
+        )
+      ]
+    }
   ]
 })
+
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || ''))
+}
 </script>
 
 <style scoped>

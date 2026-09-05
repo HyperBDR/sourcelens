@@ -90,6 +90,63 @@ export async function getAdminRunTrajectory(runUuid, params = {}) {
   return unwrapResponse(response)
 }
 
+export async function streamAdminRunTrajectory(
+  runUuid,
+  {
+    cursor = '',
+    revision = '',
+    sequence = 0,
+    q = '',
+    category = '',
+    signal,
+    onEvent
+  } = {}
+) {
+  const params = new URLSearchParams()
+  if (cursor) params.set('cursor', cursor)
+  if (revision) params.set('revision', revision)
+  if (sequence) params.set('sequence', String(sequence))
+  if (q) params.set('q', q)
+  if (category) params.set('category', category)
+  const query = params.toString()
+  const baseUrl = String(api.defaults.baseURL || '/api').replace(/\/$/, '')
+  const token = localStorage.getItem('access_token')
+  const headers = { Accept: 'text/event-stream' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(
+    `${baseUrl}/lens/admin/runs/${runUuid}/trajectory/stream/${query ? `?${query}` : ''}`,
+    {
+      credentials: 'include',
+      headers,
+      signal
+    }
+  )
+  if (!response.ok || !response.body) {
+    const error = new Error('Trajectory stream failed')
+    error.response = { status: response.status }
+    throw error
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() || ''
+    for (const frame of frames) {
+      const data = frame
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n')
+      if (data) onEvent?.(JSON.parse(data))
+    }
+  }
+}
+
 export async function getAdminRunTrajectoryExport(runUuid) {
   const events = []
   let afterSequence = 0
@@ -388,6 +445,120 @@ export async function validateCredential(uuid) {
 
 export async function deleteCredential(uuid) {
   const response = await api.delete(`/lens/admin/credentials/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function listPlugins() {
+  const response = await api.get('/lens/admin/plugins/')
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function getPluginManifest(key) {
+  const response = await api.get(`/lens/admin/plugins/${key}/manifest/`)
+  return unwrapResponse(response)
+}
+
+export async function getPluginIcon(key) {
+  const response = await api.get(`/lens/admin/plugins/${key}/icon/`, {
+    responseType: 'blob'
+  })
+  return response.data
+}
+
+export async function listPluginReleases() {
+  const response = await api.get('/lens/admin/plugins/releases/')
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function reconcilePluginReleases() {
+  const response = await api.post('/lens/admin/plugins/releases/reconcile/')
+  return unwrapResponse(response)
+}
+
+export async function publishPluginRelease(key, version) {
+  const response = await api.post(
+    `/lens/admin/plugins/${key}/releases/${version}/publish/`
+  )
+  return unwrapResponse(response)
+}
+
+export async function setPluginReleaseRole(key, version, deploymentRole) {
+  const response = await api.post(
+    `/lens/admin/plugins/${key}/releases/${version}/role/`,
+    { deployment_role: deploymentRole }
+  )
+  return unwrapResponse(response)
+}
+
+export async function retirePluginRelease(key, version) {
+  const response = await api.post(
+    `/lens/admin/plugins/${key}/releases/${version}/retire/`
+  )
+  return unwrapResponse(response)
+}
+
+export async function listConnections(params = {}) {
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/connections/', {
+      params: { page_size: 1000, ...params, page }
+    })
+    return unwrapResponse(response)
+  })
+}
+
+export async function createConnection(payload) {
+  const response = await api.post('/lens/admin/connections/', payload)
+  return unwrapResponse(response)
+}
+
+export async function updateConnection(uuid, payload) {
+  const response = await api.patch(`/lens/admin/connections/${uuid}/`, payload)
+  return unwrapResponse(response)
+}
+
+export async function deleteConnection(uuid) {
+  const response = await api.delete(`/lens/admin/connections/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function validateConnection(uuid) {
+  const response = await api.post(`/lens/admin/connections/${uuid}/validate/`)
+  return unwrapResponse(response)
+}
+
+export async function validateConnectionDatasource(uuid, payload) {
+  const response = await api.post(
+    `/lens/admin/connections/${uuid}/validate-datasource/`,
+    payload,
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+  return unwrapResponse(response)
+}
+
+export async function getConnectionResources(uuid, params = {}) {
+  const response = await api.get(`/lens/admin/connections/${uuid}/resources/`, {
+    params
+  })
+  return unwrapResponse(response)
+}
+
+export async function getConnectionResourceCandidates(uuid, params = {}) {
+  const response = await api.get(
+    `/lens/admin/connections/${uuid}/resource-candidates/`,
+    {
+      params,
+      headers: { 'Cache-Control': 'no-store' }
+    }
+  )
+  return unwrapResponse(response)
+}
+
+export async function previewConnectionResources(payload) {
+  const response = await api.post(
+    '/lens/admin/connections/resource-preview/',
+    payload,
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
   return unwrapResponse(response)
 }
 

@@ -49,9 +49,13 @@ from ..planned_evidence import (
     validate_citations,
     validate_evidence_sufficiency,
 )
+from ..plugin_tools import (
+    build_plugin_tools,
+)
 from ..runtime_modes import runtime_mode_for
 from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
+from .capability_protocol import CAPABILITY_FAMILIES
 from .direct_answer import (
     _answer_general_chat_directly,
     _contains_unfulfilled_action_promise,
@@ -109,6 +113,8 @@ from .system_prompts import (
     _context_guidance,
     _general_chat_guidance,
     _general_chat_system_prompt,
+    _activity_report_batch_tools,
+    _is_activity_report,
     _is_general_chat,
     _knowledge_system_prompt,
     _subagent_guidance,
@@ -124,6 +130,47 @@ from ..runtime_resources import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+
+
+def _high_confidence_report_route(command):
+    """Route an explicit batch-capable report without a classifier call."""
+
+    if not _is_activity_report(command):
+        return None
+    return {
+        "intent": "action",
+        "complexity": "complex",
+        "route": "plan_execute",
+        "required_capabilities": ["plugin"],
+        "evidence_requirement": "tool_result",
+    }
+
+
+def _report_scoped_tools(command, tools):
+    """Expose only batch Tools for each available report source."""
+
+    if (
+        command.get("runtime_route") != "plan_execute"
+        or not _is_activity_report(command)
+    ):
+        return list(tools)
+    batch_tools = _activity_report_batch_tools(command)
+    batch_by_plugin = {
+        key.split("_", 1)[0]: key
+        for key in batch_tools
+    }
+    return [
+        tool
+        for tool in tools
+        if (
+            (getattr(tool, "metadata", None) or {}).get("plugin_key")
+            not in batch_by_plugin
+            or getattr(tool, "name", "")
+            == batch_by_plugin.get(
+                (getattr(tool, "metadata", None) or {}).get("plugin_key")
+            )
+        )
+    ]
 MAX_CONFIGURED_SUBAGENTS = 8
 
 _MAX_PRESENTED_CITATIONS = 5
@@ -264,9 +311,10 @@ def _build_summarization_middleware(
 class LensDeepAgentRuntime:
     """Run a real LangChain Deep Agents execution for one LensNode command."""
 
-    def __init__(self, config, http_client=None):
+    def __init__(self, config, http_client=None, plugin_http_pool=None):
         self.config = config
         self.http_client = http_client
+        self.plugin_http_pool = plugin_http_pool
 
     async def answer(
         self,
@@ -362,6 +410,8 @@ class LensDeepAgentRuntime:
             return state.command.get("task") != "code_analysis"
         if not state.runtime_mode.general_chat:
             return state.command.get("task") != "code_analysis"
+        if _is_activity_report(state.command):
+            return False
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
 
@@ -776,6 +826,14 @@ class LensDeepAgentRuntime:
                 self.config,
                 emit_event=state.emit_agent_event,
             )
+        state.plugin_tools = build_plugin_tools(
+            state.command,
+            self.config,
+            self.http_client,
+            emit_event=state.emit_agent_event,
+            plugin_http_pool=self.plugin_http_pool,
+        )
+        state.tools.extend(state.plugin_tools)
         state.mcp_tools = load_mcp_tools(
             state.resources.mcp_configs,
             discovery_timeout_s=getattr(
@@ -850,6 +908,7 @@ class LensDeepAgentRuntime:
             return None
         if not state.runtime_mode.execution_gates:
             return None
+
         routing_started_at = time.monotonic()
         state.emit_agent_event(
             "deepagents.runtime.stage.start",
@@ -867,7 +926,9 @@ class LensDeepAgentRuntime:
                     self._seed_run_checkpoint(state)
                 except Exception:
                     LOGGER.exception("Failed to enable route checkpoint")
-            state.route_decision = _select_general_chat_route(
+            state.route_decision = _high_confidence_report_route(
+                state.command
+            ) or _select_general_chat_route(
                 state.model,
                 state.question,
                 history=state.command.get("history"),
@@ -902,6 +963,22 @@ class LensDeepAgentRuntime:
             **state.command,
             "runtime_route": state.route_decision["route"],
         }
+        state_tools = getattr(state, "tools", [])
+        original_tool_count = len(state_tools)
+        state.tools = _report_scoped_tools(state.command, state_tools)
+        state.plugin_tools = _report_scoped_tools(
+            state.command,
+            getattr(state, "plugin_tools", []),
+        )
+        removed_tool_count = original_tool_count - len(state.tools)
+        if removed_tool_count:
+            state.emit_agent_event(
+                "deepagents.report.tools_scoped",
+                {
+                    "removed_tool_count": removed_tool_count,
+                    "remaining_tool_count": len(state.tools),
+                },
+            )
         state.emit_user_event(
             "route.resumed" if route_was_resumed else "route.selected",
             state.route_decision,
@@ -918,14 +995,7 @@ class LensDeepAgentRuntime:
                 (
                     item
                     for item in required
-                    if item
-                    in {
-                        "artifact_delivery",
-                        "mcp",
-                        "skill",
-                        "tool",
-                        "workspace",
-                    }
+                    if item in CAPABILITY_FAMILIES or item == "tool"
                 ),
                 "tool",
             )
@@ -1137,6 +1207,7 @@ class LensDeepAgentRuntime:
                 "tool_count": len(state.tools),
                 "skill_count": len(state.resources.skill_paths),
                 "mcp_tool_count": len(state.mcp_tools),
+                "plugin_tool_count": len(state.plugin_tools),
                 "mcp_deferred": state.mcp_middleware is not None,
                 "task_tool_enabled": use_subagents,
                 "mcp_config_path": str(state.resources.mcp_config_path),
@@ -1314,7 +1385,27 @@ class LensDeepAgentRuntime:
                 else None
             ),
             input_checkpoint_seeded=state.initial_checkpoint_seeded,
-            stream_recovery_attempts=1 if state.checkpoint_ready else 0,
+            stream_recovery_attempts=(
+                int(
+                    getattr(
+                        self.config,
+                        "stream_recovery_attempts",
+                        1,
+                    )
+                )
+                if state.checkpoint_ready
+                else 0
+            ),
+            stream_recovery_backoff_s=float(
+                getattr(self.config, "stream_recovery_backoff_s", 1.0)
+            ),
+            stream_recovery_backoff_max_s=float(
+                getattr(
+                    self.config,
+                    "stream_recovery_backoff_max_s",
+                    8.0,
+                )
+            ),
             on_stream_recovery=(
                 (lambda: state.emit_output("", reset=True))
                 if state.emit_output is not None

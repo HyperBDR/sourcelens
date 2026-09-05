@@ -47,7 +47,8 @@ INVALID_TOOL_ARGUMENT_PREVIEW_CHARS = 1024
 TOKEN_BUDGET_WARNING = (
     "[TOKEN BUDGET WARNING] This run is approaching its token budget. "
     "Stop expanding the investigation, avoid new tool calls unless strictly "
-    "necessary, and synthesize the final answer from evidence already found."
+    "necessary. If a deliverable is required, create and save it now; "
+    "otherwise synthesize the final answer from evidence already found."
 )
 LOOP_WARNING = (
     "[LOOP DETECTED] Tool calls are repeating without a final answer. Stop "
@@ -95,6 +96,19 @@ class RunCancelledError(RuntimeError):
     """
 
     code = "RUN_CANCELLED"
+
+
+def _normalize_stream_error(error):
+    """Map transient HTTP transport failures to a recoverable stream error."""
+
+    if isinstance(error, GatewayStreamError):
+        return error
+    if isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        return GatewayStreamError(
+            "MODEL_STREAM_ERROR",
+            "AI gateway transport was interrupted.",
+        )
+    return error
 
 
 def _in_subagent_context():
@@ -196,6 +210,9 @@ class LensGatewayChatModel(BaseChatModel):
     # Lets control calls surface a "model is thinking" pulse without
     # leaking the reasoning text into the user-facing stream.
     on_reasoning_delta: Optional[Any] = None
+    # Receives cumulative OpenAI-compatible tool-call argument snapshots.
+    # The runtime uses this only for safe, user-visible plan progress.
+    on_tool_call_delta: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
     trace_context: dict[str, Any] = Field(default_factory=dict)
@@ -420,6 +437,12 @@ class LensGatewayChatModel(BaseChatModel):
                 "Run was cancelled; aborting in-flight model call."
             )
 
+    def _budgeted_max_tokens(self, requested, *, control_call, final):
+        """Pass through provider defaults until flow behavior is validated."""
+
+        del control_call, final
+        return requested
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -483,8 +506,13 @@ class LensGatewayChatModel(BaseChatModel):
             )
         if kwargs.get("temperature") is not None:
             payload["temperature"] = kwargs["temperature"]
-        if kwargs.get("max_tokens") is not None:
-            payload["max_tokens"] = kwargs["max_tokens"]
+        max_tokens = self._budgeted_max_tokens(
+            kwargs.get("max_tokens"),
+            control_call=control_call,
+            final=bool(kwargs.get("runtime_final_synthesis")),
+        )
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         effective_reasoning_effort = (
             kwargs.get("reasoning_effort") or self.reasoning_effort
         )
@@ -524,6 +552,9 @@ class LensGatewayChatModel(BaseChatModel):
                     "failed",
                     error=exc,
                 )
+                normalized = _normalize_stream_error(exc)
+                if normalized is not exc:
+                    raise normalized from exc
                 raise
             if self._should_retry_length_capped(result):
                 result = self._retry_length_capped(
@@ -898,6 +929,25 @@ class LensGatewayChatModel(BaseChatModel):
                                     reasoning_parts.append(text)
                                     if reasoning_cb is not None:
                                         reasoning_cb(text)
+                                elif (
+                                    text
+                                    and kind == "tool_call"
+                                    and self.on_tool_call_delta is not None
+                                    and not silent
+                                ):
+                                    try:
+                                        tool_delta = json.loads(text)
+                                    except (TypeError, ValueError):
+                                        tool_delta = None
+                                    if isinstance(tool_delta, dict):
+                                        try:
+                                            self.on_tool_call_delta(tool_delta)
+                                        except Exception:
+                                            LOGGER.warning(
+                                                "Tool-call delta callback "
+                                                "failed",
+                                                exc_info=True,
+                                            )
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}

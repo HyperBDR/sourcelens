@@ -20,9 +20,9 @@ from .assistant_lifecycle import (
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
 from .citations import public_run_citations, sanitize_planned_evidence
 from .datasource_services import (
-    check_datasource_path,
     DataSourceDispatchError,
     DataSourcePathError,
+    check_datasource_path,
     normalize_workspace_target_path,
     validate_datasource_lensnode,
 )
@@ -37,10 +37,11 @@ from .environment_variables import (
 from .model_checks import check_assistant_model_refs
 from .models import (
     Assistant,
-    assistant_mode_for,
     AssistantAccess,
     AssistantMCP,
+    AssistantPluginBinding,
     AssistantSkill,
+    Connection,
     DataSource,
     DataSourceCredential,
     EnvironmentVariableSet,
@@ -49,37 +50,48 @@ from .models import (
     MCPServer,
     Message,
     MessageAttachment,
+    PluginInvocation,
     Run,
     RunExecution,
     RunOutputFile,
     RunStep,
     ScheduledTask,
+    SecretMaterial,
+    SecretVersion,
     Session,
     SharedQA,
     SharedQAFile,
     Skill,
+    assistant_mode_for,
 )
+from .plugins.providers import DatasourceProviderError, get_datasource_provider
+from .plugins.registry import PluginRegistryError, installed_plugin
+from .plugins.skill_requirements import (
+    SkillPluginRequirementError,
+    validate_required_plugins,
+)
+from .routing_descriptions import refresh_routing_description
 from .runtime_events import (
     public_step_detail,
     sanitize_loaded_mcps,
     sanitize_loaded_skills,
     sanitize_termination_detail,
 )
-from .routing_descriptions import refresh_routing_description
 from .services import (
     CLARIFICATION_MAX_ORIGINAL_CHARS,
     MAX_SUBAGENTS_PER_RUN,
     assistant_supports_document_attachments,
     create_execution_run,
+    token_budget_profile_for_rounds,
     validate_retry_run,
-)
-from .vision_capabilities import (
-    resolve_model_capability,
-    validate_vision_model_ref,
 )
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
+)
+from .vision_capabilities import (
+    resolve_model_capability,
+    validate_vision_model_ref,
 )
 
 User = get_user_model()
@@ -490,6 +502,101 @@ class McpBindingsField(serializers.Field):
         return validated
 
 
+class PluginBindingsField(serializers.Field):
+    """Read/write field for Assistant Plugin connection bindings."""
+
+    def to_representation(self, bindings):
+        """Return binding identities without Connection secrets."""
+
+        return [
+            {
+                "connection_uuid": str(binding.connection.uuid),
+                "connection_name": binding.connection.name,
+                "plugin_key": binding.connection.plugin_key,
+                "tools": list(binding.tools or []),
+                "all_tools": True,
+                "enabled": binding.enabled,
+            }
+            for binding in bindings.select_related("connection").all()
+        ]
+
+    def to_internal_value(self, data):
+        """Validate Plugin connections and normalize legacy tool lists.
+
+        Direct Assistant bindings grant the complete read-only capability set
+        declared by the installed Plugin manifest.  The legacy ``tools``
+        field is accepted for wire compatibility and validated when present,
+        but it is not an allowlist for runtime dispatch.
+        """
+
+        if not isinstance(data, list):
+            raise serializers.ValidationError("Expected a list of bindings.")
+        validated = []
+        seen = set()
+        for item in data:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    "Each binding must be an object."
+                )
+            connection_uuid = item.get("connection_uuid")
+            connection = Connection.objects.select_related(
+                "secret_version__material"
+            ).filter(uuid=connection_uuid).first()
+            if connection is None:
+                raise serializers.ValidationError(
+                    "Plugin Connection does not exist."
+                )
+            if connection.pk in seen:
+                raise serializers.ValidationError(
+                    "Plugin Connection bindings must be unique."
+                )
+            if connection.status != Connection.Status.ACTIVE:
+                raise serializers.ValidationError(
+                    "Plugin Connection is disabled."
+                )
+            enabled = item.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise serializers.ValidationError(
+                    "Plugin binding enabled must be a boolean."
+                )
+            secret_version = connection.secret_version
+            if enabled and (
+                secret_version is None
+                or secret_version.status != "active"
+                or secret_version.material.status != "active"
+            ):
+                raise serializers.ValidationError(
+                    "Plugin Connection secret is unavailable."
+                )
+            try:
+                plugin = installed_plugin(connection.plugin_key)
+            except PluginRegistryError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+            available = {tool.key for tool in plugin.tools}
+            requested = item.get("tools")
+            if requested is None or requested == []:
+                requested = sorted(available)
+            if (
+                not isinstance(requested, list)
+                or not requested
+                or any(not isinstance(tool, str) for tool in requested)
+                or len(set(requested)) != len(requested)
+                or set(requested).difference(available)
+            ):
+                raise serializers.ValidationError(
+                    "Plugin tools must be installed read-only tools."
+                )
+            seen.add(connection.pk)
+            validated.append(
+                {
+                    "connection": connection,
+                    "tools": requested,
+                    "enabled": enabled,
+                }
+            )
+        return validated
+
+
 class AccessGrantsField(serializers.Field):
     """Read/write field for assistant access grants (group or user)."""
 
@@ -549,6 +656,7 @@ class AssistantListSerializer(serializers.ModelSerializer):
     collaboration_members = serializers.SerializerMethodField()
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
+    plugin_summary = serializers.SerializerMethodField()
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
@@ -569,6 +677,7 @@ class AssistantListSerializer(serializers.ModelSerializer):
             "visibility",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
             "vision_model_capability",
             "can_process_images",
@@ -605,6 +714,15 @@ class AssistantListSerializer(serializers.ModelSerializer):
         """Summarize prefetched MCP bindings without per-row queries."""
 
         bindings = list(assistant.mcp_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_plugin_summary(self, assistant):
+        """Summarize prefetched Plugin bindings without per-row queries."""
+
+        bindings = list(assistant.plugin_bindings.all())
         return {
             "total": len(bindings),
             "enabled": sum(binding.enabled for binding in bindings),
@@ -667,10 +785,12 @@ class AssistantSerializer(serializers.ModelSerializer):
     collaboration_members = serializers.SerializerMethodField()
     skill_bindings = SkillBindingsField(required=False)
     mcp_bindings = McpBindingsField(required=False)
+    plugin_bindings = PluginBindingsField(required=False)
     access_grants = AccessGrantsField(required=False)
     workspace_guide = serializers.JSONField(required=False)
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
+    plugin_summary = serializers.SerializerMethodField()
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
@@ -708,12 +828,14 @@ class AssistantSerializer(serializers.ModelSerializer):
             "visibility",
             "skill_bindings",
             "mcp_bindings",
+            "plugin_bindings",
             "access_grants",
             "workspace_guide",
             "kind",
             "selected_task",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
             "vision_model_capability",
             "can_process_images",
@@ -726,7 +848,9 @@ class AssistantSerializer(serializers.ModelSerializer):
             "collaboration_members",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
+            "token_budget_profile",
             "status",
             "created_at",
             "updated_at",
@@ -798,6 +922,15 @@ class AssistantSerializer(serializers.ModelSerializer):
             "enabled": enabled,
         }
 
+    def get_plugin_summary(self, assistant):
+        """Return Plugin binding summary for Assistant views."""
+
+        enabled = assistant.plugin_bindings.filter(enabled=True).count()
+        return {
+            "total": assistant.plugin_bindings.count(),
+            "enabled": enabled,
+        }
+
     def to_internal_value(self, data):
         """Accept legacy type inputs without exposing duplicate fields."""
 
@@ -838,6 +971,17 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         attrs.pop("kind", None)
         attrs.pop("selected_task", None)
+        agent_rounds = attrs.get(
+            "agent_rounds",
+            getattr(
+                self.instance,
+                "agent_rounds",
+                Assistant.AgentRounds.BALANCED,
+            ),
+        )
+        attrs["token_budget_profile"] = token_budget_profile_for_rounds(
+            agent_rounds
+        )
         mode = attrs.pop("mode", None)
         lensnode_uuid = attrs.pop("lensnode_uuid", None)
         if lensnode_uuid is not None:
@@ -904,6 +1048,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             attrs["multimodal_model_ref"] = None
             attrs["skill_bindings"] = []
             attrs["mcp_bindings"] = []
+            attrs["plugin_bindings"] = []
             lensnode = None
         elif member_uuids is not None:
             raise serializers.ValidationError(
@@ -953,11 +1098,33 @@ class AssistantSerializer(serializers.ModelSerializer):
                         uuid__in=enabled_skill_uuids,
                         enabled=True,
                     ).exists()
-                if not has_enabled_skill:
+                plugin_bindings = attrs.get("plugin_bindings")
+                if plugin_bindings is None and self.instance is not None:
+                    has_enabled_plugin = (
+                        self.instance.plugin_bindings.filter(
+                            enabled=True,
+                            connection__status=Connection.Status.ACTIVE,
+                            connection__secret_version__status="active",
+                            connection__secret_version__material__status=(
+                                "active"
+                            ),
+                        ).exists()
+                    )
+                else:
+                    has_enabled_plugin = any(
+                        binding.get("enabled", True)
+                        for binding in (plugin_bindings or [])
+                    )
+                has_enabled_plugin = (
+                    has_enabled_plugin
+                    or self._has_enabled_plugin_mcp_adapter(attrs)
+                )
+                if not has_enabled_skill and not has_enabled_plugin:
                     raise serializers.ValidationError(
                         {
                             "skill_bindings": (
-                                "general_chat requires at least one enabled skill"
+                                "general_chat requires at least one enabled "
+                                "Skill or Plugin tool"
                             )
                         }
                     )
@@ -972,6 +1139,8 @@ class AssistantSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+        self._validate_skill_plugin_requirements(attrs)
+        self._validate_plugin_tool_uniqueness(attrs)
         settings = attrs.get(
             "settings",
             getattr(self.instance, "settings", {}),
@@ -990,6 +1159,168 @@ class AssistantSerializer(serializers.ModelSerializer):
                     }
                 )
         return attrs
+
+    def _validate_skill_plugin_requirements(self, attrs):
+        """Require selected Plugin tools for enabled Skill dependencies."""
+
+        skill_bindings = attrs.get("skill_bindings")
+        if skill_bindings is None and self.instance is not None:
+            skills = [
+                binding.skill
+                for binding in self.instance.skill_bindings.select_related(
+                    "skill"
+                ).filter(enabled=True, skill__enabled=True)
+            ]
+        else:
+            skill_uuids = [
+                binding.get("skill_uuid")
+                for binding in (skill_bindings or [])
+                if binding.get("enabled", True)
+            ]
+            skills = list(
+                Skill.objects.filter(uuid__in=skill_uuids, enabled=True)
+            )
+
+        plugin_bindings = attrs.get("plugin_bindings")
+        if plugin_bindings is None and self.instance is not None:
+            plugin_bindings = [
+                {
+                    "connection": binding.connection,
+                    "tools": list(binding.tools or []),
+                    "enabled": binding.enabled,
+                }
+                for binding in self.instance.plugin_bindings.select_related(
+                    "connection"
+                ).all()
+            ]
+
+        capabilities_by_plugin = {}
+        for binding in plugin_bindings or []:
+            if not binding.get("enabled", True):
+                continue
+            connection = binding["connection"]
+            plugin = installed_plugin(connection.plugin_key)
+            capabilities_by_plugin.setdefault(plugin.key, set()).update(
+                tool.capability
+                for tool in plugin.tools
+            )
+        for adapter in self._plugin_mcp_adapters(attrs):
+            connection = adapter.connection
+            plugin = installed_plugin(connection.plugin_key)
+            selected_tools = set(adapter.tools or [])
+            capabilities_by_plugin.setdefault(plugin.key, set()).update(
+                tool.capability
+                for tool in plugin.tools
+                if tool.key in selected_tools
+            )
+
+        for skill in skills:
+            try:
+                requirements = validate_required_plugins(
+                    (skill.definition or {}).get("required_plugins")
+                )
+            except SkillPluginRequirementError as exc:
+                raise serializers.ValidationError(
+                    {"skill_bindings": str(exc)}
+                ) from exc
+            for requirement in requirements:
+                granted = capabilities_by_plugin.get(
+                    requirement["plugin"],
+                    set(),
+                )
+                missing = sorted(
+                    set(requirement["capabilities"]).difference(granted)
+                )
+                if missing:
+                    raise serializers.ValidationError(
+                        {
+                            "plugin_bindings": (
+                                f'Skill "{skill.name}" required_plugins '
+                                f'dependency "{requirement["plugin"]}" is '
+                                "missing capabilities: "
+                                f'{", ".join(missing)}.'
+                            )
+                        }
+                    )
+
+    def _has_enabled_plugin_mcp_adapter(self, attrs):
+        """Return whether the effective MCP bindings expose Plugin tools."""
+
+        return bool(self._plugin_mcp_adapters(attrs))
+
+    def _validate_plugin_tool_uniqueness(self, attrs):
+        """Reject Tool name collisions across native and MCP bindings."""
+
+        plugin_bindings = attrs.get("plugin_bindings")
+        if plugin_bindings is None and self.instance is not None:
+            plugin_bindings = [
+                {
+                    "connection": binding.connection,
+                    "enabled": binding.enabled,
+                }
+                for binding in self.instance.plugin_bindings.all()
+            ]
+        tool_keys = []
+        for binding in plugin_bindings or []:
+            if not binding.get("enabled", True):
+                continue
+            connection = binding.get("connection")
+            if connection is None:
+                continue
+            plugin = installed_plugin(connection.plugin_key)
+            tool_keys.extend(tool.key for tool in plugin.tools)
+        tool_keys.extend(
+            key
+            for adapter in self._plugin_mcp_adapters(attrs)
+            for key in (adapter.tools or [])
+        )
+        if len(tool_keys) != len(set(tool_keys)):
+            raise serializers.ValidationError(
+                {
+                    "plugin_bindings": (
+                        "Plugin Tool names must be unique across native and "
+                        "MCP adapter bindings."
+                    )
+                }
+            )
+
+    def _plugin_mcp_adapters(self, attrs):
+        """Return valid Plugin adapters from effective Assistant MCP bindings."""
+
+        mcp_bindings = attrs.get("mcp_bindings")
+        if mcp_bindings is None and self.instance is not None:
+            adapter_ids = self.instance.mcp_bindings.filter(
+                enabled=True,
+                mcp__enabled=True,
+                mcp__transport=MCPServer.Transport.PLUGIN,
+            ).values_list("mcp_id", flat=True)
+            return list(
+                MCPServer.objects.select_related(
+                    "connection__secret_version__material"
+                ).filter(
+                    pk__in=adapter_ids,
+                    connection__status=Connection.Status.ACTIVE,
+                    connection__secret_version__status="active",
+                    connection__secret_version__material__status="active",
+                )
+            )
+        adapter_uuids = [
+            binding.get("mcp_uuid")
+            for binding in (mcp_bindings or [])
+            if binding.get("enabled", True)
+        ]
+        return list(
+            MCPServer.objects.select_related(
+                "connection__secret_version__material"
+            ).filter(
+                uuid__in=adapter_uuids,
+                enabled=True,
+                transport=MCPServer.Transport.PLUGIN,
+                connection__status=Connection.Status.ACTIVE,
+                connection__secret_version__status="active",
+                connection__secret_version__material__status="active",
+            )
+        )
 
     def _validate_collaboration_members(self, member_uuids):
         """Validate Smart Assistant members at the API boundary."""
@@ -1036,6 +1367,7 @@ class AssistantSerializer(serializers.ModelSerializer):
     def _sync_bindings(self, assistant, validated_data):
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
+        plugin_bindings = validated_data.pop("plugin_bindings", None)
 
         binding_groups = [
             bindings
@@ -1098,6 +1430,16 @@ class AssistantSerializer(serializers.ModelSerializer):
                     environment_variable_set=variable_set,
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
+                )
+
+        if plugin_bindings is not None:
+            assistant.plugin_bindings.all().delete()
+            for binding in plugin_bindings:
+                AssistantPluginBinding.objects.create(
+                    assistant=assistant,
+                    connection=binding["connection"],
+                    tools=binding["tools"],
+                    enabled=binding.get("enabled", True),
                 )
 
     def _sync_environment_variable_set(self, assistant, resource, binding):
@@ -1194,6 +1536,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
+        plugin_bindings = validated_data.pop("plugin_bindings", None)
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
         assistant = Assistant.objects.create(**validated_data)
@@ -1202,6 +1545,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             {
                 "skill_bindings": skill_bindings,
                 "mcp_bindings": mcp_bindings,
+                "plugin_bindings": plugin_bindings,
             },
         )
         self._sync_access_grants(assistant, access_grants)
@@ -1242,6 +1586,278 @@ class AssistantSerializer(serializers.ModelSerializer):
         return assistant
 
 
+class PluginInvocationSerializer(serializers.ModelSerializer):
+    """Read-only, secret-free audit representation for Plugin executions."""
+
+    snapshot_uuid = serializers.UUIDField(source="snapshot.uuid")
+    connection_uuid = serializers.UUIDField(source="connection.uuid")
+    connection_name = serializers.CharField(source="connection.name")
+    datasource_uuid = serializers.SerializerMethodField()
+    run_uuid = serializers.SerializerMethodField()
+    actor_username = serializers.CharField(
+        source="actor.username",
+        allow_null=True,
+    )
+    lensnode_uuid = serializers.UUIDField(source="lensnode.uuid")
+    lensnode_name = serializers.CharField(source="lensnode.name")
+
+    class Meta:
+        model = PluginInvocation
+        fields = [
+            "uuid",
+            "snapshot_uuid",
+            "kind",
+            "plugin_key",
+            "tool_key",
+            "capability",
+            "connection_uuid",
+            "connection_name",
+            "datasource_uuid",
+            "run_uuid",
+            "actor_username",
+            "lensnode_uuid",
+            "lensnode_name",
+            "resource_summary",
+            "status",
+            "materialized_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_datasource_uuid(self, invocation):
+        """Return the optional datasource identity."""
+
+        return str(invocation.datasource.uuid) if invocation.datasource else None
+
+    def get_run_uuid(self, invocation):
+        """Return the optional Run identity."""
+
+        return str(invocation.run.uuid) if invocation.run else None
+
+
+class ConnectionSerializer(serializers.ModelSerializer):
+    """Admin serializer for reusable Plugin connections."""
+
+    endpoint = serializers.URLField(required=False, allow_blank=True)
+    secret_value = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=False,
+    )
+    has_secret = serializers.SerializerMethodField()
+    secret_hint = serializers.SerializerMethodField()
+    secret_version_uuid = serializers.SerializerMethodField()
+    datasource_count = serializers.SerializerMethodField()
+    assistant_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Connection
+        fields = [
+            "uuid",
+            "name",
+            "plugin_key",
+            "endpoint",
+            "config",
+            "allowed_scope",
+            "secret_value",
+            "has_secret",
+            "secret_hint",
+            "secret_version_uuid",
+            "datasource_count",
+            "assistant_count",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "uuid",
+            "has_secret",
+            "secret_hint",
+            "secret_version_uuid",
+            "datasource_count",
+            "assistant_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_has_secret(self, connection):
+        """Return whether the current connection has secret material."""
+
+        version = connection.secret_version
+        return bool(version and version.encrypted_value)
+
+    def get_secret_hint(self, connection):
+        """Return a non-recoverable display hint for the stored secret."""
+
+        version = connection.secret_version
+        if version is None or not version.encrypted_value:
+            return ""
+        value = version.get_value()
+        if len(value) < 8:
+            return "••••••••"
+        return f"••••••••{value[-4:]}"
+
+    def get_secret_version_uuid(self, connection):
+        """Return the opaque SecretVersion identity for audit views."""
+
+        if connection.secret_version is None:
+            return None
+        return str(connection.secret_version.uuid)
+
+    def get_datasource_count(self, connection):
+        """Return how many datasources use this connection."""
+
+        count = getattr(connection, "datasource_usage_count", None)
+        return count if count is not None else connection.datasources.count()
+
+    def get_assistant_count(self, connection):
+        """Return how many Assistants use this connection."""
+
+        count = getattr(connection, "assistant_usage_count", None)
+        return (
+            count
+            if count is not None
+            else connection.assistant_bindings.count()
+        )
+
+    def validate(self, attrs):
+        """Validate provider, endpoint, and non-secret JSON configuration."""
+
+        plugin_key = attrs.get(
+            "plugin_key",
+            getattr(self.instance, "plugin_key", ""),
+        )
+        config = attrs.get(
+            "config",
+            getattr(self.instance, "config", {}),
+        )
+        allowed_scope = attrs.get(
+            "allowed_scope",
+            getattr(self.instance, "allowed_scope", {}),
+        )
+        if not isinstance(config, dict):
+            raise serializers.ValidationError(
+                {"config": "config must be an object"}
+            )
+        if not isinstance(allowed_scope, dict):
+            raise serializers.ValidationError(
+                {"allowed_scope": "allowed_scope must be an object"}
+            )
+        _validate_plugin_json(config, "config")
+        _validate_plugin_json(allowed_scope, "allowed_scope")
+        try:
+            installed_plugin(plugin_key)
+            provider = get_datasource_provider(plugin_key)
+        except PluginRegistryError as exc:
+            raise serializers.ValidationError({"plugin_key": str(exc)})
+        except DatasourceProviderError as exc:
+            raise serializers.ValidationError({"plugin_key": str(exc)})
+        try:
+            attrs["endpoint"] = provider.validate_connection(
+                attrs.get("endpoint", getattr(self.instance, "endpoint", "")),
+                config,
+            )
+        except DatasourceProviderError as exc:
+            raise serializers.ValidationError({"endpoint": str(exc)})
+        try:
+            attrs["allowed_scope"] = provider.validate_connection_scope(
+                allowed_scope
+            )
+        except DatasourceProviderError as exc:
+            raise serializers.ValidationError({"allowed_scope": str(exc)})
+        status_value = attrs.get(
+            "status",
+            getattr(self.instance, "status", Connection.Status.ACTIVE),
+        )
+        secret_value = attrs.get("secret_value", "")
+        current_version = getattr(self.instance, "secret_version", None)
+        if (
+            status_value == Connection.Status.ACTIVE
+            and not secret_value
+            and (
+                current_version is None
+                or current_version.status != "active"
+                or current_version.material.status != "active"
+                or not current_version.encrypted_value
+            )
+        ):
+            raise serializers.ValidationError({
+                "secret_value": "active connection requires a secret"
+            })
+        return attrs
+
+    def create(self, validated_data):
+        """Create a connection and optionally its first encrypted version."""
+
+        secret_value = validated_data.pop("secret_value", "")
+        with transaction.atomic():
+            connection = Connection.objects.create(**validated_data)
+            if secret_value:
+                connection.secret_version = _create_secret_version(
+                    connection.name,
+                    secret_value,
+                )
+                connection.save(update_fields=["secret_version", "updated_at"])
+        return connection
+
+    def update(self, instance, validated_data):
+        """Update metadata and rotate SecretVersion when supplied."""
+
+        secret_value = validated_data.pop("secret_value", "")
+        with transaction.atomic():
+            for field, value in validated_data.items():
+                setattr(instance, field, value)
+            if secret_value:
+                material = (
+                    instance.secret_version.material
+                    if instance.secret_version is not None
+                    else None
+                )
+                instance.secret_version = _create_secret_version(
+                    instance.name,
+                    secret_value,
+                    material=material,
+                )
+            instance.save()
+        return instance
+
+
+def _create_secret_version(name, value, material=None):
+    """Create encrypted SecretMaterial and SecretVersion records."""
+
+    material = material or SecretMaterial.objects.create(name=f"{name} secret")
+    version = SecretVersion(material=material, status="active")
+    version.set_value(value)
+    version.save()
+    return version
+
+
+def _validate_plugin_json(value, field_name):
+    """Reject credential-shaped fields in persisted Plugin configuration."""
+
+    forbidden = {
+        "access_token",
+        "api_key",
+        "app_secret",
+        "authorization",
+        "password",
+        "private_key",
+        "secret",
+        "token",
+    }
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if str(key).lower() in forbidden:
+                raise serializers.ValidationError(
+                    {field_name: "secret fields must use secret_value"}
+                )
+            _validate_plugin_json(nested, field_name)
+    elif isinstance(value, list):
+        for nested in value:
+            _validate_plugin_json(nested, field_name)
+
+
 class DataSourceSerializer(serializers.ModelSerializer):
     """Datasource serializer."""
 
@@ -1250,6 +1866,20 @@ class DataSourceSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
         allow_null=True,
+    )
+    connection_uuid = serializers.UUIDField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    connection = serializers.UUIDField(source="connection.uuid", read_only=True)
+    connection_name = serializers.CharField(
+        source="connection.name",
+        read_only=True,
+    )
+    connection_endpoint = serializers.CharField(
+        source="connection.endpoint",
+        read_only=True,
     )
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
     lensnode_name = serializers.CharField(
@@ -1304,6 +1934,16 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"credential_uuid": "Credential does not exist"}
                 )
+        connection_uuid = attrs.pop("connection_uuid", None)
+        if "connection_uuid" in self.initial_data and connection_uuid is None:
+            attrs["connection"] = None
+        elif connection_uuid is not None:
+            try:
+                attrs["connection"] = Connection.objects.get(uuid=connection_uuid)
+            except Connection.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"connection_uuid": "Connection does not exist"}
+                )
 
         if not isinstance(config, dict):
             raise serializers.ValidationError({"config": "config must be an object"})
@@ -1334,7 +1974,94 @@ class DataSourceSerializer(serializers.ModelSerializer):
             if "credential" in attrs
             else getattr(self.instance, "credential", None)
         )
-        if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+        connection = (
+            attrs["connection"]
+            if "connection" in attrs
+            else getattr(self.instance, "connection", None)
+        )
+        datasource_config = attrs.get(
+            "datasource_config",
+            getattr(self.instance, "datasource_config", {}),
+        )
+        plugin_key = attrs.get(
+            "plugin_key",
+            getattr(self.instance, "plugin_key", ""),
+        )
+        _validate_datasource_config_secret_fields(datasource_config)
+        if connection is None and (plugin_key or datasource_config):
+            raise serializers.ValidationError(
+                {
+                    "connection_uuid": (
+                        "Plugin datasource configuration requires a "
+                        "Connection"
+                    )
+                }
+            )
+        if connection is not None:
+            if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+                raise serializers.ValidationError(
+                    {"connection_uuid": "Managed workspace does not use connections"}
+                )
+            if connection.status != Connection.Status.ACTIVE:
+                raise serializers.ValidationError(
+                    {"connection_uuid": "Plugin Connection is disabled"}
+                )
+            secret_version = connection.secret_version
+            if (
+                secret_version is None
+                or secret_version.status != "active"
+                or secret_version.material.status != "active"
+                or not secret_version.encrypted_value
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "connection_uuid": (
+                            "Plugin Connection secret is unavailable"
+                        )
+                    }
+                )
+            if plugin_key and plugin_key != connection.plugin_key:
+                raise serializers.ValidationError(
+                    {"plugin_key": "Plugin key differs from connection"}
+                )
+            plugin_key = connection.plugin_key
+            try:
+                plugin = installed_plugin(plugin_key)
+                if plugin.datasource is None:
+                    raise serializers.ValidationError(
+                        {
+                            "plugin_key": (
+                                "Plugin does not support datasources"
+                            )
+                        }
+                    )
+                provider = get_datasource_provider(plugin_key)
+            except (DatasourceProviderError, PluginRegistryError) as exc:
+                raise serializers.ValidationError({"plugin_key": str(exc)})
+            try:
+                provider.validate_datasource_source_type(source_type)
+            except DatasourceProviderError as exc:
+                raise serializers.ValidationError({"source_type": str(exc)})
+            try:
+                provider.validate_connection(
+                    connection.endpoint,
+                    connection.config,
+                )
+                attrs["datasource_config"] = provider.validate_datasource_config(
+                    connection.allowed_scope,
+                    datasource_config,
+                )
+            except DatasourceProviderError as exc:
+                raise serializers.ValidationError({"datasource_config": str(exc)})
+            attrs["plugin_key"] = plugin_key
+            attrs["credential"] = None
+            config = {}
+            attrs["config"] = {}
+            credential = None
+        if (
+            connection is None
+            and source_type == DataSource.SourceType.MANAGED_WORKSPACE
+        ):
             if credential is not None:
                 raise serializers.ValidationError(
                     {"credential_uuid": ("Managed workspace does not use credentials")}
@@ -1360,7 +2087,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             attrs["credential"] = None
             attrs["config"] = {}
             attrs["sync_policy"] = {}
-        elif source_type == DataSource.SourceType.GIT:
+        elif connection is None and source_type == DataSource.SourceType.GIT:
             _validate_datasource_credential_type(
                 credential,
                 {
@@ -1373,7 +2100,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 self.instance,
                 credential,
             )
-        elif source_type == DataSource.SourceType.FEISHU:
+        elif connection is None and source_type == DataSource.SourceType.FEISHU:
             _validate_datasource_credential_type(
                 credential,
                 DataSourceCredential.AuthType.FEISHU_APP,
@@ -1383,7 +2110,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 self.instance,
                 credential,
             )
-        else:
+        elif connection is None:
             raise serializers.ValidationError(
                 {"source_type": "Unsupported datasource source_type"}
             )
@@ -1547,6 +2274,12 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "lensnode_name",
             "credential",
             "credential_uuid",
+            "connection",
+            "connection_uuid",
+            "connection_name",
+            "connection_endpoint",
+            "plugin_key",
+            "datasource_config",
             "config",
             "credential_configured",
             "current_sync",
@@ -2258,6 +2991,12 @@ class SkillSerializer(serializers.ModelSerializer):
         normalized = dict(value)
         environment = validate_environment_schema(normalized.get("environment"))
         normalized["environment"] = environment
+        try:
+            normalized["required_plugins"] = validate_required_plugins(
+                normalized.get("required_plugins")
+            )
+        except SkillPluginRequirementError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
         api = validate_skill_api_policy(normalized.get("api"), environment)
         if api:
             normalized["api"] = api
@@ -2355,6 +3094,13 @@ class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
 class MCPServerSerializer(serializers.ModelSerializer):
     """MCP server serializer."""
 
+    connection_uuid = serializers.SlugRelatedField(
+        source="connection",
+        slug_field="uuid",
+        queryset=Connection.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     environment_references = serializers.SerializerMethodField()
     secret_mask = "********"
     sensitive_key_names = {
@@ -2379,6 +3125,8 @@ class MCPServerSerializer(serializers.ModelSerializer):
             "config",
             "environment",
             "environment_references",
+            "connection_uuid",
+            "tools",
             "version",
             "enabled",
             "created_at",
@@ -2457,13 +3205,106 @@ class MCPServerSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+        transport = attrs.get(
+            "transport",
+            getattr(self.instance, "transport", MCPServer.Transport.URL),
+        )
+        connection = attrs.get(
+            "connection",
+            getattr(self.instance, "connection", None),
+        )
+        tools = attrs.get(
+            "tools",
+            getattr(self.instance, "tools", []),
+        )
+        if transport == MCPServer.Transport.PLUGIN:
+            self._validate_plugin_adapter(
+                attrs,
+                connection,
+                tools,
+                endpoint,
+                config,
+                environment,
+            )
+        elif connection is not None or tools:
+            raise serializers.ValidationError(
+                {
+                    "connection_uuid": (
+                        "Only Plugin MCP adapters may reference a Connection."
+                    ),
+                    "tools": (
+                        "Only Plugin MCP adapters may select Plugin tools."
+                    ),
+                }
+            )
         return attrs
+
+    def _validate_plugin_adapter(
+        self,
+        attrs,
+        connection,
+        tools,
+        endpoint,
+        config,
+        environment,
+    ):
+        """Restrict Plugin adapters to the native Connection tool runtime."""
+
+        errors = {}
+        if connection is None:
+            errors["connection_uuid"] = "Plugin adapter Connection is required."
+        elif (
+            connection.status != Connection.Status.ACTIVE
+            or connection.secret_version is None
+            or connection.secret_version.status != "active"
+            or connection.secret_version.material.status != "active"
+        ):
+            errors["connection_uuid"] = "Plugin adapter Connection is disabled."
+        if endpoint:
+            errors["endpoint"] = "Plugin adapters cannot define an MCP endpoint."
+        if config:
+            errors["config"] = "Plugin adapters cannot define MCP configuration."
+        if environment:
+            errors["environment"] = (
+                "Plugin adapters cannot define MCP environment variables."
+            )
+        if not isinstance(tools, list) or not tools:
+            errors["tools"] = "Select at least one Plugin tool."
+        elif (
+            any(not isinstance(key, str) or not key.strip() for key in tools)
+            or len(tools) != len(set(tools))
+        ):
+            errors["tools"] = "Plugin tools must be unique non-empty strings."
+        if errors or connection is None:
+            raise serializers.ValidationError(errors)
+        try:
+            plugin = installed_plugin(connection.plugin_key)
+        except PluginRegistryError as exc:
+            raise serializers.ValidationError(
+                {"connection_uuid": str(exc)}
+            ) from exc
+        definitions = {tool.key: tool for tool in plugin.tools}
+        unsupported = sorted(set(tools).difference(definitions))
+        if unsupported:
+            raise serializers.ValidationError(
+                {"tools": f"Unknown Plugin tools: {', '.join(unsupported)}."}
+            )
+        if any(
+            definitions[key].side_effect != "none"
+            for key in tools
+        ):
+            raise serializers.ValidationError(
+                {"tools": "Plugin MCP adapters only support read-only tools."}
+            )
+        attrs["version"] = plugin.version
 
     def to_representation(self, instance):
         """Mask sensitive MCP configuration values in every response."""
 
         payload = super().to_representation(instance)
         payload["config"] = self._mask_sensitive_values(instance.config or {})
+        if payload.get("connection_uuid") is not None:
+            payload["connection_uuid"] = str(payload["connection_uuid"])
         return payload
 
     @classmethod

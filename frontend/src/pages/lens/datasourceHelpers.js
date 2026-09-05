@@ -6,7 +6,7 @@
  * sub-components.
  */
 
-import { EMPTY_VALUE } from './adminHelpers'
+import { EMPTY_VALUE } from './adminHelpers.js'
 
 export function formatDocIds(docIds) {
   if (Array.isArray(docIds)) {
@@ -17,15 +17,41 @@ export function formatDocIds(docIds) {
 
 export function dataSourceRepository(row) {
   const config = row.config || {}
-  if (row.source_type === 'git') {
-    return config.organization_url || config.repo_url || EMPTY_VALUE
+  const datasourceConfig = row.datasource_config || {}
+  if (
+    row.source_type === 'git' ||
+    datasourceConfig.repository ||
+    datasourceConfig.project
+  ) {
+    return (
+      datasourceConfig.repository ||
+      datasourceConfig.project ||
+      config.organization_url ||
+      config.repo_url ||
+      EMPTY_VALUE
+    )
   }
   return (
+    datasourceConfig.resource_urls?.[0] ||
     config.folder_url ||
     config.folder_token ||
     config.document_url ||
     EMPTY_VALUE
   )
+}
+
+export function dataSourceRepositoryUrl(row, connectionEndpoint = '') {
+  const resource = dataSourceRepository(row)
+  if (resource === EMPTY_VALUE || /^[a-z][a-z\d+.-]*:\/\//i.test(resource)) {
+    return resource
+  }
+  if (!row.plugin_key || !connectionEndpoint) {
+    return resource
+  }
+  return `${String(connectionEndpoint).replace(/\/$/, '')}/${resource.replace(
+    /^\//,
+    ''
+  )}`
 }
 
 export function dataSourceRepositories(row) {
@@ -39,7 +65,7 @@ export function isOrganizationDataSource(row) {
 
 export function dataSourceBranch(row) {
   if (row.source_type === 'git') {
-    return row.config?.branch || 'main'
+    return row.datasource_config?.branch || row.config?.branch || 'main'
   }
   return EMPTY_VALUE
 }

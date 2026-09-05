@@ -17,6 +17,7 @@ from lensnode.agent_runtime.summarization import (
     build_summarization_middleware,
 )
 from lensnode.gateway_model import (
+    GatewayStreamError,
     LensGatewayChatModel,
     RunCancelledError,
     _message_from_gateway,
@@ -91,6 +92,26 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     assert b'"run_uuid"' in captured["payload"]
     assert b'"is_subagent"' in captured["payload"]
     assert client_options["verify"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_streaming_network_error_is_recoverable(monkeypatch):
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=lambda _content: None,
+    )
+
+    def fail_stream(*_args, **_kwargs):
+        raise httpx.ReadError("connection reset by peer")
+
+    monkeypatch.setattr(model, "_generate_streaming", fail_stream)
+
+    with pytest.raises(GatewayStreamError) as raised:
+        model._generate([HumanMessage(content="hi")])
+
+    assert raised.value.code == "MODEL_STREAM_ERROR"
+    assert isinstance(raised.value.__cause__, httpx.ReadError)
 
 
 def test_streaming_trajectory_records_prompt_schema_reasoning_and_usage(
@@ -299,6 +320,47 @@ def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
 
     assert result.generations[0].message.tool_calls
     assert outputs == []
+
+
+def test_streaming_forwards_tool_call_deltas_to_runtime(monkeypatch):
+    tool_delta = {
+        "index": 0,
+        "id": "call-plan",
+        "name": "write_todos",
+        "arguments": '{"todos":[{"content":"Inspect",',
+    }
+    body = (
+        "data: "
+        + json.dumps(
+            {
+                "type": "token",
+                "kind": "tool_call",
+                "content": json.dumps(tool_delta),
+            }
+        )
+        + "\n\n"
+        + 'data: {"type": "done", "usage": {"total_tokens": 8}, '
+        '"finish_reason": "tool_calls", "tool_calls": [{"id": '
+        '"call-plan", "function": {"name": "write_todos", '
+        '"arguments": "{\\"todos\\":[]}"}}]}\n\n'
+    )
+
+    _install_transport(
+        monkeypatch,
+        lambda _request: httpx.Response(200, content=body.encode("utf-8")),
+    )
+    deltas = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=lambda _content: None,
+        on_tool_call_delta=deltas.append,
+    )
+
+    model._generate([HumanMessage(content="plan")])
+
+    assert deltas == [tool_delta]
 
 
 def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
@@ -725,6 +787,67 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
         "completion_tokens": 20,
         "total_tokens": 110,
     }
+
+
+def test_default_model_calls_are_clamped_to_remaining_work_budget(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.read().decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "ok", "finish_reason": "stop"},
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        token_budget_max_tokens=100000,
+        token_budget_final_reserve_tokens=2000,
+    )
+
+    model._generate([HumanMessage(content="investigate")])
+
+    assert "max_tokens" not in requests[0]
+
+
+def test_final_synthesis_is_clamped_to_remaining_budget(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.read().decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "ok", "finish_reason": "stop"},
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        token_budget_max_tokens=10000,
+        token_budget_final_reserve_tokens=2000,
+    )
+
+    model._generate(
+        [HumanMessage(content="summarize")],
+        runtime_final_synthesis=True,
+        max_tokens=4096,
+        reasoning_effort="none",
+    )
+
+    assert requests[0]["max_tokens"] == 4096
 
 
 def test_resume_restores_token_and_loop_guardrail_state(monkeypatch):

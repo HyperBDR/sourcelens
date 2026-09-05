@@ -254,7 +254,9 @@ test.describe('LLM pages', () => {
     await expect(row).toContainText('request_timeout_seconds: 90')
 
     await row.getByRole('button', { name: /更多操作|More Actions/ }).click()
-    await page.getByRole('menuitem', { name: /编辑|Edit/ }).click({ force: true })
+    await page
+      .getByRole('menuitem', { name: /编辑|Edit/ })
+      .click({ force: true })
     let form = page.locator('form').last()
     const parameterInput = (name) =>
       form
@@ -271,7 +273,9 @@ test.describe('LLM pages', () => {
     await expect(row).toContainText('request_timeout_seconds: 120')
 
     await row.getByRole('button', { name: /更多操作|More Actions/ }).click()
-    await page.getByRole('menuitem', { name: /编辑|Edit/ }).click({ force: true })
+    await page
+      .getByRole('menuitem', { name: /编辑|Edit/ })
+      .click({ force: true })
     form = page.locator('form').last()
     await parameterInput('temperature').fill('')
     await parameterInput('request_timeout_seconds').fill('')

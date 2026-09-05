@@ -65,7 +65,8 @@ test('keeps row edit actions independent from detail drawers', async ({
     .getByTestId('user-detail-row')
     .filter({ hasText: f.users.authuser })
   await userRow.click()
-  await page.getByRole('dialog', { name: 'User Details' })
+  await page
+    .getByRole('dialog', { name: 'User Details' })
     .getByRole('button', { name: 'Edit' })
     .click()
 
@@ -92,7 +93,8 @@ test('keeps row edit actions independent from detail drawers', async ({
     .getByTestId('group-detail-row')
     .filter({ hasText: group.name })
   await groupRow.click()
-  await page.getByRole('dialog', { name: 'Group Details' })
+  await page
+    .getByRole('dialog', { name: 'Group Details' })
     .getByRole('button', { name: 'Edit' })
     .click()
 

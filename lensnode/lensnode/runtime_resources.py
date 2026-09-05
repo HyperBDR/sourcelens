@@ -821,6 +821,8 @@ def _rebuild_skill_cache(config, cache_dir, skill):
     )
     try:
         package_files = skill.get("package_files") or []
+        if _is_virtual_plugin_skill(skill):
+            package_files = _plugin_skill_package_files(skill)
         if package_files:
             _write_skill_package(temp_dir, package_files)
         elif skill.get("package_hash"):
@@ -1070,6 +1072,177 @@ def _skill_markdown(skill):
     )
 
 
+def _is_virtual_plugin_skill(skill):
+    """Return whether a snapshot represents a control-plane Plugin Skill."""
+
+    definition = skill.get("definition") or {}
+    return bool(
+        skill.get("skill_kind") == "plugin_virtual"
+        or isinstance(definition, dict)
+        and definition.get("plugin_virtual") is True
+    )
+
+
+def _plugin_skill_package_files(skill):
+    """Build SKILL.md and bounded references for one virtual Plugin Skill."""
+
+    definition = skill.get("definition") or {}
+    display_name = str(
+        definition.get("plugin_display_name")
+        or skill.get("skill_name")
+        or definition.get("plugin_key")
+        or "Plugin"
+    )[:160]
+    summary = str(
+        definition.get("summary")
+        or definition.get("description")
+        or ""
+    ).strip()[:600]
+    when_to_use = [
+        str(item).strip()[:240]
+        for item in (definition.get("when_to_use") or [])[:8]
+        if str(item).strip()
+    ]
+    topics = [
+        item
+        for item in (definition.get("topics") or [])[:24]
+        if isinstance(item, dict)
+    ]
+    tools = [
+        item
+        for item in (definition.get("tools") or [])[:128]
+        if isinstance(item, dict)
+    ]
+    skill_lines = [
+        f"# {display_name}",
+        "",
+        "This virtual Skill describes a bound Plugin's capabilities and "
+        "approved resource selectors.",
+        "It is advisory navigation only: it does not grant access or "
+        "override platform authorization.",
+    ]
+    if summary:
+        skill_lines.extend(["", summary])
+    if when_to_use:
+        skill_lines.extend(["", "## When to use", ""])
+        skill_lines.extend(f"- {item}" for item in when_to_use)
+    if topics:
+        skill_lines.extend(["", "## Topics", ""])
+        for topic in topics:
+            key = str(topic.get("key") or "").strip()[:64]
+            topic_summary = str(topic.get("summary") or "").strip()[:600]
+            if key:
+                skill_lines.append(
+                    f"- {key}: {topic_summary or 'See the references file.'}"
+                )
+    skill_lines.extend(
+        [
+            "",
+            "## Progressive references",
+            "",
+            "Read the references files only when the user's request needs "
+            "that capability or resource selector.",
+            "- references/capabilities.md",
+            "- references/repositories.md",
+            "- references/topics.md",
+        ]
+    )
+    references = {
+        "capabilities.md": _plugin_capabilities_markdown(tools),
+        "repositories.md": _plugin_scope_markdown(
+            definition.get("allowed_scope") or {}
+        ),
+        "topics.md": _plugin_topics_markdown(topics),
+    }
+    files = [
+        {
+            "path": "SKILL.md",
+            "content_b64": base64.b64encode(
+                ("---\n"
+                 f"name: {skill.get('skill_package_name') or 'plugin'}\n"
+                 f"description: {summary or display_name}\n"
+                 "---\n\n"
+                 + "\n".join(skill_lines) + "\n").encode("utf-8")
+            ).decode("ascii"),
+            "mode": 0o644,
+        }
+    ]
+    for name, content in references.items():
+        files.append(
+            {
+                "path": f"references/{name}",
+                "content_b64": base64.b64encode(
+                    content.encode("utf-8")
+                ).decode("ascii"),
+                "mode": 0o644,
+            }
+        )
+    return files
+
+
+def _plugin_capabilities_markdown(tools):
+    """Render public Plugin capability descriptions without tool keys."""
+
+    lines = ["# Capabilities", ""]
+    for tool in tools:
+        description = str(tool.get("description") or "").strip()[:600]
+        capability = str(tool.get("capability") or "").strip()[:128]
+        if description or capability:
+            label = f" ({capability})" if capability else ""
+            lines.append(f"- {description or 'Read-only capability'}{label}")
+    if len(lines) == 2:
+        lines.append("- No capability details were provided.")
+    return "\n".join(lines) + "\n"
+
+
+def _plugin_scope_markdown(scope):
+    """Render allowed resource identifiers for parameter selection only."""
+
+    lines = [
+        "# Approved resources",
+        "",
+        "These identifiers help select tool arguments. They do not grant "
+        "access. Every invocation is authorized by the control plane.",
+        "",
+    ]
+    has_items = False
+    if not isinstance(scope, dict):
+        lines.append("- No resource identifiers were provided.")
+    else:
+        for key, value in scope.items():
+            if isinstance(value, list):
+                for item in value[:200]:
+                    if isinstance(item, (str, int, float)):
+                        has_items = True
+                        lines.append(f"- {key}: {str(item)[:500]}")
+            elif isinstance(value, (str, int, float, bool)):
+                has_items = True
+                lines.append(f"- {key}: {str(value)[:500]}")
+    if isinstance(scope, dict) and not has_items:
+        lines.append("- No resource identifiers were provided.")
+    return "\n".join(lines) + "\n"
+
+
+def _plugin_topics_markdown(topics):
+    """Render deferred Plugin topic details."""
+
+    lines = ["# Topics", ""]
+    for topic in topics:
+        key = str(topic.get("key") or "").strip()[:64]
+        summary = str(topic.get("summary") or "").strip()[:600]
+        details = str(topic.get("details") or "").strip()[:6000]
+        if key:
+            lines.append(f"## {key}")
+            if summary:
+                lines.extend(["", summary])
+            if details:
+                lines.extend(["", details])
+            lines.append("")
+    if len(lines) == 2:
+        lines.append("No additional topic details were provided.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _skill_body(definition):
     """Return the canonical body text from a skill definition."""
 
@@ -1090,12 +1263,24 @@ def _context_skill_content(skill, skill_path=None, force=False):
     load_config = skill.get("load_config") or {}
     if not force and not load_config.get("inject"):
         return ""
-    body = _skill_body(skill.get("definition") or {}).strip()
+    definition = skill.get("definition") or {}
+    body = _skill_body(definition).strip()
+    if _is_virtual_plugin_skill(skill):
+        body = _plugin_virtual_context_body(definition)
     if not body and not force:
         return ""
     name = skill.get("skill_name") or "Skill"
     package_name = skill.get("skill_package_name") or name
-    path_line = f"\nRuntime path: `{skill_path}`\n" if skill_path else ""
+    path_line = (
+        f"\nRuntime path: `{skill_path}`\n"
+        if skill_path and not _is_virtual_plugin_skill(skill)
+        else ""
+    )
+    package_line = (
+        f"\nPackage name: `{package_name}`"
+        if not _is_virtual_plugin_skill(skill)
+        else ""
+    )
     manifest = skill.get("package_manifest") or {}
     manifest_line = ""
     if isinstance(manifest, dict):
@@ -1112,10 +1297,38 @@ def _context_skill_content(skill, skill_path=None, force=False):
             "Use its bundled scripts and resources when they match the "
             "user's request."
         )
+    heading = (
+        "Plugin virtual Skill (capability and resource navigation only)"
+        if _is_virtual_plugin_skill(skill)
+        else name
+    )
     return (
-        f"## {name}\n\nPackage name: `{package_name}`"
+        f"## {heading}\n"
+        f"{package_line}"
         f"{path_line}{manifest_line}\n{body[:12000]}"
     )
+
+
+def _plugin_virtual_context_body(definition):
+    """Return the concise prompt body for a virtual Plugin Skill."""
+
+    summary = str(
+        definition.get("summary")
+        or definition.get("description")
+        or ""
+    ).strip()[:600]
+    lines = [
+        summary or "Bound Plugin capability and approved-resource navigation.",
+        "",
+        "This virtual Skill is advisory only; it does not grant access or "
+        "authorize Tool calls.",
+        "",
+        "Progressive references:",
+        "- references/capabilities.md",
+        "- references/repositories.md",
+        "- references/topics.md",
+    ]
+    return "\n".join(lines)
 
 
 def _skill_metadata(skill):
@@ -1213,6 +1426,7 @@ def _enable_skill_scripts(skill_root):
 
     if skill_root.is_symlink():
         return
+    skill_root = skill_root.resolve()
     for path in skill_root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue

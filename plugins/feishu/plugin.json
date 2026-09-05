@@ -1,0 +1,86 @@
+{
+  "key": "feishu",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "capability_family": "plugin",
+  "display_name": "Feishu",
+  "icon": "assets/icon.svg",
+  "description": "Connect a Feishu custom app and sync accessible Drive folders, documents, sheets, slides, Bitable bases, and wiki pages into LensNode workspaces.",
+  "datasource_source_type": "feishu",
+  "datasource": {
+    "key": "feishu_resources",
+    "display_name": "Feishu resources",
+    "description": "Synchronize one or more accessible Feishu resource URLs into a LensNode workspace.",
+    "source_type": "feishu",
+    "resources": [],
+    "runtime": {
+      "supports_incremental": true,
+      "supports_cancel": true,
+      "output": "workspace"
+    }
+  },
+  "handlers": {
+    "control": "python_v1",
+    "runtime": "python_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "app_id": {
+        "type": "string",
+        "title": "App ID",
+        "description": "App ID from a published Feishu custom app with the required document permissions.",
+        "write_to": "config.app_id"
+      },
+      "app_secret": {
+        "type": "string",
+        "format": "password",
+        "title": "App Secret",
+        "description": "App Secret for the same Feishu custom app. It is encrypted after saving.",
+        "write_to": "secret_value"
+      }
+    },
+    "required": ["app_id", "app_secret"],
+    "additionalProperties": false
+  },
+  "datasource_schema": {
+    "type": "object",
+    "properties": {
+      "resource_urls": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 100,
+        "title": "Feishu resource URLs",
+        "description": "One HTTPS folder, document, sheet, slide, Bitable, or wiki URL per field.",
+        "items": {"type": "string", "format": "uri"}
+      },
+      "recursive": {
+        "type": "boolean",
+        "title": "Include subfolders",
+        "description": "Recursively synchronize resources in nested folders.",
+        "default": true
+      },
+      "max_depth": {
+        "type": "integer",
+        "title": "Maximum folder depth",
+        "description": "Limit how many nested folder levels are synchronized.",
+        "default": 10
+      },
+      "incremental": {
+        "type": "boolean",
+        "title": "Skip unchanged files",
+        "description": "Reuse local files when the corresponding Feishu resource has not changed.",
+        "default": true
+      },
+      "delete_missing": {
+        "type": "boolean",
+        "title": "Delete missing local files",
+        "description": "Delete local files when their Feishu resources are no longer present. Keep disabled to reduce accidental deletion risk.",
+        "default": false
+      }
+    },
+    "required": ["resource_urls"],
+    "additionalProperties": false
+  },
+  "tools": []
+}

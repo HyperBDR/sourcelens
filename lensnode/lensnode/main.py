@@ -19,14 +19,14 @@ from .checkpoint import (
     get_checkpoint_saver,
 )
 from .config import load_config
-from .delegation_events import delegation_events
 from .datasource_sync import DataSourceSyncError
 from .datasource_sync import convert_managed_workspace
 from .datasource_sync import inspect_datasource_path, sync_datasource
 from .datasource_sync import test_datasource_connection
 from .datasource_sync import upload_managed_workspace
-from .executor import TASKS, LensNodeExecutor
+from .delegation_events import delegation_events
 from .execution_queue import ExecutionClass, LensNodeExecutionQueue
+from .executor import TASKS, LensNodeExecutor
 from .gateway_model import RunCancelledError
 from .logging_utils import (
     elapsed_since,
@@ -35,10 +35,21 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
+from .plugin_http import PluginHttpClientPool
+from .plugin_package_loader import (
+    PluginPackageLoadError,
+    load_runtime_contract,
+)
+from .plugin_runtime import (
+    PluginRuntimeError,
+    acquire_plugin_lease,
+    fetch_plugin_snapshot,
+    retrieve_plugin_material,
+)
 from .runtime_resources import (
-    delete_skill_cache,
     cleanup_run_runtime_resources,
     cleanup_stale_runtime_resources,
+    delete_skill_cache,
 )
 from .tls import create_config_ssl_context
 from .tls import warn_if_verification_disabled
@@ -71,9 +82,17 @@ class LensNodeClient:
                 keepalive_expiry=60.0,
             ),
         )
+        self.plugin_http_pool = PluginHttpClientPool(
+            timeout=config.request_timeout_s,
+            verify=self.ssl_context,
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=60.0,
+        )
         self.executor = LensNodeExecutor(
             config,
             http_client=self.gateway_http_client,
+            plugin_http_pool=self.plugin_http_pool,
         )
         self.stopping = asyncio.Event()
         # Set while draining on shutdown/upgrade: stop accepting new runs and
@@ -95,6 +114,7 @@ class LensNodeClient:
             )
         )
         self.datasource_conversion_cancels = {}
+        self.datasource_sync_cancels = {}
         self.running_commands = {}
         self._checkpoint_resume_ready = None
         # Durable outbound buffer, persistent across reconnects. A run started
@@ -298,7 +318,10 @@ class LensNodeClient:
             try:
                 close_checkpoint_saver()
             finally:
-                self.gateway_http_client.close()
+                try:
+                    self.plugin_http_pool.close()
+                finally:
+                    self.gateway_http_client.close()
 
     async def _drain_running_tasks(self):
         """Wait for in-flight runs to finish, bounded by the drain timeout."""
@@ -400,23 +423,64 @@ class LensNodeClient:
         self._restore_pending_terminal_frames()
 
     def _restore_pending_trace_frames(self):
-        """Requeue unacknowledged trace events once per reconnect."""
+        """Requeue unacknowledged trace events in per-run sequence order.
 
-        queued = {
-            (
-                str(frame.get("run_uuid") or ""),
-                event.get("sequence"),
+        Frames emitted while a connection is down can be newer than frames
+        that were already popped by the send loop but never acknowledged.
+        Rebuilding each run's trace segment prevents the newer frames from
+        overtaking those older pending frames after reconnect.
+        """
+
+        trace_frames = collections.OrderedDict()
+        known_frame_ids = set()
+        covered_sequences = collections.defaultdict(set)
+        for frame in self._outbox:
+            if frame.get("type") != "run_trace_events":
+                continue
+            run_uuid = str(frame.get("run_uuid") or "")
+            sequences = tuple(
+                event.get("sequence") for event in frame.get("events") or []
             )
-            for frame in self._outbox
-            if frame.get("type") == "run_trace_events"
-            for event in frame.get("events") or []
-        }
-        restored_frames = set()
-        for key, frame in self._pending_trace_frames.items():
-            frame_id = id(frame)
-            if key not in queued and frame_id not in restored_frames:
-                self._outbox.append(frame)
-                restored_frames.add(frame_id)
+            if run_uuid and sequences:
+                trace_frames[(run_uuid, sequences)] = frame
+                known_frame_ids.add(id(frame))
+                covered_sequences[run_uuid].update(sequences)
+        for (run_uuid, sequence), frame in self._pending_trace_frames.items():
+            if (
+                id(frame) in known_frame_ids
+                or sequence in covered_sequences[run_uuid]
+            ):
+                continue
+            key = (run_uuid, (sequence,))
+            trace_frames.setdefault(key, frame)
+            known_frame_ids.add(id(frame))
+            covered_sequences[run_uuid].add(sequence)
+
+        ordered_by_run = collections.defaultdict(list)
+        for (run_uuid, _sequences), frame in trace_frames.items():
+            ordered_by_run[run_uuid].append(frame)
+        for frames in ordered_by_run.values():
+            frames.sort(
+                key=lambda frame: min(
+                    event.get("sequence", 0)
+                    for event in frame.get("events") or []
+                )
+            )
+
+        rebuilt = collections.deque()
+        emitted_runs = set()
+        for frame in self._outbox:
+            run_uuid = str(frame.get("run_uuid") or "")
+            if run_uuid in ordered_by_run and run_uuid not in emitted_runs:
+                rebuilt.extend(ordered_by_run[run_uuid])
+                emitted_runs.add(run_uuid)
+            if frame.get("type") == "run_trace_events":
+                continue
+            rebuilt.append(frame)
+        for run_uuid, frames in ordered_by_run.items():
+            if run_uuid not in emitted_runs:
+                rebuilt.extend(frames)
+        self._outbox = rebuilt
         if self._outbox:
             self._outbox_ready.set()
 
@@ -478,6 +542,8 @@ class LensNodeClient:
             await self._handle_datasource_test_connection(message)
         elif message_type == "datasource_sync":
             await self._start_datasource_sync(message)
+        elif message_type == "plugin_datasource_sync":
+            await self._start_datasource_sync(message, plugin=True)
         elif message_type == "datasource_convert":
             await self._start_datasource_conversion(message)
         elif message_type == "datasource_upload":
@@ -497,10 +563,9 @@ class LensNodeClient:
             )
         elif message_type == "datasource_cancel":
             task_id = str(message.get("task_id") or "")
-            task_key = f"datasource:{task_id}"
-            task = self.running_tasks.get(task_key)
-            if task is not None:
-                task.cancel()
+            cancel_event = self.datasource_sync_cancels.get(task_id)
+            if cancel_event is not None:
+                cancel_event.set()
             LOGGER.info(
                 task_log(
                     (
@@ -766,7 +831,7 @@ class LensNodeClient:
             }
         )
 
-    async def _start_datasource_sync(self, message):
+    async def _start_datasource_sync(self, message, plugin=False):
         """Start one datasource sync without blocking WebSocket receive."""
 
         request_id = str(message.get("request_id") or "")
@@ -775,13 +840,16 @@ class LensNodeClient:
             return
 
         task_key = f"datasource:{task_id}"
+        cancel_event = threading.Event()
+        self.datasource_sync_cancels[task_id] = cancel_event
+        message = {**message, "cancel_event": cancel_event}
         task = asyncio.create_task(
-            self._execute_datasource_sync(message)
+            self._execute_datasource_sync(message, plugin)
         )
         self.running_tasks[task_key] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
 
-    async def _execute_datasource_sync(self, message):
+    async def _execute_datasource_sync(self, message, plugin=False):
         """Execute a datasource sync command in a worker thread."""
 
         request_id = str(message.get("request_id") or "")
@@ -799,6 +867,73 @@ class LensNodeClient:
             loop.call_soon_threadsafe(self._enqueue, payload)
 
         try:
+            if plugin:
+                slot_acquired = False
+
+                def report_plugin_queued():
+                    self._enqueue(
+                        {
+                            "type": "datasource_sync_event",
+                            "request_id": request_id,
+                            "task_id": task_id,
+                            "step": "queue",
+                            "status": "queued",
+                            "message": (
+                                "Waiting for exclusive LensNode execution "
+                                "capacity."
+                            ),
+                        }
+                    )
+
+                await self._acquire_execution(
+                    ExecutionClass.EXCLUSIVE,
+                    cancel_event=message.get("cancel_event"),
+                    on_queued=report_plugin_queued,
+                )
+                slot_acquired = True
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_event",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "step": "queue",
+                        "status": "running",
+                        "message": "Acquired exclusive LensNode capacity.",
+                    }
+                )
+                try:
+                    result = await asyncio.to_thread(
+                        self._execute_plugin_datasource_sync,
+                        message,
+                        emit,
+                    )
+                finally:
+                    if slot_acquired:
+                        await self.execution_queue.release(
+                            ExecutionClass.EXCLUSIVE
+                        )
+                if result.get("status") in {"failed", "cancelled"}:
+                    self._enqueue(
+                        {
+                            "type": "datasource_sync_event",
+                            "request_id": request_id,
+                            "task_id": task_id,
+                            "step": result.get("status"),
+                            "status": result.get("status"),
+                            "message": result.get("error")
+                            or "Plugin datasource synchronization ended.",
+                        }
+                    )
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_done",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "status": result.get("status") or "success",
+                        **result,
+                    }
+                )
+                return
             command = {
                 **message,
                 "ai_gateway_url": self.config.ai_gateway_url,
@@ -828,6 +963,7 @@ class LensNodeClient:
 
             await self._acquire_execution(
                 ExecutionClass.EXCLUSIVE,
+                cancel_event=message.get("cancel_event"),
                 on_queued=report_queued,
             )
             slot_acquired = True
@@ -862,7 +998,53 @@ class LensNodeClient:
                     **result,
                 }
             )
-        except Exception as exc:
+        except RunCancelledError:
+            self._enqueue(
+                {
+                    "type": "datasource_sync_event",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "step": "cancelled",
+                    "status": "cancelled",
+                    "message": "Datasource synchronization cancelled.",
+                }
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "cancelled",
+                    "error": "DATASOURCE_SYNC_CANCELLED",
+                    "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                    "stop_confirmation_source": "lensnode_callback",
+                }
+            )
+        except DataSourceSyncError as exc:
+            error_code = str(exc) or "DATASOURCE_SYNC_FAILED"
+            if error_code == "LENS_SOURCE_SYNC_CANCELLED":
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_event",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "step": "cancelled",
+                        "status": "cancelled",
+                        "message": "Datasource synchronization cancelled.",
+                    }
+                )
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_done",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "status": "cancelled",
+                        "error": "DATASOURCE_SYNC_CANCELLED",
+                        "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                        "stop_confirmation_source": "lensnode_callback",
+                    }
+                )
+                return
             self._enqueue(
                 {
                     "type": "datasource_sync_event",
@@ -870,7 +1052,7 @@ class LensNodeClient:
                     "task_id": task_id,
                     "step": "failed",
                     "status": "failed",
-                    "message": str(exc),
+                    "message": error_code,
                 }
             )
             self._enqueue(
@@ -879,11 +1061,123 @@ class LensNodeClient:
                     "request_id": request_id,
                     "task_id": task_id,
                     "status": "failed",
-                    "error": str(exc),
+                    "error": error_code,
+                }
+            )
+        except Exception:
+            LOGGER.exception(
+                "Datasource synchronization failed task_id=%s",
+                task_id,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_event",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "step": "failed",
+                    "status": "failed",
+                    "message": "DATASOURCE_SYNC_FAILED",
+                }
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": "DATASOURCE_SYNC_FAILED",
                 }
             )
         finally:
+            self.datasource_sync_cancels.pop(task_id, None)
             self.running_tasks.pop(task_key, None)
+
+    def _execute_plugin_datasource_sync(self, message, emit=None):
+        """Execute a trusted Plugin datasource using snapshot data."""
+
+        material = None
+        try:
+            snapshot = fetch_plugin_snapshot(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                message.get("snapshot_uuid"),
+            )
+            plugin_key = str(snapshot.get("plugin_key") or "")
+            plugin_version = str(snapshot.get("plugin_version") or "")
+            runtime = load_runtime_contract(plugin_key, plugin_version)
+            if not callable(runtime.build_datasource_command):
+                return {
+                    "status": "failed",
+                    "error": "PLUGIN_DATASOURCE_UNSUPPORTED",
+                }
+            lease = acquire_plugin_lease(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                message.get("snapshot_uuid"),
+            )
+            material = retrieve_plugin_material(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                lease["lease_uuid"],
+            )
+        except PluginPackageLoadError:
+            return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
+        except PluginRuntimeError as exc:
+            return {"status": "failed", "error": str(exc)}
+        except httpx.HTTPError:
+            return {"status": "failed", "error": "PLUGIN_RUNTIME_UNAVAILABLE"}
+        try:
+            command = runtime.build_datasource_command(
+                snapshot,
+                material,
+                message.get("trigger") or "plugin",
+            )
+            plugin_http_pool = getattr(
+                self,
+                "plugin_http_pool",
+                None,
+            )
+            if plugin_http_pool is not None and callable(
+                runtime.http_origins
+            ):
+                resolved = snapshot.get("resolved_config") or {}
+                endpoint = resolved.get("endpoint")
+                connection_scope = (
+                    snapshot.get("connection_uuid")
+                    or snapshot.get("snapshot_uuid")
+                    or message.get("snapshot_uuid")
+                )
+                command["provider_http_client"] = plugin_http_pool.bind(
+                    plugin_key,
+                    connection_scope,
+                    runtime.http_origins(endpoint),
+                )
+            if message.get("cancel_event") is not None:
+                command["cancel_event"] = message["cancel_event"]
+            return sync_datasource(
+                command,
+                self.config.workspace_path,
+                emit,
+            )
+        except PluginRuntimeError as exc:
+            return {"status": "failed", "error": str(exc)}
+        except DataSourceSyncError as exc:
+            if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                return {
+                    "status": "cancelled",
+                    "error": "DATASOURCE_SYNC_CANCELLED",
+                    "completion_reason": "DATASOURCE_SYNC_CANCELLED",
+                }
+            return {"status": "failed", "error": "PLUGIN_SYNC_FAILED"}
+        except Exception:
+            LOGGER.exception("Plugin datasource runtime failed")
+            return {"status": "failed", "error": "PLUGIN_EXECUTION_FAILED"}
+        finally:
+            if material is not None:
+                material["value"] = ""
 
     async def _start_datasource_conversion(self, message):
         """Start one managed workspace conversion in a worker thread."""

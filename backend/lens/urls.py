@@ -14,6 +14,7 @@ from .views import (
     AdminSharedQAViewSet,
     AdminUserAccessDetailView,
     AssistantViewSet,
+    ConnectionViewSet,
     DataSourceCredentialViewSet,
     DataSourceViewSet,
     EnvironmentVariableSetViewSet,
@@ -27,6 +28,12 @@ from .views import (
     LensNodeSkillPackageView,
     LensNodeViewSet,
     MCPServerViewSet,
+    PluginRegistryViewSet,
+    PluginCredentialLeaseView,
+    PluginCredentialMaterialView,
+    PluginExecutionSnapshotView,
+    PluginInvocationViewSet,
+    PluginToolExecutionSnapshotView,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -38,6 +45,7 @@ from .views import (
     SessionViewSet,
     SharedQAViewSet,
     SkillViewSet,
+    admin_run_trajectory_stream_view,
     run_stream_view,
 )
 
@@ -65,6 +73,21 @@ router.register(
     basename="lens-admin-credentials",
 )
 router.register(
+    "admin/plugins",
+    PluginRegistryViewSet,
+    basename="lens-admin-plugins",
+)
+router.register(
+    "admin/connections",
+    ConnectionViewSet,
+    basename="lens-admin-connections",
+)
+router.register(
+    "admin/plugin-invocations",
+    PluginInvocationViewSet,
+    basename="lens-admin-plugin-invocations",
+)
+router.register(
     "admin/environment-variable-sets",
     EnvironmentVariableSetViewSet,
     basename="lens-admin-environment-variable-sets",
@@ -82,6 +105,26 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "plugin-runtime/tool-snapshots/",
+        PluginToolExecutionSnapshotView.as_view(),
+        name="lens-plugin-tool-execution-snapshot",
+    ),
+    path(
+        "plugin-runtime/leases/",
+        PluginCredentialLeaseView.as_view(),
+        name="lens-plugin-credential-lease",
+    ),
+    path(
+        "plugin-runtime/leases/<uuid:lease_uuid>/material/",
+        PluginCredentialMaterialView.as_view(),
+        name="lens-plugin-credential-material",
+    ),
+    path(
+        "plugin-runtime/snapshots/<uuid:snapshot_uuid>/",
+        PluginExecutionSnapshotView.as_view(),
+        name="lens-plugin-execution-snapshot",
+    ),
     path(
         "admin/access/users/<int:user_id>/",
         AdminUserAccessDetailView.as_view(),
@@ -156,6 +199,11 @@ urlpatterns = [
         "admin/runs/<uuid:run_uuid>/trajectory/",
         AdminRunTrajectoryView.as_view(),
         name="lens-admin-run-trajectory",
+    ),
+    path(
+        "admin/runs/<uuid:run_uuid>/trajectory/stream/",
+        admin_run_trajectory_stream_view,
+        name="lens-admin-run-trajectory-stream",
     ),
     path(
         "admin/runs/<uuid:run_uuid>/diagnostics/",

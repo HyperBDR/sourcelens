@@ -108,6 +108,26 @@ test('run resources use one ledger with configured and call counts', async () =>
   assert.doesNotMatch(contents, /data-testid="run-resource-calls"/)
 })
 
+test('run resources label plugin tools with their owning plugin', async () => {
+  const [contents, english, chinese] = await Promise.all([
+    source(),
+    readFile(new URL('../src/admin/locales/en.json', import.meta.url), 'utf8').then(
+      JSON.parse
+    ),
+    readFile(
+      new URL('../src/admin/locales/zh-CN.json', import.meta.url),
+      'utf8'
+    ).then(JSON.parse)
+  ])
+
+  assert.match(contents, /function resourceTypeLabel\(resource\)/)
+  assert.match(contents, /resource\.resource_type === 'plugin'/)
+  assert.match(contents, /resource\.plugin_name/)
+  assert.match(contents, /lensRuns\.pluginResource/)
+  assert.equal(english.lensRuns.pluginResource, '{name} Plugin')
+  assert.equal(chinese.lensRuns.pluginResource, '{name} 插件')
+})
+
 test('run overview separates executor status from business outcome', async () => {
   const contents = await source()
 

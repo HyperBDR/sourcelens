@@ -89,6 +89,7 @@
     "calledResources": "本次调用",
     "skillResource": "Skill",
     "mcpResource": "MCP",
+    "pluginResource": "{name} 插件",
     "toolResource": "工具",
     "totalResourceCalls": "总调用次数",
     "resourceName": "资源",
@@ -140,6 +141,10 @@
     "trajectoryRawEvent": "原始事件",
     "trajectorySelectEvent": "选择一个事件查看完整内容",
     "trajectoryLoadMore": "加载更多轨迹事件",
+    "trajectoryStreamConnecting": "正在连接实时更新",
+    "trajectoryStreamLive": "实时更新中",
+    "trajectoryStreamReconnecting": "正在重新连接实时更新",
+    "trajectoryNewEvents": "{n} 条新事件 · 跳到最新",
     "trajectoryCalls": "调用",
     "trajectoryCollapseAllCalls": "折叠全部工具调用",
     "trajectoryExpandAllCalls": "展开全部工具调用",
@@ -832,6 +837,16 @@
       "subjectPrefixPlaceholder": "选填，如 【系统】、【告警】",
       "subjectPrefixDesc": "发送时自动加在邮件主题前，便于区分来源。",
       "validate": "校验",
+      "discoverResources": "从账号发现资源",
+      "discoverResourcesHint": "临时使用当前填写的密钥查询候选项；只有勾选并保存的资源会被授权。",
+      "discoverResourcesAction": "获取可访问资源",
+      "discoveryFailed": "资源发现失败",
+      "privateResource": "私有",
+      "resourceTreeEmpty": "请先获取可访问资源，再从树中选择授权项。",
+      "resourceSearchPlaceholder": "搜索 owner 或仓库名称",
+      "resourceSearchEmpty": "没有匹配的仓库",
+      "resourceCountLabel": "个资源",
+      "selectedCountLabel": "个已选择",
       "validateSuccess": "校验通过",
       "validateFailed": "校验失败",
       "validateUrlRequired": "请填写 Webhook 地址",
@@ -940,11 +955,21 @@
         "label": "数据源",
         "action": "新建数据源"
       },
+      "connections": {
+        "title": "连接管理",
+        "description": "管理可供数据源和助手工具复用的插件连接。",
+        "label": "连接",
+        "action": "新建连接"
+      },
       "credentials": {
         "title": "凭证管理",
         "description": "管理 GitHub、GitLab 和飞书数据源同步凭证。",
         "label": "凭证",
         "action": "新建凭证"
+      },
+      "pluginReleases": {
+        "title": "Plugin 版本",
+        "description": "发布已安装的 Plugin 版本，并独立指定候选版本与生产版本。"
       },
       "environmentVariables": {
         "title": "环境变量",
@@ -977,11 +1002,48 @@
         "action": "新建配置"
       }
     },
+    "pluginReleases": {
+      "reconcile": "扫描已安装版本",
+      "empty": "未发现已安装的 Plugin 版本",
+      "installation": "安装状态",
+      "installed": "已安装",
+      "missing": "文件缺失",
+      "integrity": "完整性",
+      "publishedAt": "发布时间",
+      "publish": "发布",
+      "setCandidate": "设为候选版本",
+      "setActive": "设为生产版本",
+      "clearRole": "移除部署角色",
+      "retire": "退役",
+      "loadFailed": "加载 Plugin 版本失败",
+      "reconcileSuccess": "已扫描并登记安装目录中的 Plugin 版本",
+      "reconcileFailed": "扫描 Plugin 版本失败",
+      "actionSuccess": "Plugin 版本状态已更新",
+      "actionFailed": "更新 Plugin 版本状态失败",
+      "retireConfirm": "确认退役这个 Plugin 版本？退役后不能再分配部署角色。",
+      "integrityValid": "校验通过",
+      "integrityInvalid": "内容已变化",
+      "integrityMutable": "调试版本可变",
+      "status": {
+        "debugging": "调试中",
+        "published": "已发布",
+        "retired": "已退役"
+      },
+      "role": {
+        "active": "生产版本",
+        "candidate": "候选版本"
+      }
+    },
     "mcp": {
       "secretConfigured": "已配置",
       "sensitiveConfigHint": "密码、Secret、Token、API Key、Authorization、Credential 和私钥配置会以掩码显示。保留掩码表示不修改，输入新值表示覆盖，删除该行表示清除。",
       "environmentVariablesHelp": "添加此 MCP Server 运行所需的变量；将 MCP Server 绑定到 Assistant 时再填写变量值。",
-      "environmentPlaceholderHint": "可在 Endpoint 或 Config 中使用 {placeholder} 引用已声明变量；SourceLens 只会在每次 Run 的私有 MCP 配置中解析。"
+      "environmentPlaceholderHint": "可在 Endpoint 或 Config 中使用 {placeholder} 引用已声明变量；SourceLens 只会在每次 Run 的私有 MCP 配置中解析。",
+      "pluginConnection": "插件连接",
+      "selectConnection": "请选择连接",
+      "pluginTools": "插件工具",
+      "noPluginTools": "请选择一个声明了工具的有效连接。",
+      "pluginAdapterHint": "插件适配器复用原生快照、租约、范围校验和审计链路，不能配置 Endpoint、Header、环境变量或凭证。"
     },
     "skills": {
       "searchPlaceholder": "搜索名称、Slug、描述或来源",
@@ -1221,6 +1283,261 @@
       "removeFilter": "删除筛选条件",
       "filterCount": "已添加 {count} 个筛选条件"
     },
+    "datasourceCard": {
+      "resource": "源地址",
+      "target": "目标路径"
+    },
+    "pluginForm": {
+      "selectOption": "请选择",
+      "loadingOptions": "正在加载选项…",
+      "noResourcesLoaded": "尚未加载资源。",
+      "searchResources": "搜索资源",
+      "noMatchingResources": "没有匹配的资源。",
+      "resources": "个资源",
+      "selected": "已选择",
+      "private": "私有"
+    },
+    "plugins": {
+      "feishu": {
+        "displayName": "飞书",
+        "description": "连接飞书自建应用，将有权访问的云盘文件夹、文档、表格、幻灯片、多维表格和知识库页面同步到 LensNode 工作区。",
+        "connectionFields": {
+          "app_id": {
+            "title": "App ID",
+            "description": "已发布且拥有所需文档权限的飞书自建应用 App ID。"
+          },
+          "app_secret": {
+            "title": "App Secret",
+            "description": "同一飞书自建应用的 App Secret，保存后会加密存储。"
+          }
+        },
+        "datasourceFields": {
+          "resource_urls": {
+            "title": "飞书资源地址",
+            "description": "每项填写一个 HTTPS 文件夹、文档、表格、幻灯片、多维表格或知识库地址。"
+          },
+          "recursive": {
+            "title": "包含子文件夹",
+            "description": "递归同步嵌套文件夹中的资源。"
+          },
+          "max_depth": {
+            "title": "最大文件夹深度",
+            "description": "限制同步的嵌套文件夹层级。"
+          },
+          "incremental": {
+            "title": "跳过未变更文件",
+            "description": "飞书资源未发生变化时复用本地文件。"
+          },
+          "delete_missing": {
+            "title": "删除已缺失的本地文件",
+            "description": "飞书资源不再存在时删除对应的本地文件。建议保持关闭，以降低误删风险。"
+          }
+        }
+      },
+      "github": {
+        "displayName": "GitHub",
+        "description": "连接 GitHub.com 仓库，用于文件同步和助手只读查询。",
+        "connectionFields": {
+          "secret_value": {
+            "title": "个人访问令牌",
+            "description": "仅用于写入、且对已授权仓库具有读取权限的令牌。"
+          },
+          "repositories": {
+            "title": "允许访问的仓库",
+            "description": "明确指定此连接可以访问的 owner/repository。"
+          }
+        },
+        "datasourceFields": {
+          "repository": {
+            "title": "仓库"
+          },
+          "branch": {
+            "title": "分支"
+          },
+          "directory": {
+            "title": "目录",
+            "description": "可选。填写需要同步的仓库相对目录。"
+          }
+        }
+      },
+      "gitlab": {
+        "displayName": "GitLab",
+        "description": "使用个人访问令牌连接已授权的 GitLab.com 或私有部署项目；数据源同步仓库文件，助手可只读查看代码、提交、Merge Request 和 Issue。",
+        "connectionFields": {
+          "endpoint": {
+            "title": "GitLab 服务地址",
+            "description": "GitLab 公有云或私有部署实例的根 HTTP(S) 地址。"
+          },
+          "secret_value": {
+            "title": "个人访问令牌",
+            "description": "仅用于写入、且对已授权项目具有 read_api 和 read_repository 权限的令牌。"
+          },
+          "projects": {
+            "title": "允许访问的项目",
+            "description": "明确指定此连接可以访问的 namespace/project。"
+          }
+        },
+        "datasourceFields": {
+          "project": {
+            "title": "项目"
+          },
+          "branch": {
+            "title": "分支"
+          },
+          "directory": {
+            "title": "目录",
+            "description": "可选。填写需要同步的项目相对目录。"
+          }
+        }
+      },
+      "jira": {
+        "displayName": "Jira",
+        "description": "使用账号和 API Token 连接已授权的 Jira Cloud 或私有部署项目，通过助手只读搜索 Issue、读取详情并汇总活动。",
+        "connectionFields": {
+          "endpoint": {
+            "title": "Jira 服务地址",
+            "description": "Jira Cloud 或私有部署实例的根 HTTP(S) 地址。"
+          },
+          "email": {
+            "title": "账号",
+            "description": "与 Jira API Token 配对使用的非密钥账号标识。"
+          },
+          "secret_value": {
+            "title": "API Token",
+            "description": "仅用于写入、且具有读取权限的 Jira API Token。"
+          },
+          "projects": {
+            "title": "允许访问的项目",
+            "description": "明确指定此连接可以访问的 Jira 项目 Key。"
+          }
+        },
+        "datasourceFields": {}
+      }
+    },
+    "connections": {
+      "name": "连接名称",
+      "pluginLabel": "插件",
+      "basicSection": "基本信息",
+      "basicSectionHint": "为连接设置一个便于识别的名称，并确认使用的插件。",
+      "accessSection": "连接与授权",
+      "accessSectionHint": "填写服务地址和密钥，并选择需要开放给数据源与助手的资源。",
+      "feishuGuideTitle": "飞书应用配置指引",
+      "feishuGuideSummary": "创建自建应用、申请权限并授权需要同步的资源。",
+      "feishuGuideCreateTitle": "创建飞书自建应用",
+      "feishuGuideCreateHint": "前往飞书开放平台创建企业自建应用，在「凭证与基础信息」中获取 App ID 和 App Secret。",
+      "feishuGuidePermissionTitle": "申请 API 权限并发布应用",
+      "feishuGuidePermissionHint": "在「权限管理」中申请以下权限，然后创建并发布应用版本。同步知识库页面时还需要 wiki 权限。",
+      "feishuGuidePermissionListLabel": "飞书应用所需权限",
+      "feishuGuideResourceTitle": "授权应用访问目标资源",
+      "feishuGuideResourceHint": "在飞书云盘或知识库中，将需要同步的文件夹、文档或知识库授权给该应用。仅配置 API 权限并不会自动开放全部文档。",
+      "feishuGuideConnectTitle": "保存连接并配置数据源",
+      "feishuGuideConnectHint": "在左侧填写 App ID 和 App Secret。连接保存后，到数据源中逐条添加 folder、doc 或 wiki URL；保存数据源时会验证每个地址是否可访问。",
+      "feishuGuideOpenPlatformLink": "飞书开放平台",
+      "feishuGuideDataPermissionLink": "应用数据权限说明",
+      "feishuGuideApiPermissionLink": "API 权限列表",
+      "feishuGuideLinksLabel": "飞书配置文档",
+      "githubGuideTitle": "GitHub 连接配置指引",
+      "githubGuideSummary": "创建最小权限的 Token，并只授权需要使用的仓库。",
+      "githubGuideCreateTitle": "创建细粒度个人访问令牌",
+      "githubGuideCreateHint": "GitHub 目前建议优先使用细粒度个人访问令牌。SourceLens 当前仅支持 GitHub.com Personal Access Token，不支持 OAuth 或 GitHub Enterprise。",
+      "githubGuideRepositoryTitle": "限制仓库访问范围",
+      "githubGuideRepositoryHint": "在 Repository access 中选择 Only select repositories，并只勾选需要同步或供助手查询的仓库。",
+      "githubGuidePermissionTitle": "授予只读仓库权限",
+      "githubGuidePermissionHint": "Contents 只读是同步文件和读取代码所必需的；其他权限仅在需要对应助手工具时开启。Metadata 读取权限由 GitHub 自动授予。",
+      "githubGuideContentsPermission": "只读 · 数据源与代码读取必需",
+      "githubGuideIssuesPermission": "只读 · 使用 Issue 工具时需要",
+      "githubGuidePullsPermission": "只读 · 使用 PR 工具时需要",
+      "githubGuideActionsPermission": "只读 · 查看工作流运行时需要",
+      "githubGuideConnectTitle": "验证并保存允许范围",
+      "githubGuideConnectHint": "填写 Token 后获取可访问仓库，只选择要授权的仓库。数据源只同步仓库文件；Issue、PR、Release 和 Actions 不进入知识库，仍通过只读助手工具按需查询。",
+      "githubGuideCreateLink": "创建细粒度 Token",
+      "githubGuideTokenDocsLink": "GitHub Token 配置文档",
+      "githubGuidePermissionDocsLink": "细粒度 Token 权限说明",
+      "githubGuideLinksLabel": "GitHub 配置文档",
+      "gitlabGuideTitle": "GitLab 连接配置指引",
+      "gitlabGuideSummary": "创建最小权限的 Token，并只授权需要使用的项目。",
+      "gitlabGuideEndpointTitle": "确认 GitLab 服务地址",
+      "gitlabGuideEndpointHint": "GitLab.com 填写 https://gitlab.com；私有部署填写实例根 HTTP(S) 地址，不附加 /api/v4。建议使用 HTTPS，并确认 SourceLens 可以访问该地址。",
+      "gitlabGuideTokenTitle": "创建个人访问令牌",
+      "gitlabGuideTokenHint": "在 GitLab 的 Access → Personal access tokens 中创建 Token、设置有效期并立即保存。SourceLens 当前仅支持个人访问令牌，不支持 OAuth。",
+      "gitlabGuideApiScope": "项目发现与只读 API/Tool 必需",
+      "gitlabGuideRepositoryScope": "数据源同步仓库文件必需",
+      "gitlabGuideProjectTitle": "获取并限制允许项目",
+      "gitlabGuideProjectHint": "填写服务地址和 Token 后获取该账号加入的项目，并只选择需要同步或供助手查询的 namespace/project。账号本身必须拥有项目读取权限；SourceLens 的允许项目范围不会授予 GitLab 权限。",
+      "gitlabGuideBoundaryTitle": "确认数据源与只读 Tool 边界",
+      "gitlabGuideBoundaryHint": "数据源只同步所选项目、分支和目录中的仓库文件；提交、Merge Request 和 Issue 不进入知识库，仍由助手通过只读 Tool 查询。SourceLens 不创建、修改或删除 GitLab 资源。",
+      "gitlabGuideTokenDocsLink": "GitLab 个人访问令牌文档",
+      "gitlabGuideScopeDocsLink": "GitLab Token Scope 说明",
+      "gitlabGuideAuthDocsLink": "GitLab REST API 认证文档",
+      "gitlabGuideLinksLabel": "GitLab 配置文档",
+      "jiraGuideTitle": "Jira 连接配置指引",
+      "jiraGuideSummary": "配置账号与 Token，并只开放需要查询的项目。",
+      "jiraGuideEndpointTitle": "确认部署类型和服务地址",
+      "jiraGuideEndpointHint": "Jira Cloud 填写 https://your-domain.atlassian.net；私有部署填写实例根 HTTP(S) 地址，不附加 REST API 路径。",
+      "jiraGuideCredentialTitle": "准备账号和 API Token",
+      "jiraGuideCredentialHint": "Jira Cloud 使用 Atlassian 账号邮箱和在账号安全页创建的 API Token；私有部署使用实例接受的账号与 Token。SourceLens 通过 Basic Auth 验证，密钥只写入并加密保存。",
+      "jiraGuideProjectHint": "填写凭证后获取可访问项目，并只选择允许助手查询的 Project Key。账号本身必须在 Jira 中拥有 Browse projects 和 Issue 查看权限；SourceLens 的允许项目范围不会授予 Jira 权限。",
+      "jiraGuideBoundaryTitle": "确认只读 Tool 边界",
+      "jiraGuideBoundaryHint": "Jira 目前仅作为助手的只读 Tool，可读取 Issue、按项目搜索并汇总活动；不作为数据源，也不创建、修改或删除 Issue、Project 或 Board。",
+      "jiraGuideCreateTokenLink": "创建 Jira Cloud API Token",
+      "jiraGuideAuthDocsLink": "Jira Cloud Basic Auth 文档",
+      "jiraGuideLinksLabel": "Jira 配置文档",
+      "lifecycleSection": "生命周期",
+      "lifecycleSectionHint": "停用连接后，绑定的数据源和助手将无法继续访问外部服务。",
+      "total": "连接总数",
+      "activeCount": "启用中",
+      "pluginCount": "已接入插件",
+      "emptyHint": "创建一个连接，让数据源和助手复用同一份授权。",
+      "unknownPlugin": "未知插件",
+      "connectionOverview": "连接配置概览",
+      "scope": "允许范围",
+      "repositoryTotal": "共 {count} 个授权资源",
+      "otherResources": "其他资源",
+      "usage": "数据源 / 助手",
+      "datasourceLabel": "Datasource",
+      "toolLabel": "Tool",
+      "datasources": "数据源",
+      "assistants": "助手",
+      "status": "状态",
+      "actions": "操作",
+      "endpoint": "服务地址",
+      "repositories": "允许访问的仓库",
+      "repositoriesHint": "每行填写一个 owner/repository；该范围同时约束数据源和助手工具。",
+      "token": "Personal Access Token",
+      "tokenEditHint": "输入框中的掩码表示当前已保存的 Token；留空会继续使用它，填写新值才会替换。可直接使用已保存的 Token 重新获取仓库。",
+      "secretConfigured": "••••••••（已保存）",
+      "secretStored": "密钥已安全保存",
+      "secretMissing": "未配置密钥",
+      "validate": "验证",
+      "discoverResources": "从账号发现资源",
+      "discoverResourcesHint": "临时使用当前填写的密钥查询候选项；只有勾选并保存的资源会被授权。",
+      "discoverResourcesAction": "获取可访问资源",
+      "discoveryFailed": "资源发现失败",
+      "privateResource": "私有",
+      "resourceTreeEmpty": "请先获取可访问资源，再从树中选择授权项。",
+      "resourceSearchPlaceholder": "搜索 owner 或仓库名称",
+      "resourceSearchEmpty": "没有匹配的仓库",
+      "resourceCountLabel": "个资源",
+      "selectedCountLabel": "个已选择",
+      "createTitle": "新建连接",
+      "editTitle": "编辑连接",
+      "loadFailed": "连接加载失败",
+      "saveSuccess": "连接保存成功",
+      "saveFailed": "连接保存失败",
+      "validationSuccess": "连接验证成功，可用资源 {count} 个",
+      "validationFailed": "连接验证失败",
+      "deleteConfirm": "确定删除这个连接？",
+        "deleteSuccess": "连接已删除",
+      "deleteFailed": "连接删除失败",
+      "pause": "暂停连接",
+      "resume": "恢复连接",
+      "paused": "连接已暂停",
+      "resumed": "连接已恢复",
+      "searchPlaceholder": "搜索连接名称、插件或地址",
+      "allPlugins": "全部插件",
+      "allStatuses": "全部状态",
+      "secret": "密钥"
+    },
     "credentials": {
       "secretConfigured": "密钥已配置",
       "secretMissing": "密钥未配置",
@@ -1280,18 +1597,27 @@
       "basicInfo": "基本信息",
       "tabs": {
         "basic": "基本信息",
-        "details": "详情信息"
+        "details": "同步记录"
       },
       "connection": "连接信息",
+      "resourceAndTarget": "资源与目标",
+      "connectionManaged": "由 Connection 托管",
+      "legacyConnection": "旧版配置",
       "repositories": "仓库列表",
       "sync": "同步信息",
       "retrieval": "检索增强",
       "unknownModel": "未知模型（{id}）",
       "credential": "凭证状态",
       "lastSyncedAt": "最近同步",
+      "lastStatus": "最近结果",
       "lastError": "最近错误",
       "createdAt": "创建时间",
       "updatedAt": "更新时间",
+      "processing": {
+        "document": "文档处理",
+        "image": "图片处理",
+        "pdf": "PDF 高级处理"
+      },
       "details": {
         "colStartedAt": "触发时间",
         "colStatus": "状态",
@@ -1316,8 +1642,8 @@
       "sync": "同步",
       "refreshAvailability": "检查路径",
       "uploadFile": "上传文件",
-      "enableDatasource": "启用",
-      "disableDatasource": "禁用",
+      "enableDatasource": "恢复同步",
+      "disableDatasource": "暂停同步",
       "cancelSync": "取消同步",
       "viewTask": "查看任务",
       "addRow": "添加一行",
@@ -1505,16 +1831,20 @@
     "datasourceWizard": {
       "createTitle": "新建数据源",
       "editTitle": "编辑数据源",
-      "step1Title": "基础信息",
-      "step1Desc": "设置数据源名称、类型与启用状态。",
-      "step2Title": "绑定节点",
-      "step2Desc": "选择负责执行同步的在线 LensNode。",
-      "step3Title": "连接配置",
-      "step3Desc": "填写数据源连接信息。凭证会加密保存，执行同步时临时下发到绑定节点。",
-      "step4Title": "同步策略",
-      "step4Desc": "设置节点本地同步目录和周期同步间隔。",
-      "step5Title": "检索增强",
-      "step5Desc": "配置同步后的内容转换，用于搜索和 AI Query。",
+      "progressLabel": "配置进度",
+      "step1Title": "来源",
+      "step1Desc": "设置数据源名称和类型。",
+      "step2Title": "连接与资源",
+      "step2Desc": "选择连接，并指定需要同步的仓库或资源。",
+      "step3Title": "目标与同步",
+      "step3Desc": "选择执行节点、目标目录和同步策略。",
+      "summarySource": "数据源",
+      "summaryResource": "来源连接",
+      "summaryTarget": "同步目标",
+      "summaryPending": "待配置",
+      "summaryNotSelected": "未选择",
+      "processingTitle": "内容处理（可选）",
+      "processingHint": "按需开启文档、图片转换和检索增强配置。",
       "githubDesc": "同步 GitHub 仓库、组织或用户命名空间到节点工作区。",
       "gitlabDesc": "同步 GitLab 仓库、Group 或项目命名空间到节点工作区。",
       "gitDesc": "同步一个 Git 仓库到节点工作区。",
@@ -1544,6 +1874,11 @@
       "authToken": "HTTPS Token",
       "noCredential": "不使用已有凭证",
       "selectCredential": "请选择 Git HTTPS Token 凭证",
+      "selectConnection": "请选择连接",
+      "selectRepository": "请选择允许访问的仓库",
+      "repositoryDirectory": "仓库目录",
+      "createConnectionHint": "未找到合适的连接？请先在连接管理中创建并验证。",
+      "createConnectionLink": "打开连接管理",
       "createCredentialHint": "未找到合适的凭证？请先在凭证管理中创建，创建完成后返回本页面刷新选择。",
       "createCredentialLink": "前往创建凭证",
       "quickCreateCredential": "新建凭证",
@@ -1575,6 +1910,8 @@
       "newDirPlaceholder": "目录路径，如 hyperbdr-code/ant",
       "testConnection": "测试连接",
       "connectionRequired": "请先完成数据源连接测试。",
+      "feishuResourcesAccessible": "已确认可以访问全部飞书资源。",
+      "feishuResourcesInaccessible": "以下飞书资源无法访问：{urls}",
       "syncPolicyInterval": "固定间隔",
       "syncPolicyCrontab": "Crontab 表达式",
       "intervalHint": "单位为秒，建议不少于 60 秒。",
@@ -1738,7 +2075,7 @@
       "collaborationMembersHint": "选择处于启用状态的直接助手，新 Session 会复用这组成员。",
       "noCollaborationMembers": "请先创建一个启用的直接助手。",
       "smartResourcesHint": "智能助手使用所选成员。Skill、MCP、LensNode 和执行工作区由成员助手管理；下方可补充智能协作指引。",
-      "generalChatExecutionHint": "通用对话使用绑定的 Skill、包内脚本和包内二进制运行，不启用工作区目录检索。",
+      "generalChatExecutionHint": "通用对话使用绑定的 Skill、内置插件工具、包内脚本和包内二进制运行，不启用工作区目录检索。",
       "noAssistantDescription": "未填写助手说明",
       "step3Title": "技能与工作区",
       "step3Desc": "绑定 Skills 与 MCP，并补充工作区背景，均为可选",
@@ -1759,8 +2096,7 @@
       "postPromptHint": "在检索结束后注入，用于控制回答格式或施加输出规则。",
       "postPromptPlaceholder": "留空使用系统默认…",
       "skillsSection": "Skills",
-      "skillsSectionRequired": "Skills *",
-      "generalChatSkillsHint": "请至少选择一个 Skill。通用对话会根据绑定 Skill 的指令、包内脚本和包内二进制运行。",
+      "generalChatSkillsHint": "可选。通用对话至少需要一个已启用的 Skill 或内置插件工具。",
       "searchSkills": "搜索 Skills",
       "skillSearchResults": "显示 {count} / {total} 个 Skills",
       "noMatchingSkills": "没有匹配的 Skills",
@@ -1783,6 +2119,13 @@
       "environmentSetRequiredHint": "请选择已有配置集或新建配置集后继续。变量值必须保存在配置集中。",
       "environmentSetUnusedValues": "配置集中另有 {count} 个当前资源未声明的变量，已隐藏且运行时不会传入。",
       "mcpSection": "MCP Servers",
+      "pluginSection": "内置插件工具",
+      "pluginSectionHint": "绑定连接后，该助手会自动获得对应插件 Manifest 声明的全部只读能力。模型只会看到工具说明和参数，不会接触连接信息或密钥。",
+      "noPluginConnection": "不启用 GitHub 插件工具",
+      "pluginAllowedRepositories": "该连接允许访问的仓库",
+      "pluginAllTools": "已启用该插件的全部只读能力",
+      "pluginConnectionOptional": "可选。请先在连接管理中创建并验证插件连接。",
+      "pluginRequirementsMissing": "所选 Skills 还缺少以下插件能力：{requirements}",
       "mcpEnvironmentSectionHint": "这些配置仅对当前 MCP Server 生效；继续前需配置全部必填变量。",
       "mcpEnvironmentConfigurationHint": "该 MCP Server 声明了 {count} 个环境变量。请选择已有配置集，或在这里新建。",
       "noSkills": "暂无可用 Skill，请先在 Skill 资源库中创建",

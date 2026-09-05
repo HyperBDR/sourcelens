@@ -18,9 +18,7 @@
           <div
             class="mb-6 flex flex-shrink-0 flex-col items-start justify-between gap-3 sm:flex-row sm:flex-nowrap sm:items-center"
           >
-            <div
-              class="flex min-w-0 flex-1 flex-nowrap items-center gap-2"
-            >
+            <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-2">
               <label
                 class="text-sm font-medium text-gray-700 whitespace-nowrap"
               >

@@ -1,19 +1,22 @@
 import base64
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import tarfile
 import time
 import zipfile
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
+from . import datasource_manifest as manifest_store
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
-from . import datasource_manifest as manifest_store
 from .document_convert import empty_cost_stats
 from .document_convert import is_convertible, post_process_documents
 from .document_convert import merge_cost_stats
@@ -30,6 +33,8 @@ GIT_SHALLOW_DEPTH = "1"
 DETAIL_ITEMS_LIMIT = 200
 DEFAULT_CONVERSION_BATCH_SIZE = 16
 DEFAULT_CONVERSION_MAX_FILES = 100000
+GIT_MAX_FILES = 100000
+GIT_MAX_BYTES = 1024 * 1024 * 1024
 UPLOAD_MAX_EXTRACTED_BYTES = 250 * 1024 * 1024
 UPLOAD_MAX_EXTRACTED_FILES = 10000
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
@@ -37,6 +42,11 @@ FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
 FEISHU_EXPORT_POLL_INTERVAL_S = 2
 FEISHU_EXPORT_TIMEOUT_S = 600
+FEISHU_MAX_SYNC_ITEMS = 100000
+FEISHU_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{4,255}$")
+FEISHU_RESOURCE_KINDS = frozenset(
+    {"bitable", "docx", "folder", "sheet", "slides", "wiki"}
+)
 FEISHU_EXPORT_STATUS_MESSAGES = {
     0: "success",
     1: "initializing",
@@ -919,12 +929,12 @@ def _test_git_connection(config):
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
 
     branch = str(config.get("branch") or "").strip()
-    auth_url = _git_auth_url(repo_url, config)
     try:
         result = _run_git(
-            ["ls-remote", "--heads", auth_url],
+            ["ls-remote", "--heads", repo_url],
             timeout=60,
             detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **_git_run_options(config),
         )
     except DataSourceSyncError:
         organization_result = _discover_git_organization(config)
@@ -1365,11 +1375,11 @@ def _git_repo_branches(repo_url, config):
     """Return remote branches for one repository URL."""
 
     try:
-        auth_url = _git_auth_url(repo_url, config)
         result = _run_git(
-            ["ls-remote", "--heads", auth_url],
+            ["ls-remote", "--heads", repo_url],
             timeout=60,
             detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **_git_run_options(config),
         )
     except DataSourceSyncError:
         return []
@@ -1484,8 +1494,18 @@ def _sync_git(command, workspace_path, emit):
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
 
     target = normalize_target_path(command.get("target_path"), workspace_path)
-    branch = config.get("branch") or "main"
-    auth_url = _git_auth_url(repo_url, config)
+    git_options = _git_run_options(config)
+    cancel_event = command.get("cancel_event")
+    if cancel_event is not None:
+        git_options["cancel_event"] = cancel_event
+    branch = config.get("branch") or _git_default_branch_from_remote(
+        repo_url,
+        git_options,
+    )
+    if not branch:
+        raise DataSourceSyncError(
+            "LENS_SOURCE_GIT_DEFAULT_BRANCH_UNAVAILABLE"
+        )
     previous_manifest = _read_manifest(target)
     previous_items = manifest_store.manifest_items_by_source_id(
         previous_manifest
@@ -1506,12 +1526,29 @@ def _sync_git(command, workspace_path, emit):
                 "--branch",
                 branch,
                 "--single-branch",
-                auth_url,
+                repo_url,
                 str(target),
             ],
             detail_prefix="LENS_SOURCE_GIT_CLONE_FAILED",
+            **git_options,
         )
     else:
+        remote_url = _git_output(
+            ["remote", "get-url", "origin"],
+            cwd=target,
+        )
+        if _has_embedded_credentials(remote_url):
+            _run_git(
+                [
+                    "remote",
+                    "set-url",
+                    "origin",
+                    _strip_url_credentials(repo_url),
+                ],
+                cwd=target,
+                detail_prefix="LENS_SOURCE_GIT_REMOTE_UPDATE_FAILED",
+                **git_options,
+            )
         _run_git(
             [
                 "fetch",
@@ -1523,21 +1560,32 @@ def _sync_git(command, workspace_path, emit):
             ],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_FETCH_FAILED",
+            **git_options,
         )
         _run_git(
             ["checkout", branch],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_CHECKOUT_FAILED",
+            **git_options,
         )
         _run_git(
             ["reset", "--hard", f"origin/{branch}"],
             cwd=target,
             detail_prefix="LENS_SOURCE_GIT_RESET_FAILED",
+            **git_options,
         )
 
-    _sync_git_submodules(target)
+    if config.get("allow_submodules", True):
+        _sync_git_submodules(target, git_options=git_options)
 
-    items = _git_manifest_items(target, repo_url, branch)
+    _validate_git_tree_size(target)
+
+    items = _git_manifest_items(
+        target,
+        repo_url,
+        branch,
+        directory=config.get("directory") or "",
+    )
     changed_paths, deleted_paths, skipped = _git_manifest_delta(
         items,
         previous_items,
@@ -1632,7 +1680,7 @@ def _sync_git_organization(command, workspace_path, emit):
             "config": {
                 **config,
                 "repo_url": repository.get("repo_url") or "",
-                "branch": repository.get("branch") or config.get("branch") or "main",
+                "branch": repository.get("branch") or config.get("branch") or "",
             },
         }
         repo_command["config"].pop("repositories", None)
@@ -1674,6 +1722,8 @@ def _sync_git_organization(command, workspace_path, emit):
                 _repository_summary(name, repository, "success", result)
             )
         except Exception as exc:
+            if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                raise
             totals["failed"] += 1
             repository_event_status = "failed"
             repository_event_error = str(exc)
@@ -1807,7 +1857,7 @@ def _repository_summary(name, repository, status, result):
     }
 
 
-def _sync_git_submodules(target):
+def _sync_git_submodules(target, git_options=None):
     """Synchronize Git submodules when the repository declares them."""
 
     if not (target / ".gitmodules").exists():
@@ -1816,6 +1866,7 @@ def _sync_git_submodules(target):
         ["submodule", "sync", "--recursive"],
         cwd=target,
         detail_prefix="LENS_SOURCE_GIT_SUBMODULE_SYNC_FAILED",
+        **(git_options or {}),
     )
     _run_git(
         [
@@ -1828,20 +1879,27 @@ def _sync_git_submodules(target):
         ],
         cwd=target,
         detail_prefix="LENS_SOURCE_GIT_SUBMODULE_UPDATE_FAILED",
+        **(git_options or {}),
     )
 
 
-def _git_manifest_items(target, repo_url, branch):
+def _git_manifest_items(target, repo_url, branch, directory=""):
     """Return unified manifest items for a Git datasource."""
 
     items = []
     commit = _git_output(["rev-parse", "HEAD"], cwd=target)
+    directory_path = Path(str(directory or "").strip())
     for path in sorted(target.rglob("*")):
         if not path.is_file():
             continue
         if _is_generated_datasource_path(target, path):
             continue
         local_path = relative_path(target, path)
+        if directory_path != Path("."):
+            try:
+                Path(local_path).relative_to(directory_path)
+            except ValueError:
+                continue
         extension = path.suffix.lower().lstrip(".")
         source_id = f"git:{repo_url}:{branch}:{local_path}"
         items.append(
@@ -1867,6 +1925,25 @@ def _git_manifest_items(target, repo_url, branch):
             )
         )
     return items
+
+
+def _validate_git_tree_size(target):
+    """Reject repositories that exceed the LensNode resource ceiling."""
+
+    files = 0
+    total_bytes = 0
+    for path in target.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        files += 1
+        try:
+            total_bytes += path.stat().st_size
+        except OSError as exc:
+            raise DataSourceSyncError(
+                "LENS_SOURCE_RESOURCE_STAT_FAILED"
+            ) from exc
+        if files > GIT_MAX_FILES or total_bytes > GIT_MAX_BYTES:
+            raise DataSourceSyncError("LENS_SOURCE_RESOURCE_LIMIT_EXCEEDED")
 
 
 def _git_manifest_delta(items, previous_items):
@@ -1910,6 +1987,16 @@ def _git_item_signature(item):
     }
 
 
+
+
+
+
+
+
+
+
+
+
 def _sync_feishu(command, workspace_path, emit):
     """Export Feishu content into local files."""
 
@@ -1933,7 +2020,17 @@ def _sync_feishu(command, workspace_path, emit):
         "Accept": "application/json",
         "Authorization": f"Bearer {token}",
     }
-    if (config.get("sync_mode") or "document_list") == "drive_folder":
+    sync_mode = config.get("sync_mode") or "document_list"
+    if sync_mode == "resource_list":
+        return _sync_feishu_resources(
+            config,
+            target,
+            headers,
+            emit,
+            max_workers,
+            cancel_event=command.get("cancel_event"),
+        )
+    if sync_mode == "drive_folder":
         return _sync_feishu_folder(config, target, headers, emit, max_workers)
     return _sync_feishu_documents(config, target, headers, emit, max_workers)
 
@@ -2041,6 +2138,470 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
         "_deleted_paths": [],
         **stats,
     }
+
+
+def _sync_feishu_resources(
+    config,
+    target,
+    headers,
+    emit,
+    max_workers=1,
+    cancel_event=None,
+):
+    """Synchronize mixed Feishu folders and explicit documents."""
+
+    resources = config.get("resources")
+    if (
+        not isinstance(resources, list)
+        or not 1 <= len(resources) <= 100
+    ):
+        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+    max_workers = max(1, int(max_workers or 1))
+    recursive = config.get("recursive", True) is not False
+    max_depth = int(config.get("max_depth") or 10)
+    incremental = config.get(
+        "feishu_incremental",
+        config.get("incremental", True),
+    ) is not False
+    delete_missing = config.get(
+        "feishu_delete_missing",
+        config.get("delete_missing", False),
+    ) is True
+    previous_manifest = _read_manifest(target)
+    previous_items = _manifest_items_by_token(previous_manifest)
+    pending_by_token = {}
+    manifest_items = []
+    seen_tokens = set()
+    scanned_folders = set()
+    scan_failures = []
+    deleted_paths = []
+    stats = {
+        "folders": 0,
+        "documents": 0,
+        "files": 0,
+        "scanned": 0,
+        "changed": 0,
+        "skipped": 0,
+        "deleted": 0,
+        "failed": 0,
+        "by_extension": {},
+        "by_type": {},
+    }
+    scan_queue = deque()
+    for resource in resources:
+        if not isinstance(resource, dict):
+            raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+        token = resource.get("token")
+        kind = resource.get("kind")
+        if (
+            not isinstance(token, str)
+            or not isinstance(kind, str)
+            or kind not in FEISHU_RESOURCE_KINDS
+            or not FEISHU_TOKEN_PATTERN.fullmatch(token)
+        ):
+            raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+        if kind == "folder":
+            root_dir = target / "folders" / _safe_filename(token)
+            root_dir.mkdir(parents=True, exist_ok=True)
+            scan_queue.append(
+                ("folder", token, root_dir, 1, token)
+            )
+        else:
+            scan_queue.append(
+                ("explicit", {"kind": kind, "token": token})
+            )
+
+    documents_dir = target / "documents"
+    documents_dir.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while scan_queue:
+            _check_feishu_cancel(cancel_event)
+            futures = {}
+            while scan_queue and len(futures) < max_workers:
+                task = scan_queue.popleft()
+                if task[0] == "folder":
+                    _, folder_token, _folder_dir, _depth, _root = task
+                    if folder_token in scanned_folders:
+                        continue
+                    scanned_folders.add(folder_token)
+                    future = executor.submit(
+                        _list_feishu_folder_children,
+                        folder_token,
+                        headers,
+                    )
+                else:
+                    future = executor.submit(
+                        _feishu_explicit_item,
+                        task[1],
+                        headers,
+                    )
+                futures[future] = task
+            for future in as_completed(futures):
+                _check_feishu_cancel(cancel_event)
+                task = futures[future]
+                try:
+                    result = future.result()
+                except DataSourceSyncError as exc:
+                    failed_token = (
+                        task[1] if task[0] == "folder"
+                        else task[1]["token"]
+                    )
+                    scan_failures.append(failed_token)
+                    stats["failed"] += 1
+                    _emit(
+                        emit,
+                        "scan_resource",
+                        "failed",
+                        f"Failed to scan Feishu resource {failed_token}.",
+                        category="summary",
+                        token=failed_token,
+                        error=str(exc),
+                    )
+                    continue
+                if task[0] == "folder":
+                    _, folder_token, folder_dir, depth, root_token = task
+                    stats["folders"] += 1
+                    _collect_feishu_folder_children(
+                        result,
+                        folder_dir,
+                        depth,
+                        root_token,
+                        scan_queue,
+                        pending_by_token,
+                        seen_tokens,
+                        stats,
+                        recursive,
+                        max_depth,
+                    )
+                    continue
+                resource = task[1]
+                item = result
+                token = _feishu_item_token(item)
+                root_id = f"{resource['kind']}:{resource['token']}"
+                existing = pending_by_token.get(token)
+                if existing is not None:
+                    existing["roots"].add(root_id)
+                    continue
+                pending_by_token[token] = {
+                    "item": item,
+                    "target_dir": documents_dir,
+                    "roots": {root_id},
+                    "from_folder": False,
+                }
+                seen_tokens.add(token)
+                stats["scanned"] += 1
+                _increment_counter(
+                    stats["by_type"],
+                    _feishu_item_type(item),
+                )
+                if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                    raise DataSourceSyncError(
+                        "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                    )
+
+    pending_items = []
+    for token, pending in pending_by_token.items():
+        item = pending["item"]
+        previous_item = previous_items.get(token)
+        target_dir = pending["target_dir"]
+        roots = sorted(pending["roots"])
+        has_change_metadata = bool(_feishu_item_sync_metadata(item))
+        can_skip = pending.get("from_folder") or has_change_metadata
+        if incremental and can_skip and _feishu_item_unchanged(
+            item,
+            previous_item,
+            target_dir,
+            target,
+        ):
+            manifest_item = _feishu_manifest_item_from_previous(
+                item,
+                previous_item,
+                target_dir,
+                target,
+            )
+            manifest_item["remote"] = {
+                **(manifest_item.get("remote") or {}),
+                "roots": roots,
+            }
+            manifest_items.append(manifest_item)
+            stats["skipped"] += 1
+            _increment_counter(
+                stats["by_extension"],
+                _manifest_item_extension(manifest_item),
+            )
+            continue
+        pending_items.append(
+            (item, target_dir, previous_item, roots)
+        )
+
+    stats["changed"] = len(pending_items)
+    _emit(
+        emit,
+        "sync_plan",
+        "running",
+        (
+            f"Prepared {stats['scanned']} unique Feishu items; "
+            f"{stats['changed']} need sync, {stats['skipped']} skipped."
+        ),
+        category="summary",
+        progress_total=stats["changed"],
+        progress_current=0,
+        progress_percent=100 if not pending_items else 0,
+        summary=stats,
+    )
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _sync_feishu_drive_item,
+                item,
+                target_dir,
+                target,
+                previous_item,
+                headers,
+                emit,
+                cancel_event,
+            ): (item, roots, previous_item)
+            for item, target_dir, previous_item, roots in pending_items
+        }
+        for future in as_completed(futures):
+            _check_feishu_cancel(cancel_event)
+            item, roots, previous_item = futures[future]
+            completed += 1
+            try:
+                manifest_item = future.result()
+                manifest_item["remote"] = {
+                    **(manifest_item.get("remote") or {}),
+                    "roots": roots,
+                }
+                manifest_items.append(manifest_item)
+                if manifest_item.get("kind") == "document":
+                    stats["documents"] += 1
+                else:
+                    stats["files"] += 1
+                _increment_counter(
+                    stats["by_extension"],
+                    _manifest_item_extension(manifest_item),
+                )
+            except DataSourceSyncError as exc:
+                if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+                    raise
+                stats["failed"] += 1
+                manifest_items.append(
+                    {
+                        **(previous_item or {}),
+                        "token": _feishu_item_token(item),
+                        "name": _feishu_item_name(item),
+                        "type": _feishu_item_type(item),
+                        "status": "failed",
+                        "error": str(exc),
+                        "remote": {"roots": roots},
+                    }
+                )
+            _emit(
+                emit,
+                "sync_progress",
+                "running",
+                f"Synced {completed}/{stats['changed']} changed items.",
+                category="summary",
+                progress_total=stats["changed"],
+                progress_current=completed,
+                progress_percent=_progress_percent(
+                    completed,
+                    stats["changed"],
+                ),
+                summary=stats,
+            )
+
+    _finalize_feishu_missing_items(
+        target,
+        previous_items,
+        seen_tokens,
+        manifest_items,
+        deleted_paths,
+        stats,
+        delete_missing=delete_missing,
+        scan_complete=not scan_failures,
+    )
+    _write_manifest(
+        target,
+        {
+            "source_type": "feishu",
+            "sync_mode": "resource_list",
+            "incremental": incremental,
+            "delete_missing": delete_missing,
+            "scan_complete": not scan_failures,
+            "synced_at": utc_timestamp(),
+            "stats": stats,
+            "items": manifest_items,
+        },
+    )
+    total = stats["documents"] + stats["files"]
+    if total + stats["skipped"] == 0 and stats["failed"]:
+        raise DataSourceSyncError(
+            "LENS_SOURCE_SYNC_FAILED: all Feishu resources failed"
+        )
+    return {
+        **stats,
+        "synced": total,
+        "files": total,
+        "target_path": str(target),
+        "_sync_items": [
+            _manifest_item_to_sync_item(item, target)
+            for item in manifest_items
+            if _manifest_local_path(item)
+        ],
+        "_changed_paths": [
+            _manifest_local_path(item)
+            for item in manifest_items
+            if item.get("status") not in {"deleted", "failed", "skipped"}
+            and _manifest_local_path(item)
+        ],
+        "_deleted_paths": deleted_paths,
+    }
+
+
+def _collect_feishu_folder_children(
+    children,
+    folder_dir,
+    depth,
+    root_token,
+    folder_queue,
+    pending_by_token,
+    seen_tokens,
+    stats,
+    recursive,
+    max_depth,
+):
+    """Collect one scanned folder page into the global sync plan."""
+
+    for child in children:
+        if not isinstance(child, dict):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        token = _feishu_item_token(child)
+        if (
+            not isinstance(token, str)
+            or not FEISHU_TOKEN_PATTERN.fullmatch(token)
+        ):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        item_type = _feishu_item_type(child)
+        if item_type == "folder":
+            stats["scanned"] += 1
+            _increment_counter(stats["by_type"], item_type)
+            if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                raise DataSourceSyncError(
+                    "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                )
+            if recursive and depth < max_depth:
+                next_dir = folder_dir / _safe_filename(
+                    _feishu_item_name(child)
+                )
+                next_dir.mkdir(parents=True, exist_ok=True)
+                folder_queue.append(
+                    ("folder", token, next_dir, depth + 1, root_token)
+                )
+            continue
+        if token not in seen_tokens:
+            stats["scanned"] += 1
+            _increment_counter(stats["by_type"], item_type)
+            if stats["scanned"] > FEISHU_MAX_SYNC_ITEMS:
+                raise DataSourceSyncError(
+                    "LENS_SOURCE_ITEM_LIMIT_EXCEEDED"
+                )
+        seen_tokens.add(token)
+        existing = pending_by_token.get(token)
+        if existing is None:
+            pending_by_token[token] = {
+                "item": child,
+                "target_dir": folder_dir,
+                "roots": {f"folder:{root_token}"},
+                "from_folder": True,
+            }
+        else:
+            existing["roots"].add(f"folder:{root_token}")
+            if not existing.get("from_folder"):
+                existing["item"] = child
+                existing["target_dir"] = folder_dir
+                existing["from_folder"] = True
+
+
+def _feishu_explicit_item(resource, headers):
+    """Return one Drive-like item for an explicit resource."""
+
+    if resource["kind"] == "wiki":
+        return _resolve_feishu_wiki_node(resource["token"], headers)
+    return {
+        "token": resource["token"],
+        "name": resource["token"],
+        "type": resource["kind"],
+    }
+
+
+def _resolve_feishu_wiki_node(token, headers):
+    """Resolve a Wiki node to its exportable object identity."""
+
+    query = parse.urlencode({"token": token})
+    payload = _http_json(
+        "https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node"
+        f"?{query}",
+        headers=headers,
+    )
+    node = (payload.get("data") or {}).get("node")
+    if not isinstance(node, dict):
+        raise DataSourceSyncError("FEISHU_WIKI_RESPONSE_INVALID")
+    object_token = node.get("obj_token")
+    object_type = str(node.get("obj_type") or "").lower()
+    if (
+        not isinstance(object_token, str)
+        or not FEISHU_TOKEN_PATTERN.fullmatch(object_token)
+        or not _is_feishu_exportable_type(object_type)
+    ):
+        raise DataSourceSyncError("FEISHU_WIKI_RESPONSE_INVALID")
+    return {
+        "token": object_token,
+        "name": node.get("title") or object_token,
+        "type": object_type,
+    }
+
+
+def _finalize_feishu_missing_items(
+    target,
+    previous_items,
+    seen_tokens,
+    manifest_items,
+    deleted_paths,
+    stats,
+    *,
+    delete_missing,
+    scan_complete,
+):
+    """Preserve or delete previous items according to scan completeness."""
+
+    for token, item in previous_items.items():
+        if token in seen_tokens:
+            continue
+        if not scan_complete:
+            manifest_items.append({**item, "status": "skipped"})
+            continue
+        if not delete_missing:
+            manifest_items.append({**item, "status": "skipped"})
+            stats["skipped"] += 1
+            continue
+        deleted_item = {**item, "status": "deleted"}
+        manifest_items.append(deleted_item)
+        stats["deleted"] += 1
+        local_path = _manifest_local_path(item)
+        if local_path:
+            deleted_paths.append(local_path)
+        if local_path:
+            _delete_manifest_file(target, local_path)
+
+
+def _check_feishu_cancel(cancel_event):
+    """Stop a mixed Feishu sync after cancellation is requested."""
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
 
 
 def _sync_feishu_document_item(doc_id, docs_dir, headers, emit):
@@ -2378,9 +2939,11 @@ def _sync_feishu_drive_item(
     previous_item,
     headers,
     emit,
+    cancel_event=None,
 ):
     """Synchronize one Feishu Drive file item."""
 
+    _check_feishu_cancel(cancel_event)
     token = _feishu_item_token(item)
     name = _feishu_item_name(item)
     item_type = _feishu_item_type(item)
@@ -2396,7 +2959,15 @@ def _sync_feishu_drive_item(
             item_type=item_type,
             item_name=name,
         )
-        exported = _export_feishu_document(token, item_type, headers)
+        if cancel_event is None:
+            exported = _export_feishu_document(token, item_type, headers)
+        else:
+            exported = _export_feishu_document(
+                token,
+                item_type,
+                headers,
+                cancel_event=cancel_event,
+            )
         filename = _export_filename(exported, name or token, item_type)
         path = _feishu_target_file_path(
             target_dir,
@@ -2446,7 +3017,9 @@ def _sync_feishu_drive_item(
         item_name=name,
     )
     filename = _safe_filename(name or token)
+    _check_feishu_cancel(cancel_event)
     raw = _download_feishu_file(token, headers)
+    _check_feishu_cancel(cancel_event)
     path = _feishu_target_file_path(
         target_dir,
         root_dir,
@@ -2488,8 +3061,75 @@ def _run_git(
     cwd=None,
     timeout=600,
     detail_prefix="LENS_SOURCE_SYNC_FAILED",
+    env=None,
+    cancel_event=None,
 ):
     """Run a Git command and raise a datasource error on failure."""
+
+    if cancel_event is None:
+        return _run_git_without_cancellation(
+            args,
+            cwd=cwd,
+            timeout=timeout,
+            detail_prefix=detail_prefix,
+            env=env,
+        )
+    if cancel_event.is_set():
+        raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
+    try:
+        process = subprocess.Popen(
+            ["git", *args],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+            env=env,
+        )
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+    try:
+        started = time.monotonic()
+        while True:
+            if cancel_event.is_set():
+                _terminate_git_process(process)
+                raise DataSourceSyncError("LENS_SOURCE_SYNC_CANCELLED")
+            try:
+                stdout, stderr = process.communicate(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() - started >= timeout:
+                    _terminate_git_process(process)
+                    raise DataSourceSyncError(
+                        f"{detail_prefix}: git command timed out"
+                    )
+        if process.returncode:
+            error = subprocess.CalledProcessError(
+                process.returncode,
+                ["git", *args],
+                output=stdout,
+                stderr=stderr,
+            )
+            detail = _git_error_detail(error)
+            raise DataSourceSyncError(f"{detail_prefix}: {detail}") from error
+        return subprocess.CompletedProcess(
+            ["git", *args],
+            process.returncode,
+            stdout,
+            stderr,
+        )
+    except DataSourceSyncError:
+        raise
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+
+
+def _run_git_without_cancellation(args, cwd, timeout, detail_prefix, env):
+    """Run Git with the legacy path when cancellation is unused."""
 
     try:
         return subprocess.run(
@@ -2499,6 +3139,7 @@ def _run_git(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
     except subprocess.CalledProcessError as exc:
         detail = _git_error_detail(exc)
@@ -2507,6 +3148,27 @@ def _run_git(
         raise DataSourceSyncError(
             f"{detail_prefix}: git command timed out"
         ) from exc
+    except OSError as exc:
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command failed"
+        ) from exc
+
+
+def _terminate_git_process(process):
+    """Terminate a cancellable Git process and its children."""
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        process.terminate()
+    try:
+        process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            process.kill()
+        process.communicate()
 
 
 def _git_error_detail(exc):
@@ -2515,9 +3177,74 @@ def _git_error_detail(exc):
     stderr = (exc.stderr or "").strip()
     stdout = (exc.stdout or "").strip()
     detail = stderr or stdout or str(exc)
+    detail = _redact_git_detail(detail)
     if len(detail) > 1000:
         return f"{detail[:1000]}..."
     return detail
+
+
+def _git_run_options(config):
+    """Return subprocess options that keep Git credentials ephemeral."""
+
+    environment = _git_auth_environment(config)
+    return {"env": environment} if environment is not None else {}
+
+
+def _git_auth_environment(config):
+    """Provide Git authentication through process-only configuration."""
+
+    if not isinstance(config, dict) or config.get("auth_scheme") != "token":
+        return None
+    credentials = _load_credentials(config)
+    token = credentials.get("token") or credentials.get("password")
+    if not isinstance(token, str) or not token:
+        return None
+    encoded = base64.b64encode(
+        f"x-access-token:{token}".encode("utf-8")
+    ).decode("ascii")
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded}",
+        }
+    )
+    return environment
+
+
+def _has_embedded_credentials(value):
+    """Return whether a URL contains userinfo credentials."""
+
+    parsed = parse.urlsplit(str(value or ""))
+    return bool(parsed.username or parsed.password)
+
+
+def _strip_url_credentials(value):
+    """Remove userinfo credentials from one URL before persisting it."""
+
+    parsed = parse.urlsplit(str(value or ""))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return str(value or "")
+    hostname = parsed.hostname or ""
+    netloc = hostname
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return parse.urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def _redact_git_detail(value):
+    """Remove URL credentials from Git diagnostics."""
+
+    return re.sub(
+        r"(https?://)[^/\s@]+@",
+        r"\1***@",
+        str(value or ""),
+        flags=re.IGNORECASE,
+    )
 
 
 def _git_output(args, cwd=None):
@@ -2551,6 +3278,27 @@ def _git_remote_branches(output):
     return branches
 
 
+def _git_default_branch_from_remote(repo_url, git_options=None):
+    """Return the remote HEAD branch without embedding credentials in a URL."""
+
+    try:
+        result = _run_git(
+            ["ls-remote", "--symref", repo_url, "HEAD"],
+            timeout=60,
+            detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+            **(git_options or {}),
+        )
+    except DataSourceSyncError:
+        return ""
+    for line in str(getattr(result, "stdout", "") or "").splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "ref:" and parts[1].startswith(
+            "refs/heads/"
+        ) and parts[2] == "HEAD":
+            return parts[1][len("refs/heads/") :]
+    return ""
+
+
 def _default_git_branch(branches):
     """Return the preferred branch from a remote branch list."""
 
@@ -2572,25 +3320,6 @@ def _normalize_repo_url(value):
             (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")
         )
     return str(value or "").rstrip("/")
-
-
-def _git_auth_url(repo_url, config):
-    """Inject HTTPS token credentials into a Git URL when configured."""
-
-    if config.get("auth_scheme") != "token":
-        return repo_url
-    credentials = _load_credentials(config)
-    token = credentials.get("token") or credentials.get("password")
-    username = credentials.get("username") or "oauth2"
-    if not token:
-        raise DataSourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-    parsed = parse.urlsplit(repo_url)
-    if parsed.scheme not in {"http", "https"}:
-        raise DataSourceSyncError("LENS_SOURCE_AUTH_SCHEME_UNSUPPORTED")
-    netloc = f"{parse.quote(username)}:{parse.quote(token)}@{parsed.netloc}"
-    return parse.urlunsplit(
-        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
-    )
 
 
 def _load_credentials(config):
@@ -2668,6 +3397,7 @@ def _list_feishu_folder_children(folder_token, headers):
 
     items = []
     page_token = ""
+    seen_page_tokens = set()
     while True:
         query = {
             "folder_token": folder_token,
@@ -2687,14 +3417,22 @@ def _list_feishu_folder_children(folder_token, headers):
             or data.get("children")
             or []
         )
+        if not isinstance(batch, list):
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
         items.extend(batch)
-        page_token = (
+        if len(items) > FEISHU_MAX_SYNC_ITEMS:
+            raise DataSourceSyncError("LENS_SOURCE_ITEM_LIMIT_EXCEEDED")
+        next_page_token = (
             data.get("next_page_token")
             or data.get("page_token")
             or ""
         )
-        if not data.get("has_more") or not page_token:
+        if not data.get("has_more") or not next_page_token:
             break
+        if next_page_token in seen_page_tokens:
+            raise DataSourceSyncError("FEISHU_FOLDER_RESPONSE_INVALID")
+        seen_page_tokens.add(next_page_token)
+        page_token = next_page_token
     return items
 
 
@@ -2773,9 +3511,15 @@ def _feishu_export_extension(item_type):
     return mapping.get(export_type, "docx")
 
 
-def _export_feishu_document(file_token, item_type, headers):
+def _export_feishu_document(
+    file_token,
+    item_type,
+    headers,
+    cancel_event=None,
+):
     """Export one Feishu document-like item with the official Drive API."""
 
+    _check_feishu_cancel(cancel_event)
     export_type = _feishu_export_type(item_type)
     file_extension = _feishu_export_extension(item_type)
     ticket = _create_feishu_export_task(
@@ -2784,12 +3528,21 @@ def _export_feishu_document(file_token, item_type, headers):
         file_extension,
         headers,
     )
-    result = _poll_feishu_export_task(
-        ticket,
-        file_token,
-        export_type,
-        headers,
-    )
+    if cancel_event is None:
+        result = _poll_feishu_export_task(
+            ticket,
+            file_token,
+            export_type,
+            headers,
+        )
+    else:
+        result = _poll_feishu_export_task(
+            ticket,
+            file_token,
+            export_type,
+            headers,
+            cancel_event=cancel_event,
+        )
     status = _feishu_job_status(result)
     if status != FEISHU_EXPORT_SUCCESS_STATUS:
         detail = _feishu_export_status_detail(result)
@@ -2807,8 +3560,12 @@ def _export_feishu_document(file_token, item_type, headers):
             f"extension={file_extension} ticket={ticket} result={detail}"
         )
     try:
+        _check_feishu_cancel(cancel_event)
         content = _download_feishu_export_file(export_file_token, headers)
+        _check_feishu_cancel(cancel_event)
     except DataSourceSyncError as exc:
+        if str(exc) == "LENS_SOURCE_SYNC_CANCELLED":
+            raise
         raise DataSourceSyncError(
             "LENS_SOURCE_EXPORT_DOWNLOAD_FAILED: "
             f"token={file_token} export_file_token={export_file_token} "
@@ -2848,7 +3605,13 @@ def _create_feishu_export_task(file_token, file_type, file_extension, headers):
     return ticket
 
 
-def _poll_feishu_export_task(ticket, file_token, file_type, headers):
+def _poll_feishu_export_task(
+    ticket,
+    file_token,
+    file_type,
+    headers,
+    cancel_event=None,
+):
     """Poll a Feishu Drive export task until it finishes."""
 
     query = parse.urlencode({"token": file_token, "type": file_type})
@@ -2859,6 +3622,7 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
     result = {}
     deadline = time.monotonic() + FEISHU_EXPORT_TIMEOUT_S
     while time.monotonic() < deadline:
+        _check_feishu_cancel(cancel_event)
         data = _http_json(url, headers=headers)
         data = data.get("data") or data
         result = data.get("result") or data
@@ -2867,6 +3631,7 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
             return result
         if status not in FEISHU_EXPORT_PENDING_STATUSES:
             return result
+        _check_feishu_cancel(cancel_event)
         time.sleep(FEISHU_EXPORT_POLL_INTERVAL_S)
     detail = _feishu_export_status_detail(result)
     raise DataSourceSyncError(

@@ -16,6 +16,7 @@ from .admin_runs import (
     AdminRunRetryView,
     AdminRunTrajectoryView,
     _admin_run_step_counts,
+    admin_run_trajectory_stream_view,
 )
 from .assistants import AssistantViewSet, PublicAssistantView
 from .credentials import DataSourceCredentialViewSet
@@ -31,6 +32,15 @@ from .gateway import (
 )
 from .global_settings import GlobalSettingViewSet
 from .lensnodes import LensNodeViewSet
+from .plugins import (
+    ConnectionViewSet,
+    PluginCredentialLeaseView,
+    PluginCredentialMaterialView,
+    PluginExecutionSnapshotView,
+    PluginInvocationViewSet,
+    PluginRegistryViewSet,
+    PluginToolExecutionSnapshotView,
+)
 from .sessions import (
     LensAttachmentView,
     RunCitationSourceView,
@@ -57,6 +67,7 @@ __all__ = [
     "AdminRunResumeView",
     "AdminRunRetryView",
     "AdminRunTrajectoryView",
+    "admin_run_trajectory_stream_view",
     "AdminRunDiagnosticsView",
     "AdminRunDiagnosticTurnsView",
     "AdminUserAccessDetailView",
@@ -80,6 +91,13 @@ __all__ = [
     "PublicSharedQAListView",
     "PublicSharedQAPdfView",
     "PublicSharedQAView",
+    "PluginRegistryViewSet",
+    "PluginCredentialLeaseView",
+    "PluginCredentialMaterialView",
+    "PluginExecutionSnapshotView",
+    "PluginInvocationViewSet",
+    "PluginToolExecutionSnapshotView",
+    "ConnectionViewSet",
     "RunCitationSourceView",
     "RunOutputFileDownloadView",
     "RunViewSet",

@@ -302,7 +302,9 @@ test('desktop sidebar still expands and collapses', async ({ page }) => {
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 264 })
 })
 
-test('desktop history collapses into a compact Recent row', async ({ page }) => {
+test('desktop history collapses into a compact Recent row', async ({
+  page
+}) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await mockChat(page)
   await page.goto('/lens/assistants/drawer-test/chat')
@@ -394,8 +396,8 @@ test.describe('touch input accessibility', () => {
       name: 'mobile-test.png',
       mimeType: 'image/png',
       buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk'
-        + '+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk' +
+          '+A8AAQUBAScY42YAAAAASUVORK5CYII=',
         'base64'
       )
     })
@@ -458,8 +460,8 @@ test.describe('touch input accessibility', () => {
       name: 'mobile-test.png',
       mimeType: 'image/png',
       buffer: Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk'
-        + '+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk' +
+          '+A8AAQUBAScY42YAAAAASUVORK5CYII=',
         'base64'
       )
     })

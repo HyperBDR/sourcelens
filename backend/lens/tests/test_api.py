@@ -137,6 +137,7 @@ def skill_zip_upload(
     environment=None,
     api=None,
     transforms=None,
+    required_plugins=None,
     package_files=None,
 ):
     """Return an uploaded zip containing one SKILL.md."""
@@ -153,7 +154,10 @@ def skill_zip_upload(
         archive.writestr(f"{name}/SKILL.md", skill_md)
         for path, content in (package_files or {}).items():
             archive.writestr(f"{name}/{path}", content)
-        if any(value is not None for value in (environment, api, transforms)):
+        if any(
+            value is not None
+            for value in (environment, api, transforms, required_plugins)
+        ):
             config = {}
             if environment is not None:
                 config["environment"] = environment
@@ -161,6 +165,8 @@ def skill_zip_upload(
                 config["api"] = api
             if transforms is not None:
                 config["transforms"] = transforms
+            if required_plugins is not None:
+                config["required_plugins"] = required_plugins
             archive.writestr(
                 f"{name}/sourcelens.json",
                 json.dumps(config),
@@ -829,8 +835,8 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="api-explorer")
-        self.assertEqual(assistant.token_budget_profile, "deep")
-        self.assertEqual(response.data["token_budget_profile"], "deep")
+        self.assertEqual(assistant.token_budget_profile, "standard")
+        self.assertEqual(response.data["token_budget_profile"], "standard")
         self.assertEqual(assistant.lensnode, self.lensnode)
         self.assertEqual(
             assistant.description,
@@ -852,7 +858,7 @@ class LensApiTests(TestCase):
             "skipped",
         )
 
-    def test_assistant_create_accepts_unlimited_token_budget_profile(self):
+    def test_assistant_create_derives_unlimited_budget_from_max_rounds(self):
         response = self.client.post(
             "/api/lens/assistants/",
             {
@@ -861,7 +867,8 @@ class LensApiTests(TestCase):
                 "lensnode_uuid": str(self.lensnode.uuid),
                 "selected_task": "knowledge_qa",
                 "selected_dirs": [{"path": "/workspace/repo"}],
-                "token_budget_profile": "unlimited",
+                "agent_rounds": "max",
+                "token_budget_profile": "standard",
             },
             format="json",
         )
@@ -869,6 +876,28 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="unlimited-budget")
         self.assertEqual(assistant.token_budget_profile, "unlimited")
+        self.assertEqual(response.data["token_budget_profile"], "unlimited")
+
+    def test_assistant_update_derives_budget_from_agent_rounds(self):
+        self.assistant.agent_rounds = "balanced"
+        self.assistant.token_budget_profile = "standard"
+        self.assistant.save(
+            update_fields=["agent_rounds", "token_budget_profile"]
+        )
+
+        response = self.client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {
+                "agent_rounds": "max",
+                "token_budget_profile": "standard",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.agent_rounds, "max")
+        self.assertEqual(self.assistant.token_budget_profile, "unlimited")
         self.assertEqual(response.data["token_budget_profile"], "unlimited")
 
     def test_assistant_update_saves_description(self):
@@ -1367,6 +1396,34 @@ class LensApiTests(TestCase):
         self.assertEqual(
             response.data["definition"]["environment"],
             environment,
+        )
+
+    def test_uploaded_skill_reads_plugin_capability_requirements(self):
+        required_plugins = [
+            {
+                "plugin": "github",
+                "capabilities": ["repository.read"],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "github-workflow",
+                            "Use the installed GitHub Plugin tools.",
+                            required_plugins=required_plugins,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["definition"]["required_plugins"],
+            required_plugins,
         )
 
     def test_uploaded_skill_accepts_thirty_five_megabyte_package_file(self):
@@ -3109,6 +3166,86 @@ class LensApiTests(TestCase):
             str(self.lensnode.uuid),
         )
 
+    def test_lensnode_ai_gateway_reports_reasoning_length_truncation(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        client = APIClient()
+        error = ValueError(
+            "LLM returned empty response (finish_reason='length' "
+            "has_reasoning_content=True reasoning_len=2334 "
+            "model=deepseek/deepseek-v4-flash)"
+        )
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track",
+            side_effect=error,
+        ):
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.data,
+            {
+                "code": "MODEL_EMPTY_RESPONSE",
+                "finish_reason": "length",
+                "has_reasoning_content": True,
+            },
+        )
+
+    def test_lensnode_ai_gateway_streams_tool_call_deltas(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        client = APIClient()
+
+        def tracked_stream():
+            yield (
+                "tool_call",
+                json.dumps(
+                    {
+                        "index": 0,
+                        "id": "call-plan",
+                        "name": "write_todos",
+                        "arguments": '{"todos":[{"content":"Inspect"}',
+                    }
+                ),
+            )
+            return {
+                "total_tokens": 8,
+                "_tool_calls": [],
+                "_finish_reason": "tool_calls",
+            }
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track",
+            return_value=tracked_stream(),
+        ):
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "plan"}],
+                    "stream": True,
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+            body = collect_stream(response.streaming_content).decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"kind": "tool_call"', body)
+        self.assertIn("write_todos", body)
+        self.assertIn('"type": "done"', body)
+
     def test_lensnode_delegation_routes_to_assistant_bound_node(self):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
@@ -4082,6 +4219,89 @@ class LensApiTests(TestCase):
             ],
         )
 
+    def test_admin_run_resource_usage_attributes_plugin_tools(self):
+        from lens.models import RunTraceEvent
+
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
+        run.execution.loaded_plugins = [
+            {
+                "plugin_key": "github",
+                "plugin_display_name": "GitHub",
+                "plugin_version": "1.0.0",
+                "tools": [
+                    {"key": "github_repository_get"},
+                    {"key": "github_issue_list"},
+                ],
+            }
+        ]
+        run.execution.loaded_skills = [
+            {
+                "skill_kind": "plugin_virtual",
+                "skill_name": "GitHub Plugin",
+                "skill_package_name": "plugin-virtual-github",
+                "definition": {"plugin_virtual": True},
+            }
+        ]
+        run.execution.save(update_fields=["loaded_plugins", "loaded_skills"])
+        now = timezone.now()
+        for sequence, (call_id, name) in enumerate(
+            [
+                ("plugin-call-1", "github_repository_get"),
+                ("plugin-call-2", "github_repository_get"),
+                ("runtime-call", "read_file"),
+            ],
+            start=1,
+        ):
+            RunTraceEvent.objects.create(
+                run=run,
+                event_id=uuid.uuid4(),
+                sequence=sequence,
+                event_type="tool.started",
+                timestamp=now,
+                call_id=call_id,
+                payload={"name": name},
+            )
+
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+
+        self.assertEqual(response.status_code, 200)
+        usage = response.data["execution"]["resource_usage"]
+        self.assertEqual(
+            usage["configured_plugins"],
+            [
+                {
+                    "plugin_key": "github",
+                    "plugin_name": "GitHub",
+                    "plugin_version": "1.0.0",
+                    "tool_keys": [
+                        "github_repository_get",
+                        "github_issue_list",
+                    ],
+                }
+            ],
+        )
+        self.assertEqual(usage["configured_skills"], [])
+        self.assertEqual(
+            usage["resources"],
+            [
+                {
+                    "resource_type": "plugin",
+                    "name": "github_repository_get",
+                    "plugin_name": "GitHub",
+                    "configured": True,
+                    "calls": 2,
+                },
+                {
+                    "resource_type": "tool",
+                    "name": "read_file",
+                    "configured": False,
+                    "calls": 1,
+                },
+            ],
+        )
+        self.assertEqual(usage["configured_count"], 1)
+
     def test_admin_run_resource_usage_uses_step_events_for_skill_identity(self):
         from lens.models import RunStep
 
@@ -4153,8 +4373,15 @@ class LensApiTests(TestCase):
 
         model_ref = uuid.uuid4()
         self.assistant.agent_model_ref = model_ref
+        self.assistant.agent_rounds = "deep"
         self.assistant.token_budget_profile = "deep"
-        self.assistant.save(update_fields=["agent_model_ref", "token_budget_profile"])
+        self.assistant.save(
+            update_fields=[
+                "agent_model_ref",
+                "agent_rounds",
+                "token_budget_profile",
+            ]
+        )
         session = Session.objects.create(
             assistant=self.assistant,
             user=self.user,

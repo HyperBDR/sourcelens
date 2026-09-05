@@ -153,7 +153,10 @@
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
         </p>
       </FormRow>
-      <FormRow :label="t('lensAdmin.fields.maxConcurrency')">
+      <FormRow
+        v-if="mode === 'edit'"
+        :label="t('lensAdmin.fields.maxConcurrency')"
+      >
         <input
           v-model.number="form.max_concurrency"
           type="number"
@@ -422,11 +425,7 @@
       <template v-if="!isSmartMode">
         <div>
           <div class="mb-2 text-sm font-medium text-ink-700">
-            {{
-              isGeneralChatTask
-                ? t('lensAdmin.wizard.skillsSectionRequired')
-                : t('lensAdmin.wizard.skillsSection')
-            }}
+            {{ t('lensAdmin.wizard.skillsSection') }}
           </div>
           <p v-if="isGeneralChatTask" class="mb-2 text-xs text-ink-500">
             {{ t('lensAdmin.wizard.generalChatSkillsHint') }}
@@ -796,6 +795,71 @@
             {{ t('lensAdmin.wizard.noMcp') }}
           </div>
         </div>
+        <div>
+          <div class="mb-2 text-sm font-medium text-ink-700">
+            {{ t('lensAdmin.wizard.pluginSection') }}
+          </div>
+          <div
+            class="space-y-3 rounded-md border border-line bg-surface-sunken p-3"
+          >
+            <p
+              v-if="missingSkillPluginRequirements.length"
+              class="text-xs leading-5 text-warning-700"
+            >
+              {{
+                t('lensAdmin.wizard.pluginRequirementsMissing', {
+                  requirements: missingSkillPluginRequirements.join('; ')
+                })
+              }}
+            </p>
+            <div
+              v-for="connection in activePluginConnections"
+              :key="connection.uuid"
+              class="rounded-md border border-line bg-surface p-3"
+            >
+              <label class="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+                  :checked="Boolean(pluginBinding(connection.uuid))"
+                  @change="
+                    togglePluginConnection(connection, $event.target.checked)
+                  "
+                />
+                <span
+                  class="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken"
+                >
+                  <img
+                    v-if="pluginIconUrl(connection.plugin_key)"
+                    :src="pluginIconUrl(connection.plugin_key)"
+                    :alt="pluginDisplayName(connection.plugin_key)"
+                    class="h-full w-full object-cover"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-semibold uppercase text-brand-700"
+                  >
+                    {{ connection.plugin_key.slice(0, 2) }}
+                  </span>
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-medium text-ink-900">
+                    {{ connection.name }}
+                  </span>
+                  <span class="mt-0.5 block truncate text-xs text-ink-500">
+                    {{ pluginDisplayName(connection.plugin_key) }}
+                  </span>
+                </span>
+              </label>
+            </div>
+            <p
+              v-if="!activePluginConnections.length"
+              class="text-xs text-ink-500"
+            >
+              {{ t('lensAdmin.wizard.pluginConnectionOptional') }}
+            </p>
+          </div>
+        </div>
       </template>
     </div>
 
@@ -1106,6 +1170,9 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useUserStore } from '@/store/user'
+import {
+  pluginDisplayName as translatedPluginDisplayName
+} from '@/utils/pluginI18n'
 
 import EnvironmentSetValues from './components/EnvironmentSetValues.vue'
 
@@ -1136,6 +1203,9 @@ const props = defineProps({
   skills: { type: Array, default: () => [] },
   environmentVariableSets: { type: Array, default: () => [] },
   mcps: { type: Array, default: () => [] },
+  pluginConnections: { type: Array, default: () => [] },
+  pluginManifests: { type: Object, default: () => ({}) },
+  pluginIconUrls: { type: Object, default: () => ({}) },
   llmConfigOptions: { type: Array, default: () => [] },
   saving: Boolean,
   formError: { type: String, default: '' },
@@ -1144,7 +1214,7 @@ const props = defineProps({
 
 defineEmits(['close', 'save', 'refresh-dirs'])
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
 const isSmartMode = computed(() => props.form.mode === 'smart')
@@ -1156,6 +1226,39 @@ const collaborationMemberOptions = computed(() =>
       assistant.uuid !== props.form.uuid
   )
 )
+
+const activePluginConnections = computed(() =>
+  props.pluginConnections.filter((connection) => {
+    if (connection.status !== 'active') return false
+    const manifest = props.pluginManifests?.[connection.plugin_key]
+    return Array.isArray(manifest?.tools) && manifest.tools.length > 0
+  })
+)
+
+const selectedPluginBindings = computed(() =>
+  Array.isArray(props.form.plugin_bindings) ? props.form.plugin_bindings : []
+)
+
+const missingSkillPluginRequirements = computed(() => {
+  const selectedSkills = props.skills.filter((skill) =>
+    (props.form.skill_uuids || []).includes(skill.uuid)
+  )
+  const missing = []
+  selectedSkills.forEach((skill) => {
+    const requirements = skill.definition?.required_plugins
+    if (!Array.isArray(requirements)) return
+    requirements.forEach((requirement) => {
+      const granted = selectedPluginCapabilities(requirement.plugin)
+      const missingCapabilities = (requirement.capabilities || []).filter(
+        (capability) => !granted.has(capability)
+      )
+      if (missingCapabilities.length) {
+        missing.push(`${requirement.plugin}: ${missingCapabilities.join(', ')}`)
+      }
+    })
+  })
+  return [...new Set(missing)]
+})
 
 const emptyValue = EMPTY_VALUE
 const WIZARD_STEP_COUNT = 4
@@ -1375,12 +1478,17 @@ const canProceedWizard = computed(() => {
   }
   if (wizardStep.value === 3) {
     if (isSmartMode.value) return true
-    const hasRequiredSkill =
-      !isGeneralChatTask.value || (props.form.skill_uuids || []).length > 0
+    const hasGeneralChatExecutionTool =
+      !isGeneralChatTask.value ||
+      (props.form.skill_uuids || []).length > 0 ||
+      selectedPluginBindings.value.some(
+        (binding) => binding.enabled !== false
+      )
     return (
-      hasRequiredSkill &&
+      hasGeneralChatExecutionTool &&
       selectedSkillEnvironmentsConfigured() &&
-      selectedMcpEnvironmentsConfigured()
+      selectedMcpEnvironmentsConfigured() &&
+      missingSkillPluginRequirements.value.length === 0
     )
   }
   return true
@@ -1417,6 +1525,7 @@ watch(
     props.form.selected_dirs = []
     props.form.skill_uuids = []
     props.form.mcp_uuids = []
+    props.form.plugin_bindings = []
     props.form.multimodal_model_ref = ''
   }
 )
@@ -1426,6 +1535,52 @@ const compatibleLensnodes = computed(() =>
     (lensnode.tasks || []).some((task) => task.name === props.form.capability)
   )
 )
+
+function pluginBinding(connectionUuid) {
+  return selectedPluginBindings.value.find(
+    (binding) => binding.connection_uuid === connectionUuid
+  )
+}
+
+function pluginDisplayName(pluginKey) {
+  return (
+    translatedPluginDisplayName(props.pluginManifests?.[pluginKey], t, te) ||
+    pluginKey
+  )
+}
+
+function pluginIconUrl(pluginKey) {
+  return props.pluginIconUrls?.[pluginKey] || ''
+}
+
+function selectedPluginCapabilities(pluginKey) {
+  const capabilities = new Set()
+  selectedPluginBindings.value.forEach((binding) => {
+    if (binding.enabled === false) return
+    const connection = props.pluginConnections.find(
+      (item) => item.uuid === binding.connection_uuid
+    )
+    if (connection?.plugin_key !== pluginKey) return
+    const tools = props.pluginManifests?.[pluginKey]?.tools || []
+    tools.forEach((tool) => capabilities.add(tool.capability))
+  })
+  return capabilities
+}
+
+function togglePluginConnection(connection, checked) {
+  const bindings = [...selectedPluginBindings.value]
+  if (!checked) {
+    props.form.plugin_bindings = bindings.filter(
+      (binding) => binding.connection_uuid !== connection.uuid
+    )
+    return
+  }
+  if (pluginBinding(connection.uuid)) return
+  props.form.plugin_bindings = [
+    ...bindings,
+    { connection_uuid: connection.uuid, enabled: true }
+  ]
+}
 
 const selectedLensNodeDirs = computed(() => {
   const selected = props.lensnodes.find(

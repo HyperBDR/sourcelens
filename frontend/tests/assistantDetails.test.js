@@ -114,3 +114,19 @@ test('assistant management loads form resources only when editing', async () => 
     /async function load\(\)[\s\S]*?Promise\.all\(\[\s*listAssistants[\s\S]*?listSkills/
   )
 })
+
+test('assistant creation does not expose or submit concurrency tuning', async () => {
+  const [drawer, page] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('pages/lens/Assistants.vue')
+  ])
+
+  assert.match(
+    drawer,
+    /<FormRow\s+v-if="mode === 'edit'"\s+:label="t\('lensAdmin\.fields\.maxConcurrency'\)"/s
+  )
+  assert.match(
+    page,
+    /\.\.\.\(mode\.value === 'edit'[\s\S]*max_concurrency: Number\(form\.value\.max_concurrency\)/
+  )
+})

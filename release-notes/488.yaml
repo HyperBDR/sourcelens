@@ -1,0 +1,10 @@
+type: feature
+audience: user
+en: >-
+  Added trusted built-in GitHub, GitLab, and Jira integrations with read-only
+  assistant tools and datasource synchronization.
+zh-CN: >-
+  新增受信任的内置 GitHub、GitLab 和 Jira 集成，支持只读助手工具与数据源同步。
+es: >-
+  Se añadieron integraciones integradas y confiables con GitHub, GitLab y Jira,
+  con herramientas de asistente de solo lectura y sincronización de fuentes de datos.

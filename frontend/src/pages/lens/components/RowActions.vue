@@ -28,6 +28,10 @@ const props = defineProps({
   confirmInline: {
     type: Boolean,
     default: true
+  },
+  showDownload: {
+    type: Boolean,
+    default: false
   }
 })
 const emit = defineEmits(['download', 'edit', 'delete'])
@@ -35,25 +39,31 @@ const emit = defineEmits(['download', 'edit', 'delete'])
 const { t } = useI18n()
 const confirming = ref(false)
 
-const actions = computed(() => [
-  {
-    key: 'download',
-    label: t('lensAdmin.skills.download'),
-    icon: Download
-  },
-  {
-    key: 'edit',
-    label: t('common.edit'),
-    icon: Pencil
-  },
-  {
-    key: 'delete',
-    label: t('common.delete'),
-    icon: Trash2,
-    variant: 'danger',
-    divider: true
+const actions = computed(() => {
+  const items = []
+  if (props.showDownload) {
+    items.push({
+      key: 'download',
+      label: t('lensAdmin.skills.download'),
+      icon: Download
+    })
   }
-])
+  items.push(
+    {
+      key: 'edit',
+      label: t('common.edit'),
+      icon: Pencil
+    },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: Trash2,
+      variant: 'danger',
+      divider: true
+    }
+  )
+  return items
+})
 
 function confirmDelete() {
   confirming.value = false

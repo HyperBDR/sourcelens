@@ -37,6 +37,10 @@ from .base import EventStreamRenderer, LensNodeAuthMixin
 GATEWAY_STREAM_HEARTBEAT_S = 10
 OBSERVATION_ID_PATTERN = re.compile(r"^(?!0{16}$)[0-9a-f]{16}$")
 GENERATION_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+EMPTY_RESPONSE_FINISH_REASON_PATTERN = re.compile(
+    r"finish_reason=(?P<quote>['\"])(?P<reason>[^'\"]+)"
+    r"(?P=quote)"
+)
 
 
 class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
@@ -126,18 +130,27 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
                 request.data,
             )
 
-        content, usage = LLMTracker.call_and_track(
-            messages=messages,
-            model_uuid=model_ref,
-            node_name=f"lensnode:{lensnode.uuid}",
-            state=tracker_state,
-            tools=request.data.get("tools"),
-            tool_choice=request.data.get("tool_choice"),
-            temperature=request.data.get("temperature"),
-            max_tokens=request.data.get("max_tokens"),
-            reasoning_effort=request.data.get("reasoning_effort"),
-            return_message=bool(request.data.get("return_message")),
-        )
+        try:
+            content, usage = LLMTracker.call_and_track(
+                messages=messages,
+                model_uuid=model_ref,
+                node_name=f"lensnode:{lensnode.uuid}",
+                state=tracker_state,
+                tools=request.data.get("tools"),
+                tool_choice=request.data.get("tool_choice"),
+                temperature=request.data.get("temperature"),
+                max_tokens=request.data.get("max_tokens"),
+                reasoning_effort=request.data.get("reasoning_effort"),
+                return_message=bool(request.data.get("return_message")),
+            )
+        except ValueError as exc:
+            empty_response = self._empty_response_error_payload(exc)
+            if empty_response is None:
+                raise
+            return Response(
+                empty_response,
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         data = {
             "usage": usage,
             "lensnode_uuid": str(lensnode.uuid),
@@ -149,6 +162,21 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
             data["content"] = content
         return Response(data)
 
+    @staticmethod
+    def _empty_response_error_payload(error):
+        """Return a bounded error contract for an empty model response."""
+
+        message = str(error)
+        if not message.startswith("LLM returned empty response ("):
+            return None
+        finish_reason = EMPTY_RESPONSE_FINISH_REASON_PATTERN.search(message)
+        if finish_reason is None:
+            return None
+        return {
+            "code": "MODEL_EMPTY_RESPONSE",
+            "finish_reason": finish_reason.group("reason"),
+            "has_reasoning_content": "has_reasoning_content=True" in message,
+        }
 
     @staticmethod
     def _valid_trace_context(trace_context, run_uuid):

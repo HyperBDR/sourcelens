@@ -52,6 +52,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 WORKDIR /opt/backend
 
 COPY backend /opt/backend
+COPY plugins /opt/plugins
 COPY pyproject.toml /opt/backend/
 
 # Always install agentcore from the bundled, pinned submodules so image builds

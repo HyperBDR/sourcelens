@@ -67,6 +67,7 @@ def test_drain_lets_in_flight_run_finish_then_stops():
         assert client.draining.is_set()
         assert client.stopping.is_set()
         assert ws.closed
+        assert client.plugin_http_pool.is_closed
         assert client.gateway_http_client.is_closed
         # Draining was announced so the control plane stops routing here.
         assert "node_draining" in _sent_types(ws)
@@ -93,6 +94,9 @@ def test_stop_closes_checkpoint_after_workers_finish(monkeypatch):
         client.gateway_http_client = SimpleNamespace(
             close=lambda: actions.append("gateway")
         )
+        client.plugin_http_pool = SimpleNamespace(
+            close=lambda: actions.append("plugins")
+        )
         monkeypatch.setattr(
             "lensnode.main.close_checkpoint_saver",
             lambda: actions.append("checkpoint"),
@@ -102,7 +106,7 @@ def test_stop_closes_checkpoint_after_workers_finish(monkeypatch):
 
     asyncio.run(exercise())
 
-    assert actions == ["workers", "checkpoint", "gateway"]
+    assert actions == ["workers", "checkpoint", "plugins", "gateway"]
 
 
 def test_drain_rejects_new_runs():

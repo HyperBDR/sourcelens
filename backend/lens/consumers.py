@@ -415,6 +415,9 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             error=content.get("error") or "",
             outcome=content.get("outcome") or "",
             termination_detail=content.get("termination_detail") or {},
+            final_content=content.get("final_content"),
+            citations=content.get("citations"),
+            planned_evidence=content.get("planned_evidence"),
         )
         parent_update = await database_sync_to_async(
             self._delegation_done_payload

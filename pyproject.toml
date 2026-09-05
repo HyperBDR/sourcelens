@@ -41,6 +41,7 @@ dependencies = [
     "uvicorn[standard]==0.30.6",
     "langchain-core==1.4.0",
     "langgraph==1.2.1",
+    "httpx[http2]>=0.27.0,<1.0.0",
     "opentelemetry-api==1.28.0",
     "opentelemetry-sdk==1.28.0",
     "opentelemetry-exporter-otlp==1.28.0",

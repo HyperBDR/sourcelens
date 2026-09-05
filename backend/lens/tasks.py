@@ -19,9 +19,12 @@ from .datasource_services import (
     get_datasource_upload_timeout_s,
 )
 from .models import (
+    CredentialLease,
     DataSource,
+    ExecutionSnapshot,
     GlobalSetting,
     LensNode,
+    PluginInvocation,
     Run,
     RunExecution,
     RunTraceExport,
@@ -888,7 +891,12 @@ def complete_datasource_sync_task(task_id, result):
 
     status_value = str(result.get("status") or "failed").lower()
     success = status_value == "success"
-    error = result.get("error") or "LENS_SOURCE_SYNC_FAILED"
+    cancelled = status_value == "cancelled"
+    error = result.get("error") or (
+        "DATASOURCE_SYNC_CANCELLED"
+        if cancelled
+        else "LENS_SOURCE_SYNC_FAILED"
+    )
     changed = result.get("changed")
     if changed is None:
         changed = result.get("synced")
@@ -959,15 +967,17 @@ def complete_datasource_sync_task(task_id, result):
                     "updated_at",
                 ]
             )
-        else:
+        elif not cancelled:
             datasource.last_error = error
             datasource.save(update_fields=["last_error", "updated_at"])
 
     if record is not None:
         record.last_status = (
-            ScheduledTask.Status.SUCCESS if success else ScheduledTask.Status.FAILED
+            ScheduledTask.Status.SUCCESS
+            if success
+            else ScheduledTask.Status.FAILED
         )
-        record.last_error = "" if success else error
+        record.last_error = "" if success or cancelled else error
         record.last_run_at = timezone.now()
         record.last_metrics = result_metrics if success else {}
         record.save(
@@ -1004,6 +1014,28 @@ def complete_datasource_sync_task(task_id, result):
             TaskStatus.SUCCESS,
             result=result_metrics,
             metadata=completion_metadata,
+        )
+
+    if cancelled:
+        return TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.REVOKED,
+            error=error,
+            metadata={
+                **_datasource_step_metadata(
+                    task_id,
+                    "cancelled",
+                    "failed",
+                    error,
+                ),
+                "completion_reason": str(
+                    result.get("completion_reason") or error
+                ),
+                "stop_confirmation_source": str(
+                    result.get("stop_confirmation_source")
+                    or "lensnode_callback"
+                ),
+            },
         )
 
     return TaskTracker.update_task_status(
@@ -1837,7 +1869,7 @@ def run_retention_task():
     retention_days = setting.value if setting else 30
     cutoff = timezone.now() - timedelta(days=int(retention_days))
 
-    deleted, _ = Run.objects.filter(
+    terminal_runs = Run.objects.filter(
         status__in=[
             Run.Status.AWAITING_USER_INPUT,
             Run.Status.DONE,
@@ -1845,11 +1877,32 @@ def run_retention_task():
             Run.Status.CANCELLED,
         ],
         finished_at__lt=cutoff,
-    ).delete()
+    )
+    run_ids = list(terminal_runs.values_list("id", flat=True))
+    run_snapshot_ids = list(
+        ExecutionSnapshot.objects.filter(run_id__in=run_ids).values_list(
+            "id",
+            flat=True,
+        )
+    )
+    datasource_snapshot_ids = list(
+        ExecutionSnapshot.objects.filter(
+            run__isnull=True,
+            created_at__lt=cutoff,
+        ).values_list("id", flat=True)
+    )
+    snapshot_ids = run_snapshot_ids + datasource_snapshot_ids
+    if snapshot_ids:
+        CredentialLease.objects.filter(snapshot_id__in=snapshot_ids).delete()
+        PluginInvocation.objects.filter(snapshot_id__in=snapshot_ids).delete()
+        ExecutionSnapshot.objects.filter(id__in=snapshot_ids).delete()
+
+    deleted, _ = terminal_runs.delete()
 
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_metrics = {
         "deleted": deleted,
+        "plugin_snapshots_deleted": len(snapshot_ids),
         "retention_days": retention_days,
     }
     record.last_run_at = timezone.now()

@@ -3,6 +3,31 @@
     <BaseLoading v-if="loading && events.length === 0" />
 
     <template v-else>
+      <div
+        v-if="
+          active &&
+          (ACTIVE_RUN_STATUSES.has(runStatus) || pendingNewEventCount > 0)
+        "
+        class="trajectory-stream-bar"
+      >
+        <div
+          v-if="ACTIVE_RUN_STATUSES.has(runStatus)"
+          class="trajectory-live-state"
+          :data-state="streamState"
+          role="status"
+        >
+          <span class="trajectory-live-dot" aria-hidden="true" />
+          {{ t(`lensRuns.trajectoryStream${streamStateLabel}`) }}
+        </div>
+        <button
+          v-if="pendingNewEventCount > 0"
+          type="button"
+          class="trajectory-new-events"
+          @click="scrollToLatestTrajectory"
+        >
+          {{ t('lensRuns.trajectoryNewEvents', { n: pendingNewEventCount }) }}
+        </button>
+      </div>
       <dl class="trajectory-stats" data-testid="trajectory-summary">
         <div class="stat">
           <dt>{{ t('lensRuns.trajectoryEvents') }}</dt>
@@ -209,7 +234,11 @@
         :class="{ 'trajectory-split-resizing': resizeActive }"
         ref="splitRef"
       >
-        <div ref="tablePaneRef" class="table-pane sl-scrollbar">
+        <div
+          ref="tablePaneRef"
+          class="table-pane sl-scrollbar"
+          @scroll="handleTrajectoryScroll"
+        >
           <table class="trajectory-table">
             <thead>
               <tr>
@@ -220,7 +249,7 @@
             <tbody>
               <tr
                 v-for="(row, index) in rows"
-                :key="row.event.event_id"
+                :key="trajectoryEventKey(row.event)"
                 class="ledger-row"
                 :class="{ 'turn-start-row': index === 0 }"
                 :data-turn-start="index === 0 || undefined"
@@ -517,7 +546,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import { getAdminRunTrajectory } from '@/api/lens'
+import { getAdminRunTrajectory, streamAdminRunTrajectory } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -525,13 +554,18 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import JsonTree from '@/components/ui/JsonTree.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import {
+  ACTIVE_TRAJECTORY_RUN_STATUSES,
+  applyTrajectoryStreamUpdate,
   buildTimelineGroups,
   buildTrajectoryRows,
   childRunAttempts,
   childRunProgress,
   clampInspectorWidth,
   eventCategory,
-  groupTrajectoryRows
+  groupTrajectoryRows,
+  mergeTrajectoryEvents,
+  shouldKeepTrajectoryStream,
+  trajectoryEventKey
 } from './runTrajectory'
 
 const props = defineProps({
@@ -540,6 +574,7 @@ const props = defineProps({
   active: { type: Boolean, default: false },
   runStatus: { type: String, default: '' }
 })
+const emit = defineEmits(['run-update'])
 
 const { t } = useI18n()
 const { showError } = useToast()
@@ -548,6 +583,7 @@ const events = ref([])
 const summary = ref({})
 const loading = ref(false)
 const hasMore = ref(false)
+const nextAfterSequence = ref(0)
 const query = ref('')
 const category = ref('all')
 const selectedEvent = ref(null)
@@ -560,9 +596,19 @@ const inspectorRef = ref(null)
 const inspectorWidth = ref(null)
 const resizeActive = ref(false)
 const showSnapshots = ref(false)
+const streamCursor = ref('')
+const streamRevision = ref('')
+const streamSequence = ref(0)
+const streamState = ref('idle')
+const pendingNewEventCount = ref(0)
+const awaitingStreamDone = ref(false)
 
 let filterTimer = null
-let refreshTimer = null
+let fallbackTimer = null
+let finalSyncTimer = null
+let streamController = null
+let reconnectDelay = 1000
+let finalSyncDelay = 1000
 let requestId = 0
 let resizeOriginX = 0
 let resizeOriginWidth = 0
@@ -606,7 +652,13 @@ const KIND_LABEL = {
   step: 'STEP'
 }
 
-const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'streaming'])
+const ACTIVE_RUN_STATUSES = ACTIVE_TRAJECTORY_RUN_STATUSES
+
+const streamStateLabel = computed(() => {
+  if (streamState.value === 'live') return 'Live'
+  if (streamState.value === 'reconnecting') return 'Reconnecting'
+  return 'Connecting'
+})
 
 const categoryOptions = computed(() => {
   const counts = summary.value.categories || {}
@@ -741,7 +793,10 @@ function isErrorEvent(event) {
 }
 
 function isSelected(event) {
-  return selectedEvent.value?.sequence === event.sequence
+  return (
+    selectedEvent.value &&
+    trajectoryEventKey(selectedEvent.value) === trajectoryEventKey(event)
+  )
 }
 
 const eventTimeRange = computed(() => {
@@ -780,13 +835,6 @@ function isOutsideTimelineRange(event) {
   return (
     span.end < timelineRange.value.start || span.start > timelineRange.value.end
   )
-}
-
-function latestSequence(items) {
-  return items.reduce((latest, event) => {
-    const sequence = Number(event?.sequence)
-    return Number.isFinite(sequence) ? Math.max(latest, sequence) : latest
-  }, 0)
 }
 
 function toolCallText(event) {
@@ -930,6 +978,23 @@ function onTimelineSelect(sequence) {
   }
 }
 
+function isFollowingTrajectoryTail() {
+  const pane = tablePaneRef.value
+  if (!pane) return true
+  return pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 48
+}
+
+function handleTrajectoryScroll() {
+  if (isFollowingTrajectoryTail()) pendingNewEventCount.value = 0
+}
+
+async function scrollToLatestTrajectory() {
+  await nextTick()
+  const pane = tablePaneRef.value
+  if (pane) pane.scrollTop = pane.scrollHeight
+  pendingNewEventCount.value = 0
+}
+
 function toggleCall(callId) {
   const next = new Set(collapsed.value)
   if (next.has(callId)) next.delete(callId)
@@ -952,12 +1017,25 @@ function setCategory(value) {
   category.value = value
 }
 
-async function fetchTrajectory(append = false) {
+function normalizeEvents(items) {
+  return (items || []).map((event) => ({
+    ...event,
+    _ms: new Date(event.timestamp).getTime()
+  }))
+}
+
+async function fetchTrajectory(
+  append = false,
+  { preserveState = false, silent = false } = {}
+) {
   if (!props.runUuid) return
   const currentRequestId = ++requestId
+  const selectedKey = selectedEvent.value
+    ? trajectoryEventKey(selectedEvent.value)
+    : ''
   loading.value = true
   try {
-    const afterSequence = append ? latestSequence(events.value) : 0
+    const afterSequence = append ? nextAfterSequence.value : 0
     const data = await getAdminRunTrajectory(props.runUuid, {
       page_size: 500,
       after_sequence: afterSequence,
@@ -965,39 +1043,184 @@ async function fetchTrajectory(append = false) {
       category: category.value === 'all' ? undefined : category.value
     })
     if (currentRequestId !== requestId) return
-    const normalize = (items) =>
-      (items || []).map((event) => ({
-        ...event,
-        _ms: new Date(event.timestamp).getTime()
-      }))
-    const nextEvents = normalize(data.results)
-    events.value = append ? [...events.value, ...nextEvents] : nextEvents
-    summary.value = data.summary || {}
+    const nextEvents = normalizeEvents(data.results)
+    events.value = append
+      ? mergeTrajectoryEvents(events.value, nextEvents)
+      : nextEvents
     hasMore.value = Boolean(data.has_more)
+    nextAfterSequence.value = Number(data.next_after_sequence) || 0
     if (!append) {
+      summary.value = data.summary || {}
+      streamCursor.value = data.stream_cursor || streamCursor.value
+      streamRevision.value = data.revision || streamRevision.value
+      streamSequence.value = Number(data.stream_sequence) || 0
+    }
+    if (!append && !preserveState) {
       selectedEvent.value = null
       timelineRange.value = null
       inspectorTab.value = 'summary'
+    } else if (selectedKey) {
+      selectedEvent.value =
+        events.value.find(
+          (event) => trajectoryEventKey(event) === selectedKey
+        ) || null
     }
+    return true
   } catch (error) {
     if (currentRequestId !== requestId) return
-    showError(extractErrorMessage(error, t('common.error')))
+    if (!silent) showError(extractErrorMessage(error, t('common.error')))
     hasMore.value = false
+    return false
   } finally {
     if (currentRequestId === requestId) {
       loading.value = false
-      scheduleRefresh()
     }
   }
 }
 
-function scheduleRefresh() {
-  clearTimeout(refreshTimer)
-  if (!props.active || !ACTIVE_RUN_STATUSES.has(props.runStatus)) return
-  refreshTimer = setTimeout(() => fetchTrajectory(true), 2000)
+function shouldFollowTrajectory() {
+  return shouldKeepTrajectoryStream({
+    active: props.active,
+    runUuid: props.runUuid,
+    runStatus: props.runStatus,
+    awaitingDone: awaitingStreamDone.value
+  })
+}
+
+function stopTrajectoryStream() {
+  const controller = streamController
+  streamController = null
+  controller?.abort()
+  clearTimeout(fallbackTimer)
+  fallbackTimer = null
+  streamState.value = 'idle'
+}
+
+function scheduleFallbackRefresh() {
+  clearTimeout(fallbackTimer)
+  if (!shouldFollowTrajectory()) return
+  const delay = reconnectDelay
+  reconnectDelay = Math.min(reconnectDelay * 2, 15000)
+  streamState.value = 'reconnecting'
+  fallbackTimer = setTimeout(async () => {
+    fallbackTimer = null
+    await refreshAndFollow(true, true)
+  }, delay)
+}
+
+function cancelTerminalSync() {
+  clearTimeout(finalSyncTimer)
+  finalSyncTimer = null
+  finalSyncDelay = 1000
+}
+
+async function syncTerminalTrajectory(runUuid) {
+  if (!props.active || props.runUuid !== runUuid) return
+  const loaded = await fetchTrajectory(false, {
+    preserveState: true,
+    silent: true
+  })
+  if (loaded !== false || !props.active || props.runUuid !== runUuid) {
+    finalSyncDelay = 1000
+    return
+  }
+  const delay = finalSyncDelay
+  finalSyncDelay = Math.min(finalSyncDelay * 2, 15000)
+  finalSyncTimer = setTimeout(() => {
+    finalSyncTimer = null
+    void syncTerminalTrajectory(runUuid)
+  }, delay)
+}
+
+function handleTrajectoryStreamEvent(message) {
+  if (message?.type === 'ping') return
+  const existingKeys = new Set(events.value.map(trajectoryEventKey))
+  const incomingEvents = normalizeEvents(message.events)
+  const newEventCount = incomingEvents.filter(
+    (event) => !existingKeys.has(trajectoryEventKey(event))
+  ).length
+  const followsTail = isFollowingTrajectoryTail()
+  const current = {
+    events: events.value,
+    summary: summary.value,
+    revision: streamRevision.value,
+    cursor: streamCursor.value,
+    sequence: streamSequence.value,
+    run: null
+  }
+  const next = applyTrajectoryStreamUpdate(current, {
+    ...message,
+    events: incomingEvents
+  })
+  if (next.requiresResync) {
+    stopTrajectoryStream()
+    void refreshAndFollow(true, true)
+    return
+  }
+  events.value = next.events
+  summary.value = next.summary
+  streamRevision.value = next.revision
+  streamCursor.value = next.cursor
+  streamSequence.value = next.sequence
+  reconnectDelay = 1000
+  streamState.value = message.type === 'done' ? 'idle' : 'live'
+  if (message.type === 'done') awaitingStreamDone.value = false
+  if (next.run) emit('run-update', next.run)
+  if (newEventCount > 0) {
+    if (followsTail) void scrollToLatestTrajectory()
+    else pendingNewEventCount.value += newEventCount
+  }
+  if (message.type === 'done') {
+    cancelTerminalSync()
+    void syncTerminalTrajectory(props.runUuid)
+  }
+}
+
+async function connectTrajectoryStream() {
+  if (!shouldFollowTrajectory() || streamController) return
+  clearTimeout(fallbackTimer)
+  fallbackTimer = null
+  const controller = new AbortController()
+  const runUuid = props.runUuid
+  streamController = controller
+  awaitingStreamDone.value = true
+  streamState.value = 'connecting'
+  let completed = false
+  try {
+    await streamAdminRunTrajectory(runUuid, {
+      cursor: streamCursor.value,
+      revision: streamRevision.value,
+      sequence: streamSequence.value,
+      q: query.value.trim(),
+      category: category.value === 'all' ? '' : category.value,
+      signal: controller.signal,
+      onEvent(message) {
+        if (controller !== streamController || runUuid !== props.runUuid) return
+        if (message?.type === 'done') completed = true
+        handleTrajectoryStreamEvent(message)
+      }
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+  } finally {
+    if (streamController === controller) streamController = null
+  }
+  if (!completed) scheduleFallbackRefresh()
+}
+
+async function refreshAndFollow(preserveState = false, silent = false) {
+  stopTrajectoryStream()
+  const loaded = await fetchTrajectory(false, { preserveState, silent })
+  if (loaded && shouldFollowTrajectory()) {
+    void connectTrajectoryStream()
+  } else if (loaded === false) {
+    scheduleFallbackRefresh()
+  }
 }
 
 function reset() {
+  stopTrajectoryStream()
+  cancelTerminalSync()
   requestId += 1
   events.value = []
   summary.value = {}
@@ -1006,7 +1229,14 @@ function reset() {
   query.value = ''
   category.value = 'all'
   hasMore.value = false
+  nextAfterSequence.value = 0
   timelineRange.value = null
+  pendingNewEventCount.value = 0
+  streamCursor.value = ''
+  streamRevision.value = ''
+  streamSequence.value = 0
+  reconnectDelay = 1000
+  awaitingStreamDone.value = false
 }
 
 function loadMore() {
@@ -1017,7 +1247,7 @@ watch(
   () => props.runUuid,
   () => {
     reset()
-    if (props.active) fetchTrajectory()
+    if (props.active) void refreshAndFollow()
   }
 )
 
@@ -1025,14 +1255,17 @@ watch([query, category], () => {
   if (!props.active) return
   clearTimeout(filterTimer)
   filterTimer = setTimeout(() => {
-    fetchTrajectory()
+    void refreshAndFollow()
   }, 250)
 })
 
 watch(filteredEvents, (filtered) => {
   if (
     selectedEvent.value &&
-    !filtered.some((event) => event.sequence === selectedEvent.value.sequence)
+    !filtered.some(
+      (event) =>
+        trajectoryEventKey(event) === trajectoryEventKey(selectedEvent.value)
+    )
   ) {
     selectedEvent.value = null
   }
@@ -1041,18 +1274,27 @@ watch(filteredEvents, (filtered) => {
 watch(
   [() => props.active, () => props.runStatus],
   ([active]) => {
-    if (active && events.value.length === 0) {
-      fetchTrajectory()
+    if (!active) {
+      awaitingStreamDone.value = false
+      cancelTerminalSync()
+      stopTrajectoryStream()
       return
     }
-    scheduleRefresh()
+    if (streamController) return
+    if (active && events.value.length === 0) {
+      void refreshAndFollow()
+      return
+    }
+    if (shouldFollowTrajectory()) void connectTrajectoryStream()
+    else stopTrajectoryStream()
   },
   { immediate: true }
 )
 
 onBeforeUnmount(() => {
   clearTimeout(filterTimer)
-  clearTimeout(refreshTimer)
+  cancelTerminalSync()
+  stopTrajectoryStream()
 })
 </script>
 
@@ -1094,6 +1336,66 @@ onBeforeUnmount(() => {
   min-width: 0;
   color: var(--t-text-1);
   background: var(--t-bg-1);
+}
+
+.trajectory-live-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  gap: 6px;
+  color: var(--t-text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trajectory-stream-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.trajectory-new-events {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--t-accent) 35%, transparent);
+  border-radius: 4px;
+  color: var(--t-accent);
+  background: color-mix(in srgb, var(--t-accent) 7%, var(--t-bg-1));
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.trajectory-new-events:hover,
+.trajectory-new-events:focus-visible {
+  border-color: var(--t-accent);
+  outline: 0;
+}
+
+.trajectory-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-text-4);
+}
+
+.trajectory-live-state[data-state='live'] .trajectory-live-dot {
+  background: #16a34a;
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 12%);
+}
+
+.trajectory-live-state[data-state='connecting'] .trajectory-live-dot,
+.trajectory-live-state[data-state='reconnecting'] .trajectory-live-dot {
+  background: #d97706;
+  animation: trajectory-live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes trajectory-live-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .assistant-tag {

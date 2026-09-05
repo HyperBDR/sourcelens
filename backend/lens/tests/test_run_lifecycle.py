@@ -1084,6 +1084,37 @@ class RunLifecycleTests(TransactionTestCase):
             }
         )
 
+    def test_terminal_frame_atomically_persists_long_final_output(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        final_content = "完整报告" * 2500
+        consumer = LensNodeConsumer()
+        consumer.send_json = AsyncMock()
+
+        async_to_sync(consumer._handle_run_done)(
+            {
+                "run_uuid": str(run.uuid),
+                "status": Run.Status.DONE,
+                "outcome": Run.Outcome.COMPLETED,
+                "final_content": final_content,
+                "citations": [],
+                "planned_evidence": {"sufficient": True},
+            }
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.output_message.content, final_content)
+        self.assertEqual(run.planned_evidence, {"sufficient": True})
+        consumer.send_json.assert_awaited_once_with(
+            {
+                "type": "run_done_ack",
+                "run_uuid": str(run.uuid),
+            }
+        )
+
     def test_idle_reaper_expires_stale_awaiting_resume(self):
         run = self._run(
             Run.Status.RUNNING,

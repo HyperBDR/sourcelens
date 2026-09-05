@@ -25,8 +25,8 @@ RUN pip install \
         uv \
     && python -m venv --without-pip /opt/venv
 
-COPY pyproject.toml ./
-COPY lensnode ./lensnode
+COPY lensnode/pyproject.toml ./
+COPY lensnode/lensnode ./lensnode
 
 RUN uv pip install \
         --python /opt/venv/bin/python \
@@ -100,7 +100,8 @@ RUN set -eux; \
     fi
 
 COPY --from=builder /opt/venv /opt/venv
-COPY docker/entrypoint.sh /entrypoint.sh
+COPY lensnode/docker/entrypoint.sh /entrypoint.sh
+COPY plugins /opt/plugins
 
 RUN chmod +x /entrypoint.sh
 

@@ -123,6 +123,35 @@ def test_executor_emits_streamed_output_delta():
     }
 
 
+def test_executor_repeats_long_final_output_in_terminal_frame():
+    final_answer = "完整报告" * 2500
+
+    class LongAnswerAgent(FakeAgent):
+        async def answer(self, *args, **kwargs):
+            result = await super().answer(*args, **kwargs)
+            return {**result, "answer": final_answer}
+
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = LongAnswerAgent()
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000018",
+                "task": "knowledge_qa",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"][-1]
+    assert done["final_content"] == final_answer
+    assert done["citations"][0]["id"] == "evidence-123"
+    assert done["planned_evidence"] == {"sufficient": True}
+
+
 def test_terminal_result_retains_checkpoint_until_acknowledged():
     executor = LensNodeExecutor.__new__(LensNodeExecutor)
     executor.agent = FakeAgent()
@@ -895,6 +924,62 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
             }
         }
         assert resources.mcp_config_path.exists()
+    finally:
+        cleanup_runtime_resources(resources)
+
+
+def test_runtime_materializes_virtual_plugin_skill_references(tmp_path):
+    config = type("Config", (), {"workspace_path": str(tmp_path)})()
+    command = {
+        "run_uuid": "virtual-plugin-run",
+        "loaded_mcps": [],
+        "loaded_skills": [
+            {
+                "skill_uuid": "11111111-1111-1111-1111-111111111112",
+                "skill_package_name": "plugin-github-abcd1234",
+                "skill_name": "GitHub Plugin",
+                "skill_kind": "plugin_virtual",
+                "version": "1.0.0",
+                "content_hash": "sha256:virtual-plugin",
+                "definition": {
+                    "plugin_virtual": True,
+                    "plugin_display_name": "GitHub",
+                    "summary": "Inspect approved repositories.",
+                    "allowed_scope": {
+                        "repositories": ["HyperBDR/sourcelens"],
+                    },
+                    "tools": [
+                        {
+                            "description": "Read repository files.",
+                            "capability": "repository.read",
+                        }
+                    ],
+                },
+                "load_config": {"mode": "context", "inject": True},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+    try:
+        package = (
+            tmp_path
+            / ".sourcelens"
+            / "runtime"
+            / "runs"
+            / "virtual-plugin-run"
+            / "skills"
+            / "plugin-github-abcd1234"
+        )
+        assert (package / "SKILL.md").exists()
+        assert (
+            "HyperBDR/sourcelens"
+            in (package / "references" / "repositories.md").read_text()
+        )
+        assert "do not grant access" in (
+            package / "references" / "repositories.md"
+        ).read_text()
+        assert "virtual Skill" in resources.context_skill_contents[0]
     finally:
         cleanup_runtime_resources(resources)
 

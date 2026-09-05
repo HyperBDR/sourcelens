@@ -315,7 +315,9 @@
             <button
               type="button"
               class="assistant-switcher-item assistant-switcher-item-smart"
-              :class="isSmartCollaboration ? 'assistant-switcher-item-active' : ''"
+              :class="
+                isSmartCollaboration ? 'assistant-switcher-item-active' : ''
+              "
               @click="selectSmartCollaboration"
             >
               <span

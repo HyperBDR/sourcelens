@@ -34,6 +34,7 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
     queryset = Assistant.objects.select_related("lensnode").prefetch_related(
         "skill_bindings",
         "mcp_bindings",
+        "plugin_bindings__connection",
         "access_grants__group",
         "access_grants__user",
         Prefetch(
@@ -71,6 +72,7 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
             queryset = Assistant.objects.select_related("lensnode").prefetch_related(
                 "skill_bindings",
                 "mcp_bindings",
+                "plugin_bindings__connection",
                 Prefetch(
                     "collaboration_members",
                     queryset=Assistant.objects.order_by("name", "uuid"),

@@ -66,9 +66,11 @@ test.describe('Login page', () => {
     expect(page.url()).toContain('/login')
 
     // Should show error message
-    const errorMsg = page.locator(
-      'text=/error|登录失败|invalid|incorrect|错误|human verification|人机验证/i'
-    ).first()
+    const errorMsg = page
+      .locator(
+        'text=/error|登录失败|invalid|incorrect|错误|human verification|人机验证/i'
+      )
+      .first()
     await expect(errorMsg).toBeVisible({ timeout: 5000 })
   })
 

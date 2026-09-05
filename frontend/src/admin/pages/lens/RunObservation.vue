@@ -887,7 +887,9 @@
                   >
                     <div class="overview-section-heading">
                       <div>
-                        <h3 class="overview-title">{{ t('lensRuns.smartCollaborationTitle') }}</h3>
+                        <h3 class="overview-title">
+                          {{ t('lensRuns.smartCollaborationTitle') }}
+                        </h3>
                         <p class="overview-section-description">
                           {{ t('lensRuns.smartCollaborationDescription') }}
                         </p>
@@ -900,7 +902,9 @@
                         class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
                       >
                         {{ assistant.name }}
-                        <span class="ml-1 text-indigo-500">· {{ assistant.capability }}</span>
+                        <span class="ml-1 text-indigo-500"
+                          >· {{ assistant.capability }}</span
+                        >
                       </span>
                       <span
                         v-if="!(detail.delegated_assistants || []).length"
@@ -1185,9 +1189,7 @@
                               class="resource-ledger-type"
                               :class="`resource-ledger-type-${resource.resource_type}`"
                             >
-                              {{
-                                t(`lensRuns.${resource.resource_type}Resource`)
-                              }}
+                              {{ resourceTypeLabel(resource) }}
                             </span>
                             <span class="break-all">{{ resource.name }}</span>
                           </div>
@@ -1407,6 +1409,7 @@
                     activeDetailTab === 'execution' &&
                     activeExecutionView === 'trace'
                   "
+                  @run-update="applyTrajectoryRunUpdate"
                 />
 
                 <RunDiagnosisPanel
@@ -1962,6 +1965,13 @@ function statusText(status) {
   return status || '-'
 }
 
+function resourceTypeLabel(resource) {
+  if (resource.resource_type === 'plugin' && resource.plugin_name) {
+    return t('lensRuns.pluginResource', { name: resource.plugin_name })
+  }
+  return t(`lensRuns.${resource.resource_type}Resource`)
+}
+
 function formatDateTime(val) {
   if (!val) return '-'
   try {
@@ -2214,6 +2224,11 @@ async function fetchDetail(background = false) {
   }
 }
 
+function applyTrajectoryRunUpdate(run) {
+  if (!run || run.uuid !== selectedUuid.value || !detail.value) return
+  detail.value = { ...detail.value, ...run }
+}
+
 function scheduleDetailRefresh() {
   clearTimeout(detailRefreshTimer)
   if (!detailVisible.value || !ACTIVE_RUN_STATUSES.has(detail.value?.status)) {
@@ -2400,6 +2415,9 @@ onBeforeUnmount(() => clearTimeout(detailRefreshTimer))
 }
 .resource-ledger-type-mcp {
   @apply border-emerald-200 bg-emerald-50 text-emerald-700;
+}
+.resource-ledger-type-plugin {
+  @apply border-violet-200 bg-violet-50 text-violet-700;
 }
 .resource-ledger-type-tool {
   @apply border-gray-200 bg-gray-100 text-gray-600;

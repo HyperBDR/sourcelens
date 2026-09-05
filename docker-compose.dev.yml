@@ -14,6 +14,7 @@ services:
     env_file:
       - ./.env.dev
     environment:
+      LENS_PLUGIN_ROOTS: /opt/plugins
       LENSNODE_NAME: ${LENSNODE_NAME:-local-dev-lensnode}
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
       LENSNODE_WORKSPACE_PATH: /workspace
@@ -33,6 +34,7 @@ services:
       - ./data.dev/django/staticfiles:/opt/backend/core/staticfiles
       - ./data.dev/logs/api:/var/log/gunicorn
       - ./backend:/opt/backend
+      - ./plugins:/opt/plugins:ro
       - ./docker/nginx/certs:/opt/certs
       - ./data.dev/storage:/opt/storage
       - ./data.dev/document-attachments:/opt/document-attachments
@@ -59,6 +61,7 @@ services:
     env_file:
       - ./.env.dev
     environment:
+      LENS_PLUGIN_ROOTS: /opt/plugins
       WORKSPACE_ROOT: /opt/backend
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
       LENSNODE_AI_GATEWAY_URL: >-
@@ -72,6 +75,7 @@ services:
       - ./data.dev/document-attachments:/opt/document-attachments
       - ./data.dev/deliverables:/opt/deliverables
       - ./backend:/opt/backend
+      - ./plugins:/opt/plugins:ro
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     networks:
       - backend_network
@@ -91,12 +95,14 @@ services:
     env_file:
       - ./.env.dev
     environment:
+      LENS_PLUGIN_ROOTS: /opt/plugins
       # Development login must not depend on the external Turnstile service.
       TURNSTILE_ENABLED: "false"
       TURNSTILE_SECRET_KEY: ""
     volumes:
       - ./data.dev/logs/scheduler:/var/log/celery
       - ./backend:/opt/backend
+      - ./plugins:/opt/plugins:ro
     networks:
       - backend_network
     depends_on:
@@ -175,8 +181,8 @@ services:
 
   lensnode:
     build:
-      context: ./lensnode
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: lensnode/Dockerfile
       args:
         APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
@@ -193,10 +199,17 @@ services:
       LENSNODE_CONTROL_WS_URL: ws://backend-api:8000/ws/lens/lensnodes/
       LENSNODE_AI_GATEWAY_URL: http://backend-api:8000/api/lens/lensnode/ai-gateway/
       LENSNODE_WORKSPACE_PATH: /workspace
+      HTTP_PROXY: ${LENSNODE_HTTP_PROXY:-}
+      HTTPS_PROXY: ${LENSNODE_HTTPS_PROXY:-}
+      ALL_PROXY: ${LENSNODE_ALL_PROXY:-}
+      NO_PROXY: ${LENSNODE_NO_PROXY:-}
       LENSNODE_EXECUTION_BACKEND: ${LENSNODE_EXECUTION_BACKEND:-trusted_container}
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
       LENSNODE_REQUEST_TIMEOUT_S: ${LENSNODE_REQUEST_TIMEOUT_S:-600}
       LENSNODE_RUN_IDLE_TIMEOUT_S: ${LENSNODE_RUN_IDLE_TIMEOUT_S:-180}
+      LENSNODE_STREAM_RECOVERY_ATTEMPTS: ${LENSNODE_STREAM_RECOVERY_ATTEMPTS:-3}
+      LENSNODE_STREAM_RECOVERY_BACKOFF_S: ${LENSNODE_STREAM_RECOVERY_BACKOFF_S:-1}
+      LENSNODE_STREAM_RECOVERY_BACKOFF_MAX_S: ${LENSNODE_STREAM_RECOVERY_BACKOFF_MAX_S:-8}
       LENSNODE_PLANNING_REASONING_EFFORT: ${LENSNODE_PLANNING_REASONING_EFFORT:-medium}
       LENSNODE_MCP_DISCOVERY_TIMEOUT_S: ${LENSNODE_MCP_DISCOVERY_TIMEOUT_S:-30}
       LENSNODE_MCP_TOOL_TIMEOUT_S: ${LENSNODE_MCP_TOOL_TIMEOUT_S:-60}
@@ -217,6 +230,7 @@ services:
     volumes:
       - ./data.dev/workspace:/workspace
       - ./lensnode/lensnode:/opt/lensnode/lensnode:ro
+      - ./plugins:/opt/plugins:ro
     networks:
       - backend_network
     depends_on:

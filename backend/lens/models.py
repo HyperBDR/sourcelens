@@ -513,12 +513,21 @@ class MCPServer(TimestampedUUIDModel):
     class Transport(models.TextChoices):
         URL = "url", "URL"
         STDIO = "stdio", "STDIO"
+        PLUGIN = "plugin", "Plugin Adapter"
 
     name = models.CharField(max_length=160)
     transport = models.CharField(max_length=16, choices=Transport.choices)
     endpoint = models.CharField(max_length=500, blank=True, default="")
     config = models.JSONField(default=dict, blank=True)
     environment = models.JSONField(default=list, blank=True)
+    connection = models.ForeignKey(
+        "Connection",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="mcp_adapters",
+    )
+    tools = models.JSONField(default=list, blank=True)
     version = models.CharField(max_length=64, blank=True, default="1")
     enabled = models.BooleanField(default=True)
 
@@ -543,6 +552,7 @@ class DataSource(TimestampedUUIDModel):
     class SourceType(models.TextChoices):
         GIT = "git", "Git"
         FEISHU = "feishu", "Feishu"
+        JIRA = "jira", "Jira"
         MANAGED_WORKSPACE = "managed_workspace", "Managed Workspace"
 
     class Status(models.TextChoices):
@@ -574,6 +584,15 @@ class DataSource(TimestampedUUIDModel):
         on_delete=models.SET_NULL,
         related_name="datasources",
     )
+    connection = models.ForeignKey(
+        "Connection",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="datasources",
+    )
+    plugin_key = models.CharField(max_length=64, blank=True, default="")
+    datasource_config = models.JSONField(default=dict, blank=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True, default="")
     availability_status = models.CharField(
@@ -679,6 +698,350 @@ class DataSourceCredential(TimestampedUUIDModel):
         return self.name
 
 
+class SecretMaterial(TimestampedUUIDModel):
+    """Stable identity for encrypted integration authentication material."""
+
+    name = models.CharField(max_length=160)
+    status = models.CharField(max_length=16, default="active")
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class SecretVersion(TimestampedUUIDModel):
+    """One encrypted version of reusable authentication material."""
+
+    material = models.ForeignKey(
+        SecretMaterial,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    encrypted_value = models.TextField()
+    status = models.CharField(max_length=16, default="active")
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def set_value(self, value):
+        """Encrypt and store one secret version value."""
+
+        self.encrypted_value = (
+            _datasource_fernet()
+            .encrypt(str(value or "").encode("utf-8"))
+            .decode("utf-8")
+        )
+
+    def get_value(self):
+        """Return the decrypted secret value for trusted runtime use."""
+
+        if not self.encrypted_value:
+            return ""
+        try:
+            return _datasource_fernet().decrypt(
+                self.encrypted_value.encode("utf-8")
+            ).decode("utf-8")
+        except InvalidToken:
+            return ""
+
+
+class PluginRelease(TimestampedUUIDModel):
+    """Lifecycle state for one immutable installed Plugin version."""
+
+    class ReleaseStatus(models.TextChoices):
+        DEBUGGING = "debugging", "Debugging"
+        PUBLISHED = "published", "Published"
+        RETIRED = "retired", "Retired"
+
+    class DeploymentRole(models.TextChoices):
+        NONE = "", "None"
+        CANDIDATE = "candidate", "Candidate"
+        ACTIVE = "active", "Active"
+
+    plugin_key = models.CharField(max_length=64)
+    version = models.CharField(max_length=32)
+    package_digest = models.CharField(max_length=64)
+    release_status = models.CharField(
+        max_length=16,
+        choices=ReleaseStatus.choices,
+        default=ReleaseStatus.DEBUGGING,
+    )
+    deployment_role = models.CharField(
+        max_length=16,
+        choices=DeploymentRole.choices,
+        blank=True,
+        default=DeploymentRole.NONE,
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="published_plugin_releases",
+    )
+
+    class Meta:
+        ordering = ["plugin_key", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["plugin_key", "version"],
+                name="lens_plugin_release_identity_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["plugin_key"],
+                condition=Q(deployment_role="active"),
+                name="lens_plugin_release_active_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["plugin_key"],
+                condition=Q(deployment_role="candidate"),
+                name="lens_plugin_release_candidate_uniq",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(deployment_role="")
+                    | Q(
+                        release_status="published",
+                        deployment_role__in=["active", "candidate"],
+                    )
+                ),
+                name="lens_plugin_release_role_status_ck",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.plugin_key}@{self.version}"
+
+
+class Connection(TimestampedUUIDModel):
+    """Current approved plugin authentication and platform access policy."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+
+    name = models.CharField(max_length=160)
+    plugin_key = models.CharField(max_length=64)
+    endpoint = models.URLField(max_length=500)
+    config = models.JSONField(default=dict, blank=True)
+    allowed_scope = models.JSONField(default=dict, blank=True)
+    secret_version = models.ForeignKey(
+        SecretVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="connections",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class LegacyIntegrationMigration(TimestampedUUIDModel):
+    """Audit one reversible legacy credential or datasource migration."""
+
+    class SourceKind(models.TextChoices):
+        CREDENTIAL = "credential", "Credential"
+        DATASOURCE = "datasource", "Datasource"
+
+    class Status(models.TextChoices):
+        MIGRATED = "migrated", "Migrated"
+        MANUAL_REVIEW = "manual_review", "Manual Review"
+        ROLLED_BACK = "rolled_back", "Rolled Back"
+
+    source_kind = models.CharField(max_length=16, choices=SourceKind.choices)
+    source_uuid = models.UUIDField()
+    status = models.CharField(max_length=24, choices=Status.choices)
+    reason = models.CharField(max_length=64, blank=True, default="")
+    connection = models.ForeignKey(
+        Connection,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="legacy_migration_records",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="legacy_migration_records",
+    )
+    details = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["source_kind", "source_uuid"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_kind", "source_uuid"],
+                name="lens_legacy_migration_source_uniq",
+            )
+        ]
+
+
+class ExecutionSnapshot(TimestampedUUIDModel):
+    """Immutable resolved configuration used by a started plugin operation."""
+
+    class Kind(models.TextChoices):
+        DATASOURCE_SYNC = "datasource_sync", "Datasource Sync"
+        TOOL_INVOKE = "tool_invoke", "Tool Invoke"
+
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    run = models.ForeignKey(
+        "Run",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_execution_snapshots",
+    )
+    secret_version = models.ForeignKey(
+        SecretVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    plugin_key = models.CharField(max_length=64)
+    plugin_version = models.CharField(max_length=32)
+    protocol_version = models.PositiveIntegerField()
+    tool_key = models.CharField(max_length=128, blank=True, default="")
+    invocation_id = models.CharField(max_length=128, blank=True, default="")
+    resolved_config = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        kind="datasource_sync",
+                        datasource__isnull=False,
+                        run__isnull=True,
+                        tool_key="",
+                        invocation_id="",
+                    )
+                    | (
+                        Q(
+                            kind="tool_invoke",
+                            datasource__isnull=True,
+                            run__isnull=False,
+                        )
+                        & ~Q(tool_key="")
+                        & ~Q(invocation_id="")
+                    )
+                ),
+                name="lens_snapshot_owner_kind_ck",
+            ),
+            models.UniqueConstraint(
+                fields=["run", "invocation_id"],
+                condition=Q(kind="tool_invoke"),
+                name="lens_snap_run_invocation_uniq",
+            ),
+        ]
+
+
+class CredentialLease(TimestampedUUIDModel):
+    """Short-lived authorization handle bound to one execution snapshot."""
+
+    snapshot = models.ForeignKey(
+        ExecutionSnapshot,
+        on_delete=models.PROTECT,
+        related_name="credential_leases",
+    )
+    lensnode = models.ForeignKey(
+        LensNode,
+        on_delete=models.PROTECT,
+        related_name="credential_leases",
+    )
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class PluginInvocation(TimestampedUUIDModel):
+    """Secret-free audit record for one authorized Plugin execution."""
+
+    class Status(models.TextChoices):
+        AUTHORIZED = "authorized", "Authorized"
+        MATERIALIZED = "materialized", "Materialized"
+
+    snapshot = models.OneToOneField(
+        ExecutionSnapshot,
+        on_delete=models.PROTECT,
+        related_name="invocation_audit",
+    )
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    run = models.ForeignKey(
+        "Run",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="plugin_invocations",
+    )
+    lensnode = models.ForeignKey(
+        LensNode,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    kind = models.CharField(max_length=32, choices=ExecutionSnapshot.Kind.choices)
+    plugin_key = models.CharField(max_length=64)
+    tool_key = models.CharField(max_length=128, blank=True, default="")
+    capability = models.CharField(max_length=128, blank=True, default="")
+    resource_summary = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=24,
+        choices=Status.choices,
+        default=Status.AUTHORIZED,
+    )
+    materialized_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 def _datasource_fernet():
     """Return the symmetric encryptor for datasource credentials."""
 
@@ -769,6 +1132,30 @@ class AssistantMCP(models.Model):
         result = super().delete(*args, **kwargs)
         _refresh_assistant_routing_description(assistant)
         return result
+
+
+class AssistantPluginBinding(models.Model):
+    """Assistant access to one reusable Plugin connection.
+
+    ``tools`` is retained as a legacy compatibility field. Direct Assistant
+    runtime loading always uses the complete read-only Plugin manifest.
+    """
+
+    assistant = models.ForeignKey(
+        Assistant,
+        on_delete=models.CASCADE,
+        related_name="plugin_bindings",
+    )
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="assistant_bindings",
+    )
+    tools = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = [("assistant", "connection")]
 
 
 class Session(TimestampedUUIDModel):
@@ -1151,6 +1538,7 @@ class RunExecution(models.Model):
     task = models.CharField(max_length=160)
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
+    loaded_plugins = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
     runtime_snapshot = models.JSONField(default=dict, blank=True)
     agent_rounds = models.CharField(

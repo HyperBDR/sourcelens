@@ -137,22 +137,13 @@ test('fixed Smart Assistants allow member inspection without editing', async () 
     routingScopePickerSource()
   ])
 
-  assert.doesNotMatch(
-    picker,
-    /if \(!props\.readonly\) emit\('open'\)/
-  )
+  assert.doesNotMatch(picker, /if \(!props\.readonly\) emit\('open'\)/)
   assert.match(picker, /:disabled="readonly \|\| !candidateCount"/)
   assert.match(picker, /:disabled="readonly"/)
   assert.match(picker, /v-if="!readonly"/)
   assert.match(picker, /readonly \? t\('common\.close'\)/)
-  assert.match(
-    chat,
-    /if \(!isFixedSmartAssistant\.value\) return candidates/
-  )
-  assert.match(
-    chat,
-    /selectedAssistant\.value\?\.collaboration_members/
-  )
+  assert.match(chat, /if \(!isFixedSmartAssistant\.value\) return candidates/)
+  assert.match(chat, /selectedAssistant\.value\?\.collaboration_members/)
   assert.match(
     chat,
     /return candidates\.filter\(\(assistant\) => configured\.has\(assistant\.uuid\)\)/

@@ -41,7 +41,7 @@
 
         <div class="flex min-h-0 flex-col px-5 py-4">
           <div
-            class="mb-4 flex flex-shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+            class="datasource-toolbar mb-4 flex flex-shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
           >
             <div
               ref="searchBoxRef"
@@ -142,12 +142,18 @@
                 </div>
               </div>
             </div>
-            <div v-if="searchFilters.length" class="text-xs text-ink-500">
-              {{
-                t('lensAdmin.datasourceSearch.filterCount', {
-                  count: searchFilters.length
-                })
-              }}
+            <div class="flex shrink-0 items-center gap-3 text-xs text-ink-500">
+              <span
+                >{{ enabledDataSourceCount }}
+                {{ t('common.status.active') }}</span
+              >
+              <span v-if="searchFilters.length">
+                {{
+                  t('lensAdmin.datasourceSearch.filterCount', {
+                    count: searchFilters.length
+                  })
+                }}
+              </span>
             </div>
           </div>
 
@@ -164,230 +170,163 @@
 
           <div
             v-else
-            class="datasource-table-scroll relative min-h-0 overflow-auto rounded-lg border border-line bg-surface"
+            class="grid min-h-0 grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto md:grid-cols-2 xl:grid-cols-3"
           >
-            <table class="min-w-full divide-y divide-line">
-              <thead class="sticky top-0 z-10 bg-surface-sunken">
-                <tr>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.datasource') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.repository') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.lensnode') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.targetPath') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.status') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.policy') }}
-                  </th>
-                  <th class="table-head">
-                    {{ t('lensAdmin.columns.actions') }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line bg-surface">
-                <tr
-                  v-for="row in dataSources"
-                  :key="row.uuid"
-                  class="cursor-pointer transition-colors hover:bg-line-soft"
-                  :class="
-                    selectedDataSource?.uuid === row.uuid ? 'bg-brand-50' : ''
-                  "
-                  @click="selectDataSource(row)"
+            <article
+              v-for="row in dataSources"
+              :key="row.uuid"
+              class="datasource-card flex min-w-0 cursor-pointer flex-col rounded-xl border border-line bg-surface p-3 shadow-sm transition hover:border-brand-200 hover:shadow-md"
+              @click="selectDataSource(row)"
+            >
+              <div class="flex items-start gap-3">
+                <div
+                  class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken"
                 >
-                  <td class="table-cell">
-                    <div
-                      class="flex items-center gap-2 font-medium text-ink-900"
-                    >
-                      <span
-                        :class="
-                          isDataSourceEnabled(row)
-                            ? 'bg-success-600'
-                            : 'bg-danger-600'
-                        "
-                        class="h-2 w-2 shrink-0 rounded-full"
-                      />
-                      <span>{{ row.name }}</span>
-                    </div>
-                    <div class="mt-1 flex flex-wrap items-center gap-2">
-                      <span class="font-mono text-xs text-ink-400">
-                        {{ compactUuid(row.uuid) }}
-                      </span>
-                      <span
-                        class="rounded border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-500"
-                      >
-                        {{ formatSourceType(row.source_type) }}
-                      </span>
-                    </div>
-                  </td>
-                  <td class="table-cell max-w-xs text-ink-600">
-                    <div class="truncate" :title="dataSourceRepository(row)">
-                      {{ dataSourceRepository(row) }}
-                    </div>
-                    <div
-                      v-if="isOrganizationDataSource(row)"
-                      class="mt-2 flex max-w-xs flex-wrap gap-1"
-                    >
-                      <span
-                        v-for="repo in visibleRepositoryTags(row)"
-                        :key="repo.repo_url || repo.name || repo.path"
-                        class="max-w-28 truncate rounded border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
-                        :title="repo.repo_url || repo.name || repo.path"
-                      >
-                        {{ repo.name || repo.path || repo.repo_url }}
-                      </span>
-                      <span
-                        v-if="hiddenRepositoryTagCount(row) > 0"
-                        class="rounded border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-500"
-                      >
-                        +{{ hiddenRepositoryTagCount(row) }}
-                      </span>
-                    </div>
-                    <div
-                      v-if="
-                        row.source_type === 'git' &&
-                        !isOrganizationDataSource(row)
-                      "
-                      class="mt-1 font-mono text-xs text-ink-500"
-                    >
-                      {{ dataSourceBranch(row) }}
-                    </div>
-                  </td>
-                  <td class="table-cell text-ink-600">
-                    {{ row.lensnode_name || lensNodeName(row.lensnode) }}
-                  </td>
-                  <td
-                    class="table-cell max-w-xs font-mono text-xs text-ink-500"
+                  <img
+                    v-if="pluginIconUrl(row.plugin_key)"
+                    :src="pluginIconUrl(row.plugin_key)"
+                    :alt="formatSourceType(row.source_type)"
+                    class="h-full w-full object-cover"
+                  />
+                  <span
+                    v-else
+                    class="text-xs font-semibold uppercase text-brand-700"
+                    >{{ sourceTypeInitials(row) }}</span
                   >
-                    <div
-                      class="truncate"
-                      :title="row.target_path || emptyValue"
-                    >
-                      {{ row.target_path || emptyValue }}
-                    </div>
-                  </td>
-                  <td class="table-cell text-ink-600">
-                    <div class="flex max-w-sm flex-col items-start gap-2">
-                      <div class="flex flex-wrap gap-1.5">
-                        <span
-                          v-for="tag in datasourceSyncTags(row)"
-                          :key="tag.key"
-                          :class="tag.class"
-                          class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium"
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <h2 class="truncate text-sm font-semibold text-ink-900">
+                        {{ row.name }}
+                      </h2>
+                      <p class="mt-0.5 truncate text-xs text-ink-500">
+                        {{ formatSourceType(row.source_type) }}
+                        <template v-if="connectionName(row)">
+                          · {{ connectionName(row) }}</template
                         >
-                          {{ tag.label }}
-                        </span>
-                      </div>
-                      <div
-                        v-if="isDataSourceSyncing(row)"
-                        class="space-y-1 text-xs text-ink-500"
-                      >
-                        <div class="break-words">
-                          {{
-                            row.current_sync?.progress_message ||
-                            row.current_sync?.progress_step ||
-                            emptyValue
-                          }}
-                        </div>
-                        <div class="font-mono">
-                          {{ compactUuid(row.current_sync?.task_id) }}
-                        </div>
-                      </div>
+                      </p>
                     </div>
-                  </td>
-                  <td class="table-cell">
-                    <div
-                      v-if="row.source_type === 'managed_workspace'"
-                      class="space-y-1 text-xs text-ink-500"
+                    <span
+                      v-for="tag in datasourceSyncTags(row).slice(0, 1)"
+                      :key="tag.key"
+                      :class="tag.class"
+                      class="shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium"
+                      >{{ tag.label }}</span
                     >
-                      <div class="font-medium text-ink-700">
-                        {{ t('lensAdmin.availability.title') }}
-                      </div>
-                      <div>
-                        {{ formatDateTime(row.availability_checked_at) }}
-                      </div>
-                    </div>
-                    <div v-else class="space-y-1 text-xs text-ink-500">
-                      <div class="font-mono text-ink-700">
-                        {{ formatDataSourcePolicyLine(row.sync_policy) }}
-                      </div>
-                      <div>
-                        {{ t('lensAdmin.table.lastSync') }}:
-                        {{ formatDateTime(row.last_synced_at) }}
-                      </div>
-                      <div>
-                        {{ t('lensAdmin.table.nextSync') }}:
-                        {{ formatNextDatasourceSync(row) }}
-                      </div>
-                    </div>
-                  </td>
-                  <td class="table-cell" @click.stop>
-                    <div class="flex flex-wrap gap-2">
-                      <BaseButton
-                        v-if="row.source_type !== 'managed_workspace'"
-                        size="sm"
-                        variant="outline"
-                        :disabled="
-                          !isDataSourceEnabled(row) || isDataSourceSyncing(row)
-                        "
-                        @click="sync(row)"
-                      >
-                        {{ t('lensAdmin.actions.sync') }}
-                      </BaseButton>
-                      <BaseButton
-                        v-else
-                        size="sm"
-                        variant="outline"
-                        @click="refreshAvailability(row)"
-                      >
-                        {{ t('lensAdmin.actions.refreshAvailability') }}
-                      </BaseButton>
-                      <BaseButton
-                        v-if="row.source_type === 'managed_workspace'"
-                        size="sm"
-                        variant="outline"
-                        @click="openUpload(row)"
-                      >
-                        {{ t('lensAdmin.actions.uploadFile') }}
-                      </BaseButton>
-                      <BaseButton
-                        size="sm"
-                        :variant="
-                          isDataSourceEnabled(row) ? 'outline' : 'primary'
-                        "
-                        @click="toggleDataSourceEnabled(row)"
-                      >
-                        {{
-                          isDataSourceEnabled(row)
-                            ? t('lensAdmin.actions.disableDatasource')
-                            : t('lensAdmin.actions.enableDatasource')
-                        }}
-                      </BaseButton>
-                      <BaseButton
-                        v-if="isDataSourceSyncing(row)"
-                        size="sm"
-                        variant="danger"
-                        @click="cancelSync(row)"
-                      >
-                        {{ t('lensAdmin.actions.cancelSync') }}
-                      </BaseButton>
-                      <RowActions
-                        :row="row"
-                        @edit="startEdit"
-                        @delete="remove"
-                      />
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-3 min-w-0 rounded-lg bg-surface-sunken px-3">
+                <div
+                  class="datasource-source-summary flex min-w-0 items-center gap-2 py-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-ink-500">{{
+                    t('lensAdmin.datasourceCard.resource')
+                  }}</span>
+                  <p
+                    class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-ink-800"
+                    :title="
+                      dataSourceRepositoryUrl(row, connectionEndpoint(row))
+                    "
+                  >
+                    {{ dataSourceRepositoryUrl(row, connectionEndpoint(row)) }}
+                  </p>
+                  <span
+                    v-if="
+                      row.source_type === 'git' &&
+                      !isOrganizationDataSource(row)
+                    "
+                    class="max-w-24 shrink-0 truncate rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
+                    :title="dataSourceBranch(row)"
+                    >{{ dataSourceBranch(row) }}</span
+                  >
+                  <span
+                    v-else-if="isOrganizationDataSource(row)"
+                    class="shrink-0 text-xs text-ink-500"
+                    >{{ dataSourceRepositories(row).length }}
+                    {{ t('lensAdmin.pluginForm.resources') }}</span
+                  >
+                </div>
+                <div
+                  class="datasource-target-summary flex min-w-0 items-center gap-2 border-t border-line py-2"
+                >
+                  <span class="w-14 shrink-0 text-xs text-ink-500">{{
+                    t('lensAdmin.datasourceCard.target')
+                  }}</span>
+                  <p
+                    class="min-w-0 flex-1 truncate font-mono text-xs text-ink-700"
+                    :title="row.target_path || emptyValue"
+                  >
+                    {{ row.target_path || emptyValue }}
+                  </p>
+                  <span
+                    class="max-w-28 shrink-0 truncate text-xs text-ink-500"
+                    :title="row.lensnode_name || lensNodeName(row.lensnode)"
+                    >{{ row.lensnode_name || lensNodeName(row.lensnode) }}</span
+                  >
+                </div>
+              </div>
+
+              <div
+                class="datasource-run-summary mt-3 flex flex-1 items-center justify-between gap-3 border-t border-line pt-2"
+                @click.stop
+              >
+                <div class="min-w-0 text-xs text-ink-500">
+                  <p v-if="isDataSourceSyncing(row)" class="truncate">
+                    {{
+                      row.current_sync?.progress_message ||
+                      row.current_sync?.progress_step ||
+                      t('lensAdmin.table.syncRunning')
+                    }}
+                  </p>
+                  <p v-else-if="row.source_type !== 'managed_workspace'">
+                    {{ t('lensAdmin.table.lastSync') }}:
+                    {{ formatDateTime(row.last_synced_at) }}
+                  </p>
+                  <p v-else>
+                    {{ t('lensAdmin.availability.title') }}:
+                    {{ formatDateTime(row.availability_checked_at) }}
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                  <BaseButton
+                    v-if="
+                      row.source_type !== 'managed_workspace' &&
+                      !isDataSourceSyncing(row)
+                    "
+                    size="sm"
+                    variant="outline"
+                    :disabled="!isDataSourceEnabled(row)"
+                    @click="sync(row)"
+                    >{{ t('lensAdmin.actions.sync') }}</BaseButton
+                  >
+                  <BaseButton
+                    v-else-if="isDataSourceSyncing(row)"
+                    size="sm"
+                    variant="danger"
+                    :title="t('lensAdmin.actions.cancelSync')"
+                    @click="cancelSync(row)"
+                  >
+                    <span class="sm:hidden">{{ t('common.cancel') }}</span>
+                    <span class="hidden sm:inline">{{
+                      t('lensAdmin.actions.cancelSync')
+                    }}</span>
+                  </BaseButton>
+                  <BaseButton
+                    v-else
+                    size="sm"
+                    variant="outline"
+                    @click="refreshAvailability(row)"
+                    >{{
+                      t('lensAdmin.actions.refreshAvailability')
+                    }}</BaseButton
+                  >
+                  <RowActions :row="row" @edit="startEdit" @delete="remove" />
+                </div>
+              </div>
+            </article>
           </div>
           <PaginationBar
             v-if="!loading"
@@ -408,6 +347,9 @@
         :config="datasourceConfig"
         :lensnodes="lensnodes"
         :credentials="credentials"
+        :connections="connections"
+        :plugins="datasourcePlugins"
+        :plugin-manifest="currentPluginManifest"
         :llm-config-options="llmConfigOptions"
         v-model:sync-interval-seconds="syncIntervalSeconds"
         v-model:sync-policy-mode="syncPolicyMode"
@@ -415,6 +357,7 @@
         v-model:sync-timezone="syncTimezone"
         :path-result="datasourcePathResult"
         :connection-result="datasourceConnectionResult"
+        :loading-resource-options="loadingPluginResourceOptions"
         :checking-path="checkingDatasourcePath"
         :testing-connection="testingDatasourceConnection"
         :refreshing-credentials="refreshingCredentials"
@@ -429,13 +372,19 @@
         @connection-change="resetDatasourceConnectionResult"
         @refresh-credentials="refreshCredentials"
         @refresh-dirs="refreshDirectories"
+        @request-resource-options="loadPluginResourceOptions"
       />
 
       <DataSourceDetailDrawer
         :show="showDatasourceDetailDrawer"
         :datasource="selectedDataSource"
         :lensnodes="lensnodes"
+        @cancel-sync="cancelSync"
         @close="closeDataSourceDetail"
+        @edit="startEdit"
+        @sync="sync"
+        @toggle-enabled="toggleDataSourceEnabled"
+        @upload="openUpload"
       />
       <input
         ref="uploadInput"
@@ -463,35 +412,37 @@ import {
   checkLensNodeDataSourcePath,
   createDataSource,
   deleteDataSource,
+  getConnectionResources,
+  getPluginIcon,
+  getPluginManifest,
   listCredentials,
+  listConnections,
   listDataSources,
   listLensNodes,
+  listPlugins,
   scanLensNodeDirs,
   refreshDataSourceAvailability,
   uploadDataSourceFile,
   setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
-  updateDataSource
+  updateDataSource,
+  validateConnectionDatasource
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { pluginDisplayName } from '@/utils/pluginI18n'
 
 import DataSourceDetailDrawer from './DataSourceDetailDrawer.vue'
 import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
 import RowActions from './components/RowActions.vue'
-import {
-  EMPTY_VALUE as emptyValue,
-  compactUuid,
-  normalizeList
-} from './adminHelpers'
+import { EMPTY_VALUE as emptyValue, normalizeList } from './adminHelpers'
 import {
   dataSourceBranch,
   dataSourceRepositories,
-  dataSourceRepository,
-  formatDataSourcePolicyLine,
+  dataSourceRepositoryUrl,
   isDataSourceEnabled,
   isOrganizationDataSource,
   isDataSourceSyncing,
@@ -503,7 +454,7 @@ import {
 } from './directoryRefresh'
 import { useShortDateTime } from './useShortDateTime'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { showSuccess, showError } = useToast()
 const route = useRoute()
 
@@ -528,6 +479,10 @@ const searchInputRef = ref(null)
 const searchValueInputRef = ref(null)
 const lensnodes = ref([])
 const credentials = ref([])
+const connections = ref([])
+const plugins = ref([])
+const pluginManifests = ref({})
+const pluginIconUrls = ref({})
 const llmConfigOptions = ref([])
 const selectedDataSource = ref(null)
 const uploadInput = ref(null)
@@ -552,6 +507,8 @@ const uploadAccept = [
 const datasourceConfig = ref({})
 const datasourcePathResult = ref(null)
 const datasourceConnectionResult = ref(null)
+const loadingPluginResourceOptions = ref('')
+let pluginResourceRequestId = 0
 const suppressDatasourceConnectionReset = ref(false)
 const datasourceConnectionBaseSignature = ref('')
 const checkingDatasourcePath = ref(false)
@@ -567,6 +524,20 @@ const dynamicRefreshInFlight = ref(false)
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(totalDataSources.value / pageSize.value))
+)
+
+const enabledDataSourceCount = computed(
+  () => dataSources.value.filter((row) => isDataSourceEnabled(row)).length
+)
+
+const currentPluginManifest = computed(
+  () => pluginManifests.value[form.value.plugin_key] || null
+)
+
+const datasourcePlugins = computed(() =>
+  plugins.value.filter(
+    (plugin) => plugin.datasource && plugin.datasource_source_type
+  )
 )
 
 const datasourceSearchOptions = computed(() => [
@@ -792,19 +763,6 @@ function formatDatasourceLastSyncStatus(status) {
   return t('lensAdmin.table.notSynced')
 }
 
-function formatNextDatasourceSync(row) {
-  if (!isDataSourceEnabled(row)) {
-    return t('common.status.disabled')
-  }
-  if (row.sync_state?.next_run_at) {
-    return formatDateTime(row.sync_state.next_run_at)
-  }
-  if (row.sync_policy?.mode === 'crontab') {
-    return t('lensAdmin.table.followCrontab')
-  }
-  return t('lensAdmin.table.notRecorded')
-}
-
 function selectDataSource(row) {
   selectedDataSource.value = row
   showDatasourceDetailDrawer.value = true
@@ -815,6 +773,14 @@ function closeDataSourceDetail() {
 }
 
 function formatSourceType(sourceType) {
+  if (isPluginSourceType(sourceType)) {
+    const plugin = plugins.value.find(
+      (item) => item.key === pluginKeyFromSourceType(sourceType)
+    )
+    return (
+      pluginDisplayName(plugin, t, te) || pluginKeyFromSourceType(sourceType)
+    )
+  }
   if (isGitSourceType(sourceType)) {
     if (sourceType === 'github') return 'GitHub'
     if (sourceType === 'gitlab') return 'GitLab'
@@ -834,10 +800,33 @@ function isGitSourceType(sourceType) {
 }
 
 function normalizedSourceType(sourceType) {
+  if (isPluginSourceType(sourceType)) {
+    return currentPluginManifest.value?.datasource_source_type || ''
+  }
   return isGitSourceType(sourceType) ? 'git' : sourceType
 }
 
+function isPluginSourceType(sourceType) {
+  return String(sourceType || '').startsWith('plugin:')
+}
+
+function pluginKeyFromSourceType(sourceType) {
+  return isPluginSourceType(sourceType) ? sourceType.slice(7) : ''
+}
+
+function pluginIconUrl(pluginKey) {
+  return pluginIconUrls.value[pluginKey] || ''
+}
+
+function sourceTypeInitials(row) {
+  const label = row.plugin_key || formatSourceType(row.source_type)
+  return String(label || 'DS').slice(0, 2)
+}
+
 function uiSourceTypeFromRow(row) {
+  if (row?.plugin_key && row?.connection) {
+    return `plugin:${row.plugin_key}`
+  }
   if (row?.source_type !== 'git') {
     return row?.source_type || 'feishu'
   }
@@ -870,28 +859,63 @@ function lensNodeName(value) {
   return found?.name || uuid || emptyValue
 }
 
-function visibleRepositoryTags(row) {
-  return dataSourceRepositories(row).slice(0, 4)
+function dataSourceConnection(row) {
+  const connectionUuid =
+    typeof row.connection === 'object' ? row.connection?.uuid : row.connection
+  return connections.value.find(
+    (connection) => connection.uuid === connectionUuid
+  )
 }
 
-function hiddenRepositoryTagCount(row) {
-  return Math.max(0, dataSourceRepositories(row).length - 4)
+function connectionName(row) {
+  return (
+    row.connection_name ||
+    (typeof row.connection === 'object' ? row.connection?.name : '') ||
+    dataSourceConnection(row)?.name ||
+    ''
+  )
+}
+
+function connectionEndpoint(row) {
+  return (
+    row.connection_endpoint ||
+    (typeof row.connection === 'object' ? row.connection?.endpoint : '') ||
+    dataSourceConnection(row)?.endpoint ||
+    ''
+  )
 }
 
 async function load() {
   loading.value = true
   formError.value = ''
   try {
-    const [dataSourceRows, lensnodeRows, credentialRows, llmConfigRows] =
-      await Promise.all([
-        listDataSources(datasourceListParams()),
-        listLensNodes(),
-        listCredentials(),
-        llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
-      ])
+    const [
+      dataSourceRows,
+      lensnodeRows,
+      credentialRows,
+      connectionRows,
+      installedPlugins,
+      llmConfigRows
+    ] = await Promise.all([
+      listDataSources(datasourceListParams()),
+      listLensNodes(),
+      listCredentials(),
+      listConnections({ status: 'active' }),
+      listPlugins(),
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+    ])
     applyDataSourceRows(dataSourceRows, { selectFallback: true })
     lensnodes.value = normalizeList(lensnodeRows)
     credentials.value = normalizeList(credentialRows)
+    connections.value = normalizeList(connectionRows)
+    plugins.value = normalizeList(installedPlugins)
+    const manifests = await Promise.all(
+      plugins.value.map((plugin) => getPluginManifest(plugin.key))
+    )
+    pluginManifests.value = Object.fromEntries(
+      manifests.map((manifest) => [manifest.key, manifest])
+    )
+    await loadPluginIcons(plugins.value)
     llmConfigOptions.value = normalizeList(llmConfigRows)
     updateDynamicRefresh()
   } catch (error) {
@@ -899,6 +923,29 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadPluginIcons(installedPlugins) {
+  revokePluginIconUrls()
+  const entries = await Promise.all(
+    installedPlugins.map(async (plugin) => {
+      if (!plugin.icon_url) return [plugin.key, '']
+      try {
+        const blob = await getPluginIcon(plugin.key)
+        return [plugin.key, URL.createObjectURL(blob)]
+      } catch {
+        return [plugin.key, '']
+      }
+    })
+  )
+  pluginIconUrls.value = Object.fromEntries(entries)
+}
+
+function revokePluginIconUrls() {
+  Object.values(pluginIconUrls.value).forEach((url) => {
+    if (url) URL.revokeObjectURL(url)
+  })
+  pluginIconUrls.value = {}
 }
 
 function applyDataSourceRows(rows, options = {}) {
@@ -1014,14 +1061,17 @@ function closeDrawer() {
 }
 
 function defaultForm() {
+  const defaultPluginKey = datasourcePlugins.value[0]?.key || ''
   const seed = {
     name: '',
-    source_type: 'github',
+    source_type: defaultPluginKey ? `plugin:${defaultPluginKey}` : 'gitlab',
     lensnode_uuid: '',
     workspace_relative_path: '',
     target_path: '',
     credential_uuid: '',
     credential_configured: false,
+    connection_uuid: '',
+    plugin_key: defaultPluginKey,
     conversion_document: true,
     conversion_document_model_ref: '',
     conversion_image: false,
@@ -1060,6 +1110,8 @@ function formFromRow(row) {
     target_path: row.target_path || '',
     credential_uuid: row.credential || '',
     credential_configured: !!row.credential_configured,
+    connection_uuid: row.connection || '',
+    plugin_key: row.plugin_key || '',
     conversion_document: row.sync_policy?.conversion?.document === true,
     conversion_document_model_ref:
       row.sync_policy?.conversion?.document_model_ref || '',
@@ -1094,6 +1146,9 @@ function formFromRow(row) {
 }
 
 function datasourceConfigFromRow(row) {
+  if (row.plugin_key && row.connection) {
+    return { ...(row.datasource_config || {}) }
+  }
   if (row.source_type === 'feishu') {
     return {
       ...(row.config || {}),
@@ -1119,6 +1174,9 @@ function datasourceConfigFromRow(row) {
 }
 
 function cachedDatasourceConnectionResult(row) {
+  if (row.plugin_key && row.connection) {
+    return null
+  }
   const config = datasourceConfig.value || {}
   if (row.source_type === 'git' && Array.isArray(config.git_repositories)) {
     return {
@@ -1160,9 +1218,18 @@ function handleDatasourceTypeChange(seed = null) {
   resetDatasourceSyncPolicy()
   if (!seed) {
     form.value.credential_uuid = ''
+    form.value.connection_uuid = ''
+    form.value.plugin_key = ''
   }
   const sourceType = seed?.source_type || form.value.source_type
-  if (isGitSourceType(sourceType)) {
+  if (isPluginSourceType(sourceType)) {
+    const pluginKey = pluginKeyFromSourceType(sourceType)
+    datasourceConfig.value = datasourceSchemaDefaults(
+      pluginManifests.value[pluginKey]?.datasource_schema
+    )
+    if (seed) seed.plugin_key = pluginKey
+    else form.value.plugin_key = pluginKey
+  } else if (isGitSourceType(sourceType)) {
     datasourceConfig.value = {
       repo_url: '',
       branch: '',
@@ -1241,7 +1308,7 @@ async function save() {
 
 function buildPayload() {
   const managedWorkspace = form.value.source_type === 'managed_workspace'
-  return {
+  const payload = {
     name: form.value.name,
     source_type: normalizedSourceType(form.value.source_type),
     lensnode_uuid: form.value.lensnode_uuid,
@@ -1253,6 +1320,52 @@ function buildPayload() {
       ? form.value.credential_uuid
       : null
   }
+  if (isPluginSourceType(form.value.source_type)) {
+    payload.plugin_key = form.value.plugin_key
+    payload.connection_uuid = form.value.connection_uuid
+    payload.datasource_config = buildPluginDatasourceConfig()
+    payload.config = {}
+    payload.credential_uuid = null
+  } else {
+    payload.connection_uuid = null
+    payload.plugin_key = ''
+    payload.datasource_config = {}
+  }
+  return payload
+}
+
+function buildPluginDatasourceConfig() {
+  const config = datasourceConfig.value || {}
+  const properties =
+    currentPluginManifest.value?.datasource_schema?.properties || {}
+  return Object.fromEntries(
+    Object.entries(properties)
+      .map(([key, field]) => [
+        key,
+        normalizePluginDatasourceField(field, config[key])
+      ])
+      .filter(([, value]) => hasDatasourceFieldValue(value))
+  )
+}
+
+function normalizePluginDatasourceField(field, value) {
+  if (field?.type !== 'array' || !Array.isArray(value)) return value
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean)
+}
+
+function datasourceSchemaDefaults(schema) {
+  return Object.fromEntries(
+    Object.entries(schema?.properties || {}).map(([key, field]) => [
+      key,
+      field.default ?? (field.type === 'array' ? [] : '')
+    ])
+  )
+}
+
+function hasDatasourceFieldValue(value) {
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'string') return value.trim().length > 0
+  return value !== null && value !== undefined && value !== ''
 }
 
 async function buildCreatePayloads() {
@@ -1279,6 +1392,9 @@ async function buildCreatePayloads() {
 }
 
 function buildDatasourceConfig() {
+  if (isPluginSourceType(form.value.source_type)) {
+    return {}
+  }
   const config = { ...datasourceConfig.value }
   if (isGitSourceType(form.value.source_type)) {
     if (Array.isArray(config.git_repositories)) {
@@ -1452,6 +1568,23 @@ function resetDatasourceConnectionResult() {
     suppressDatasourceConnectionReset.value = false
     return
   }
+  if (
+    isPluginSourceType(form.value.source_type) &&
+    datasourceConnectionResult.value?.status === 'success' &&
+    datasourceConnectionResult.value?.details?.connection_uuid ===
+      form.value.connection_uuid
+  ) {
+    if (
+      form.value.plugin_key === 'feishu' &&
+      datasourceConnectionSignature(true) !==
+        datasourceConnectionBaseSignature.value
+    ) {
+      datasourceConnectionResult.value = null
+      datasourceConnectionBaseSignature.value = ''
+      return
+    }
+    return
+  }
   if (shouldKeepGitBranchConnectionResult()) {
     datasourceConnectionResult.value = {
       ...datasourceConnectionResult.value,
@@ -1467,10 +1600,42 @@ function resetDatasourceConnectionResult() {
 }
 
 async function testDatasourceConnection() {
-  if (!form.value.lensnode_uuid) return
   testingDatasourceConnection.value = true
   datasourceConnectionResult.value = null
   try {
+    if (isPluginSourceType(form.value.source_type)) {
+      if (!form.value.connection_uuid) return
+      if (form.value.plugin_key === 'feishu') {
+        const result = await validateConnectionDatasource(
+          form.value.connection_uuid,
+          { datasource_config: buildPluginDatasourceConfig() }
+        )
+        datasourceConnectionResult.value = {
+          status: 'success',
+          message: t('lensAdmin.datasourceWizard.feishuResourcesAccessible'),
+          details: {
+            ...result,
+            connection_uuid: form.value.connection_uuid
+          }
+        }
+        datasourceConnectionBaseSignature.value =
+          datasourceConnectionSignature(true)
+        return
+      }
+      const resources = await getConnectionResources(form.value.connection_uuid)
+      datasourceConnectionResult.value = {
+        status: 'success',
+        message: 'Plugin Connection resources are available.',
+        details: {
+          ...resources,
+          connection_uuid: form.value.connection_uuid
+        }
+      }
+      datasourceConnectionBaseSignature.value =
+        datasourceConnectionSignature(true)
+      return
+    }
+    if (!form.value.lensnode_uuid) return
     const result = await testLensNodeDataSourceConnection(
       form.value.lensnode_uuid,
       {
@@ -1490,6 +1655,7 @@ async function testDatasourceConnection() {
     datasourceConnectionResult.value = {
       status: 'failed',
       message:
+        feishuDatasourceAccessError(error) ||
         lensNodeErrorMessage(error.response?.data?.detail, t) ||
         extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
     }
@@ -1498,7 +1664,68 @@ async function testDatasourceConnection() {
   }
 }
 
+function feishuDatasourceAccessError(error) {
+  if (form.value.plugin_key !== 'feishu') return ''
+  const payload = error.response?.data
+  const data =
+    payload?.data && typeof payload.data === 'object' ? payload.data : payload
+  const failures = Array.isArray(data?.resources)
+    ? data.resources.filter((item) => item?.accessible === false)
+    : []
+  const urls = failures.map((item) => item.url).filter(Boolean)
+  if (!urls.length) return ''
+  return t('lensAdmin.datasourceWizard.feishuResourcesInaccessible', {
+    urls: urls.join(', ')
+  })
+}
+
+async function loadPluginResourceOptions({ resource, selectedValues }) {
+  const connectionUuid = form.value.connection_uuid
+  const selection = selectedValues || {}
+  if (!connectionUuid || !resource || !Object.keys(selection).length) return
+  const requestId = ++pluginResourceRequestId
+  loadingPluginResourceOptions.value = resource
+  try {
+    const resources = await getConnectionResources(connectionUuid, {
+      resource,
+      ...selection
+    })
+    if (
+      requestId !== pluginResourceRequestId ||
+      connectionUuid !== form.value.connection_uuid
+    ) {
+      return
+    }
+    datasourceConnectionResult.value = {
+      ...(datasourceConnectionResult.value || {}),
+      status: 'success',
+      details: {
+        ...(datasourceConnectionResult.value?.details || {}),
+        resources: {
+          ...(datasourceConnectionResult.value?.details?.resources || {}),
+          ...(resources.resources || {})
+        },
+        connection_uuid: connectionUuid
+      }
+    }
+  } catch (error) {
+    if (requestId === pluginResourceRequestId) {
+      showError(
+        lensNodeErrorMessage(error.response?.data?.detail, t) ||
+          extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
+      )
+    }
+  } finally {
+    if (requestId === pluginResourceRequestId) {
+      loadingPluginResourceOptions.value = ''
+    }
+  }
+}
+
 function shouldUseDatasourceCredential() {
+  if (isPluginSourceType(form.value.source_type)) {
+    return false
+  }
   if (!form.value.credential_uuid) {
     return false
   }
@@ -1551,6 +1778,9 @@ async function refreshDirectories() {
 }
 
 function applyDatasourceConnectionResult(result) {
+  if (isPluginSourceType(form.value.source_type)) {
+    return
+  }
   if (
     !isGitSourceType(form.value.source_type) ||
     result?.status !== 'success'
@@ -1606,12 +1836,15 @@ function shouldKeepGitBranchConnectionResult() {
 }
 
 function datasourceConnectionSignature(ignoreBranch = false) {
-  const config = buildDatasourceConfig()
+  const config = isPluginSourceType(form.value.source_type)
+    ? buildPluginDatasourceConfig()
+    : buildDatasourceConfig()
   if (ignoreBranch) {
     delete config.branch
   }
   return JSON.stringify({
     lensnode_uuid: form.value.lensnode_uuid || '',
+    connection_uuid: form.value.connection_uuid || '',
     source_type: normalizedSourceType(form.value.source_type) || '',
     config
   })
@@ -1620,6 +1853,7 @@ function datasourceConnectionSignature(ignoreBranch = false) {
 function isGitOrganizationCreateMode() {
   return (
     mode.value === 'create' &&
+    !isPluginSourceType(form.value.source_type) &&
     isGitSourceType(form.value.source_type) &&
     Array.isArray(datasourceConnectionResult.value?.details?.repositories) &&
     datasourceConnectionResult.value.details.repositories.length > 0
@@ -1637,6 +1871,7 @@ function selectedGitOrganizationRepositories() {
 
 function isGitOrganizationSelectionMode() {
   return (
+    !isPluginSourceType(form.value.source_type) &&
     isGitSourceType(form.value.source_type) &&
     Array.isArray(datasourceConfig.value.git_repositories)
   )
@@ -1821,9 +2056,7 @@ async function uploadFile(event) {
     )
     await load()
   } catch (error) {
-    showError(
-      extractErrorMessage(error, t('lensAdmin.messages.uploadFailed'))
-    )
+    showError(extractErrorMessage(error, t('lensAdmin.messages.uploadFailed')))
   } finally {
     uploadDataSource.value = null
   }
@@ -1866,19 +2099,8 @@ onBeforeRouteLeave(() => {
 
 onBeforeUnmount(() => {
   stopDynamicRefresh()
+  revokePluginIconUrls()
 })
 </script>
 
-<style scoped>
-.datasource-table-scroll {
-  max-height: calc(100vh - 20rem);
-}
-
-.table-head {
-  @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
-}
-
-.table-cell {
-  @apply px-4 py-4 text-sm text-ink-700;
-}
-</style>
+<style scoped></style>
