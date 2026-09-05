@@ -189,6 +189,10 @@ class AttachmentServiceTests(TestCase):
         attachment.refresh_from_db()
         self.assertEqual(attachment.message_id, run.input_message_id)
         self.assertEqual(run.input_message.attachments.count(), 1)
+        self.assertEqual(
+            run.execution.runtime_snapshot["direct_attachment_uuids"],
+            [str(attachment.uuid)],
+        )
 
     def test_explicit_attachment_does_not_reuse_historical_images(self):
         historical = store_message_attachment(
@@ -237,6 +241,30 @@ class AttachmentServiceTests(TestCase):
             run.execution.runtime_snapshot["session_attachment_uuids"],
             [],
         )
+
+    @patch("lens.services.get_session_document_attachments", return_value=[])
+    def test_document_reference_never_falls_back_to_historical_image(
+        self, mock_documents
+    ):
+        """A missing document must not be replaced with an old image."""
+
+        image = store_message_attachment(
+            self.session, self.user, _png_upload("historical.png")
+        )
+        create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(image.uuid)],
+        )
+
+        with self.assertRaisesRegex(AttachmentError, "ATTACHMENT_NOT_FOUND"):
+            create_execution_run(
+                session=self.session,
+                question="Analyze the previous PDF",
+                enqueue=False,
+            )
+        mock_documents.assert_called()
 
     @patch("lens.services.model_supports_vision", return_value=True)
     def test_follow_up_reuses_previous_image(self, mock_support):

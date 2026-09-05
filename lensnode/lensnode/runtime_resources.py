@@ -198,8 +198,10 @@ def prepare_runtime_resources(
         command["history_artifact_paths"] = artifact_paths
     if subject_dir is not None:
         command["subject_dirs"] = [str(subject_dir)]
-        command.setdefault("target_dirs", []).append(
-            {"path": str(subject_dir), "material_role": "subject"}
+        target_dirs = command.setdefault("target_dirs", [])
+        target_dirs.insert(
+            0,
+            {"path": str(subject_dir), "material_role": "subject"},
         )
 
     if emit_event is not None:

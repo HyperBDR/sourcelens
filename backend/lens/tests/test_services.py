@@ -635,6 +635,85 @@ class LensServiceTests(TransactionTestCase):
             history,
         )
 
+    def test_build_run_history_excludes_old_attachment_turn_for_new_file(self):
+        attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            file="lens/attachments/historical.jpg",
+            original_name="historical.jpg",
+            mime_type="image/jpeg",
+        )
+        prior = create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        prior.output_message.content = "The old image contains a thesis meme."
+        prior.output_message.save(update_fields=["content"])
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        current_attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            file="lens/attachments/current.jpg",
+            original_name="current.jpg",
+            mime_type="image/jpeg",
+        )
+        current = create_execution_run(
+            session=self.session,
+            question="Analyze this file",
+            enqueue=False,
+            attachment_uuids=[str(current_attachment.uuid)],
+        )
+
+        self.assertEqual(build_run_history(current), [])
+
+    def test_build_run_history_keeps_referenced_old_attachment_turn(self):
+        attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            file="lens/attachments/historical.jpg",
+            original_name="historical.jpg",
+            mime_type="image/jpeg",
+        )
+        prior = create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        prior.output_message.content = "The old image contains a thesis meme."
+        prior.output_message.save(update_fields=["content"])
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        current_attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            file="lens/attachments/current.jpg",
+            original_name="current.jpg",
+            mime_type="image/jpeg",
+        )
+        current = create_execution_run(
+            session=self.session,
+            question="Compare this file with the previous image",
+            enqueue=False,
+            attachment_uuids=[str(current_attachment.uuid)],
+        )
+
+        self.assertEqual(
+            build_run_history(current),
+            [
+                {"role": "user", "content": "Describe this image"},
+                {
+                    "role": "assistant",
+                    "content": "The old image contains a thesis meme.",
+                },
+            ],
+        )
+
     def test_build_run_history_artifacts_returns_trusted_deliverable(self):
         from django.core.files.base import ContentFile
 
