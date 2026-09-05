@@ -254,6 +254,11 @@ test('Feishu datasource creation uses the Plugin while legacy rows remain editab
   )
   assert.match(
     drawer,
+    /props\.mode === 'edit' &&\s*props\.form\.source_type === 'gitlab'/
+  )
+  assert.match(drawer, /!props\.form\.connection_uuid/)
+  assert.match(
+    drawer,
     /if \(isPluginSourceType\(props\.form\.source_type\)\) \{\s*return Boolean\([\s\S]*schemaRequiredFieldsHaveValues/
   )
 })

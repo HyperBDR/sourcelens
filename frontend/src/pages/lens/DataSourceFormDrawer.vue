@@ -1547,16 +1547,22 @@ const sourceTypes = computed(() => {
       }
     }),
     {
-      value: 'gitlab',
-      label: 'GitLab',
-      description: t('lensAdmin.datasourceWizard.gitlabDesc')
-    },
-    {
       value: 'managed_workspace',
       label: t('lensAdmin.datasourceWizard.managedWorkspace'),
       description: t('lensAdmin.datasourceWizard.managedWorkspaceDesc')
     }
   ]
+  if (
+    props.mode === 'edit' &&
+    props.form.source_type === 'gitlab' &&
+    !props.form.connection_uuid
+  ) {
+    types.splice(types.length - 1, 0, {
+      value: 'gitlab',
+      label: 'GitLab',
+      description: t('lensAdmin.datasourceWizard.gitlabDesc')
+    })
+  }
   if (props.mode === 'edit' && props.form.source_type === 'feishu') {
     types.splice(types.length - 1, 0, {
       value: 'feishu',
