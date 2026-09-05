@@ -113,18 +113,19 @@
   "datasource_schema": {
     "type": "object",
     "properties": {
-      "repository": {
-        "type": "string",
+      "repositories": {
+        "type": "array",
+        "items": {"type": "string"},
         "format": "provider-resource",
         "resource": "repositories",
-        "title": "Repository"
+        "title": "Repositories",
+        "minItems": 1,
+        "maxItems": 50
       },
       "branch": {
         "type": "string",
-        "format": "provider-resource-option",
-        "resource": "branches",
-        "depends_on": "repository",
-        "title": "Branch"
+        "title": "Branch",
+        "description": "Optional branch, tag, or commit ref shared by all repositories."
       },
       "directory": {
         "type": "string",
@@ -133,7 +134,7 @@
         "description": "Optional repository-relative directory to sync."
       }
     },
-    "required": ["repository"],
+    "required": ["repositories"],
     "additionalProperties": false
   },
   "tools": [

@@ -1,4 +1,5 @@
 from django.test import TestCase
+from lens.plugins.providers import get_datasource_provider
 from lens.plugins.registry import installed_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 
@@ -217,3 +218,27 @@ class GitHubToolProviderTests(TestCase):
                     "path": "/user",
                 },
             )
+
+
+class GitHubDatasourceProviderTests(TestCase):
+    """Verify GitHub datasource resource lists stay within scope."""
+
+    def setUp(self):
+        self.provider = get_datasource_provider("github", "1.0.0")
+
+    def test_accepts_multiple_repositories(self):
+        config = self.provider.validate_datasource_config(
+            {"repositories": ["oneprolabs/a", "oneprolabs/b"]},
+            {
+                "repositories": ["oneprolabs/a", "oneprolabs/b"],
+                "branch": "main",
+            },
+        )
+
+        self.assertEqual(
+            config,
+            {
+                "repositories": ["oneprolabs/a", "oneprolabs/b"],
+                "branch": "main",
+            },
+        )

@@ -132,12 +132,12 @@ class PluginRegistryTests(TestCase):
         self.assertEqual(plugin.connection_schema["type"], "object")
         self.assertEqual(plugin.datasource_schema["type"], "object")
         self.assertEqual(
-            plugin.datasource_schema["properties"]["repository"]["resource"],
+            plugin.datasource_schema["properties"]["repositories"]["resource"],
             "repositories",
         )
-        self.assertEqual(
-            plugin.datasource_schema["properties"]["branch"]["depends_on"],
-            "repository",
+        self.assertIn(
+            "shared by all repositories",
+            plugin.datasource_schema["properties"]["branch"]["description"],
         )
         self.assertEqual(
             plugin.connection_schema["properties"]["repositories"]["write_to"],
