@@ -918,7 +918,7 @@ def build_datasource_command(snapshot, material, trigger):
                 "repo_url": f"{endpoint}/{repository}.git",
                 "branch": datasource.get("branch") or "",
                 "directory": datasource.get("directory") or "",
-                "target_subdir": repository.rsplit("/", 1)[-1],
+                "target_subdir": quote(repository, safe=""),
                 "enabled": True,
             }
             for repository in repositories

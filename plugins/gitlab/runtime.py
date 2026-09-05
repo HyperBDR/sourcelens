@@ -396,7 +396,7 @@ def build_datasource_command(snapshot, material, trigger):
     if any(item.casefold() not in allowed for item in projects):
         raise PluginRuntimeError("PLUGIN_SCOPE_VIOLATION")
     config = {
-        "branch": datasource.get("branch") or "main",
+        "branch": datasource.get("branch") or "",
         "directory": datasource.get("directory") or "",
         "auth_scheme": "token",
         "access_token": material["value"],
@@ -405,9 +405,9 @@ def build_datasource_command(snapshot, material, trigger):
         config["repositories"] = [
             {
                 "repo_url": f"{endpoint}/{project}.git",
-                "branch": datasource.get("branch") or "main",
+                "branch": datasource.get("branch") or "",
                 "directory": datasource.get("directory") or "",
-                "target_subdir": project.rsplit("/", 1)[-1],
+                "target_subdir": quote(project, safe=""),
                 "enabled": True,
             }
             for project in projects

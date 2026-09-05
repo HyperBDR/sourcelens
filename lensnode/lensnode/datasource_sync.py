@@ -1641,6 +1641,14 @@ def _sync_git_organization(command, workspace_path, emit):
 
     root = normalize_target_path(command.get("target_path"), workspace_path)
     root.mkdir(parents=True, exist_ok=True)
+    repository_names = {
+        repo_target_subdir(repository) for repository in repositories
+    }
+    _cleanup_removed_git_repositories(
+        root,
+        repository_names,
+        command.get("datasource_uuid"),
+    )
     totals = {
         "synced": 0,
         "files": 0,
@@ -1778,6 +1786,34 @@ def repo_target_subdir(repository):
         or "repository"
     )
     return safe_filename(str(raw).strip()) or "repository"
+
+
+def _cleanup_removed_git_repositories(root, repository_names, datasource_uuid):
+    """Remove child repositories no longer configured for a datasource."""
+
+    datasource_uuid = str(datasource_uuid or "")
+    if not datasource_uuid:
+        return []
+    removed = []
+    for child in sorted(Path(root).iterdir(), key=lambda item: item.name):
+        if (
+            not child.is_dir()
+            or child.is_symlink()
+            or child.name in repository_names
+        ):
+            continue
+        marker = child / manifest_store.MARKER_FILE
+        if not marker.is_file():
+            continue
+        try:
+            marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(marker_payload.get("datasource_uuid") or "") != datasource_uuid:
+            continue
+        shutil.rmtree(child)
+        removed.append(child.name)
+    return removed
 
 
 def _write_git_repository_manifest(

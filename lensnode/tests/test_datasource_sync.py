@@ -8,8 +8,10 @@ from threading import Event
 import httpx
 import pytest
 
+from lensnode.datasource_manifest import MARKER_FILE
 from lensnode.datasource_sync import (
     DataSourceSyncError,
+    _cleanup_removed_git_repositories,
     datasource_sync_workers,
     inspect_datasource_path,
     _default_git_branch,
@@ -238,6 +240,35 @@ def test_default_git_branch_prefers_main():
     assert _default_git_branch(["dev", "main"]) == "main"
     assert _default_git_branch(["dev", "master"]) == "master"
     assert _default_git_branch(["release"]) == "release"
+
+
+def test_cleanup_removed_git_repositories_keeps_current_and_foreign(tmp_path):
+    """Only stale child repositories owned by this datasource are removed."""
+
+    stale = tmp_path / "team%2Fstale"
+    current = tmp_path / "team%2Fcurrent"
+    foreign = tmp_path / "team%2Fforeign"
+    for child, datasource_uuid in [
+        (stale, "datasource-1"),
+        (current, "datasource-1"),
+        (foreign, "datasource-2"),
+    ]:
+        child.mkdir()
+        (child / MARKER_FILE).write_text(
+            json.dumps({"datasource_uuid": datasource_uuid}),
+            encoding="utf-8",
+        )
+
+    removed = _cleanup_removed_git_repositories(
+        tmp_path,
+        {"team%2Fcurrent"},
+        "datasource-1",
+    )
+
+    assert removed == ["team%2Fstale"]
+    assert not stale.exists()
+    assert current.exists()
+    assert foreign.exists()
 
 
 def test_git_manifest_items_honors_repository_directory(tmp_path, monkeypatch):
