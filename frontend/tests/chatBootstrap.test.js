@@ -67,6 +67,28 @@ test('guards restored run state with the current session load', async () => {
   )
 })
 
+test('closes the delete dialog before loading the replacement session', async () => {
+  const source = await chatSource()
+  const deleteHandler = source.indexOf('async function doDeleteSession()')
+  const deleteHandlerEnd = source.indexOf('\n}\n\nwatch(', deleteHandler)
+  const handlerSource = source.slice(deleteHandler, deleteHandlerEnd)
+  const closeDialog = handlerSource.indexOf('deleteSessionTarget.value = null')
+  const replacementLoad = handlerSource.indexOf('await selectSession(next)')
+
+  assert.notEqual(deleteHandler, -1)
+  assert.notEqual(closeDialog, -1)
+  assert.notEqual(replacementLoad, -1)
+  assert.ok(closeDialog < replacementLoad)
+})
+
+test('does not reopen the delete dialog during replacement loading', async () => {
+  const source = await chatSource()
+  assert.match(
+    source,
+    /action === 'delete' && !deletingSession\.value\)\s*\{\s*deleteSessionTarget\.value = session/
+  )
+})
+
 test('shows a retryable node-offline error when run creation is unavailable', async () => {
   const source = await chatSource()
 

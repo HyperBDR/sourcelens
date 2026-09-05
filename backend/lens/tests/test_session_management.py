@@ -4,15 +4,22 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from PIL import Image
 from rest_framework.test import APIClient
 
 from lens.models import (
     Assistant,
+    Connection,
+    CredentialLease,
+    ExecutionSnapshot,
     LensNode,
+    PluginInvocation,
     Run,
     RunDiagnostic,
     RunDiagnosticEvidence,
+    SecretMaterial,
+    SecretVersion,
     Session,
     SharedQA,
 )
@@ -233,6 +240,67 @@ class SessionManagementTests(TestCase):
         self.assertFalse(
             RunDiagnosticEvidence.objects.filter(pk=evidence.pk).exists()
         )
+
+    def test_delete_session_with_plugin_tool_snapshot(self):
+        run = create_execution_run(
+            self.first,
+            "Plugin question",
+            enqueue=False,
+            user=self.user,
+        )
+        material = SecretMaterial.objects.create(name="Plugin secret")
+        secret_version = SecretVersion.objects.create(
+            material=material,
+            encrypted_value="encrypted",
+        )
+        connection = Connection.objects.create(
+            name="Plugin connection",
+            plugin_key="github",
+            endpoint="https://github.com",
+            secret_version=secret_version,
+        )
+        snapshot = ExecutionSnapshot.objects.create(
+            kind=ExecutionSnapshot.Kind.TOOL_INVOKE,
+            connection=connection,
+            run=run,
+            secret_version=secret_version,
+            plugin_key="github",
+            plugin_version="1.0.0",
+            protocol_version=1,
+            tool_key="github_read_file",
+            invocation_id="tool-call-1",
+            resolved_config={},
+        )
+        invocation = PluginInvocation.objects.create(
+            snapshot=snapshot,
+            connection=connection,
+            run=run,
+            actor=self.user,
+            lensnode=self.node,
+            kind=ExecutionSnapshot.Kind.TOOL_INVOKE,
+            plugin_key="github",
+            tool_key="github_read_file",
+        )
+        lease = CredentialLease.objects.create(
+            snapshot=snapshot,
+            lensnode=self.node,
+            expires_at=timezone.now(),
+        )
+
+        response = self.client.delete(
+            f"/api/lens/sessions/{self.first.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 204, response.data)
+        self.assertFalse(Session.objects.filter(pk=self.first.pk).exists())
+        self.assertFalse(Run.objects.filter(pk=run.pk).exists())
+        self.assertFalse(
+            ExecutionSnapshot.objects.filter(pk=snapshot.pk).exists()
+        )
+        self.assertFalse(
+            PluginInvocation.objects.filter(pk=invocation.pk).exists()
+        )
+        self.assertFalse(CredentialLease.objects.filter(pk=lease.pk).exists())
 
     def test_other_users_cannot_manage_sessions_they_do_not_own(self):
         self.client.force_authenticate(self.other)
