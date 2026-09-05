@@ -26,7 +26,7 @@ def build_datasource_command(snapshot, material, trigger):
 
 
 def _package(tmp_path, source=RUNTIME_SOURCE, version="1.0.0"):
-    package = tmp_path / "example" / version
+    package = tmp_path / "example"
     package.mkdir(parents=True)
     (package / "runtime.py").write_text(source, encoding="utf-8")
     return package
@@ -49,26 +49,6 @@ def test_loads_runtime_contract_from_configured_root(tmp_path):
     assert contract.http_origins("https://example.com") == (
         "https://example.com",
     )
-
-
-def test_loads_exact_runtime_when_multiple_versions_are_installed(tmp_path):
-    _package(tmp_path)
-    _package(
-        tmp_path,
-        RUNTIME_SOURCE.replace(
-            'PLUGIN_VERSION = "1.0.0"',
-            'PLUGIN_VERSION = "1.1.0"',
-        ),
-        version="1.1.0",
-    )
-
-    contract = load_runtime_contract(
-        "example",
-        "1.1.0",
-        roots=[tmp_path],
-    )
-
-    assert contract.plugin_version == "1.1.0"
 
 
 def test_loads_tool_only_runtime_without_datasource_command(tmp_path):

@@ -21,7 +21,7 @@ class PluginPackageLoaderTests(TestCase):
     """Verify fixed Python entrypoints for trusted packages."""
 
     def _write_plugin(self, root, *, control_source=None, runtime_source=None):
-        path = Path(root) / "example" / "1.0.0"
+        path = Path(root) / "example"
         path.mkdir(parents=True)
         manifest = {
             "key": "example",

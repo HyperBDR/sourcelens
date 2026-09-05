@@ -106,12 +106,19 @@ def discover_plugins():
         for key_dir in sorted(root.iterdir()):
             if not key_dir.is_dir() or key_dir.is_symlink():
                 continue
-            for version_dir in sorted(key_dir.iterdir()):
-                if not version_dir.is_dir() or version_dir.is_symlink():
-                    continue
-                if version_dir.name == "__pycache__":
-                    continue
-                plugin = _load_plugin(root, key_dir, version_dir)
+            if key_dir.name == "__pycache__":
+                continue
+            package_dirs = [key_dir]
+            if not (key_dir / "plugin.json").is_file():
+                package_dirs.extend(
+                    path
+                    for path in sorted(key_dir.iterdir())
+                    if path.is_dir()
+                    and not path.is_symlink()
+                    and path.name != "__pycache__"
+                )
+            for plugin_dir in package_dirs:
+                plugin = _load_plugin(root, plugin_dir, key_dir.name)
                 identity = (plugin.key, plugin.version)
                 if identity in identities:
                     raise PluginRegistryError(
@@ -165,7 +172,7 @@ def installed_plugin(plugin_key, version=None):
     raise PluginNotFoundError("installed plugin version is required")
 
 
-def _load_plugin(root, key_dir, plugin_dir):
+def _load_plugin(root, plugin_dir, expected_key=None):
     """Load one manifest after validating its controlled directory identity."""
 
     manifest_path = plugin_dir / "plugin.json"
@@ -193,14 +200,15 @@ def _load_plugin(root, key_dir, plugin_dir):
         version
     ):
         raise PluginRegistryError("plugin version is invalid")
-    if key != key_dir.name:
+    if key != (expected_key or plugin_dir.name):
         raise PluginRegistryError(
             "plugin manifest does not match directory identity"
         )
-    if version != plugin_dir.name:
-        raise PluginRegistryError(
-            "plugin manifest does not match version directory"
-        )
+    if expected_key and plugin_dir.parent != root:
+        if version != plugin_dir.name:
+            raise PluginRegistryError(
+                "plugin manifest does not match version directory"
+            )
     if protocol_version != SUPPORTED_PROTOCOL_VERSION:
         raise PluginRegistryError("plugin protocol version is unsupported")
     if not isinstance(handlers, dict):

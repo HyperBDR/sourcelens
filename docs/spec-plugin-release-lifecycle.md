@@ -2,7 +2,7 @@
 
 ## Objective
 
-Manage every installed `plugins/<key>/<version>/` package as an immutable
+Manage every installed `plugins/<key>/` package as an immutable
 release. Newly discovered versions start in `debugging`; administrators can
 publish them and independently assign the `candidate` or `active` deployment
 role. Normal Connections, Datasources, Assistants, and new execution snapshots
@@ -40,7 +40,7 @@ stable `detail` code and an appropriate HTTP 4xx response.
 ## Package and runtime layout
 
 ```text
-plugins/<plugin-key>/<semver>/
+plugins/<plugin-key>/
   plugin.json
   control.py
   runtime.py
@@ -48,9 +48,9 @@ plugins/<plugin-key>/<semver>/
 ```
 
 The control plane chooses the active version for new work. Execution snapshots
-continue to store the exact `plugin_version`, and LensNode loads that exact
-directory so an active-version switch does not change an in-flight or replayed
-execution.
+continue to store the exact `plugin_version` and digest. The installed package
+directory is flat; retaining older packages for replay or rollback requires an
+external artifact store or a separate runtime package location.
 
 ## Testing strategy
 

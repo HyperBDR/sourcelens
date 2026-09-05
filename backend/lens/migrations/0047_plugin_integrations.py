@@ -60,7 +60,7 @@ def bootstrap_plugin_releases(apps, schema_editor):
         root = Path(root_value)
         if not root.is_dir() or root.is_symlink():
             continue
-        for manifest_path in root.glob("*/*/plugin.json"):
+        for manifest_path in root.glob("*/plugin.json"):
             package = manifest_path.parent
             if package.is_symlink():
                 continue
@@ -71,7 +71,7 @@ def bootstrap_plugin_releases(apps, schema_editor):
                 version_key = tuple(int(part) for part in version.split("."))
             except (KeyError, OSError, TypeError, ValueError):
                 continue
-            if package.parent.name != key or package.name != version:
+            if package.name != key:
                 continue
             installed[(key, version)] = (version_key, package)
     by_key = {}

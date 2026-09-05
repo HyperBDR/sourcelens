@@ -22,7 +22,7 @@ User = get_user_model()
 class PluginRegistryTests(TestCase):
     """Verify trusted plugin manifest discovery."""
 
-    def test_discovers_plugin_from_version_directory(self):
+    def test_discovers_plugin_from_flat_key_directory(self):
         manifest = {
             "key": "github",
             "version": "1.0.0",
@@ -33,7 +33,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            plugin_dir = Path(root) / "github" / "1.0.0"
+            plugin_dir = Path(root) / "github"
             plugin_dir.mkdir(parents=True)
             (plugin_dir / "plugin.json").write_text(json.dumps(manifest))
             (plugin_dir / "control.py").write_text("# test entrypoint\n")
@@ -46,7 +46,7 @@ class PluginRegistryTests(TestCase):
 
     def test_duplicate_configured_root_is_scanned_once(self):
         with tempfile.TemporaryDirectory() as root:
-            plugin_dir = Path(root) / "github" / "1.0.0"
+            plugin_dir = Path(root) / "github"
             plugin_dir.mkdir(parents=True)
             with override_settings(LENS_PLUGIN_ROOTS=[root, root]):
                 with patch(
@@ -63,27 +63,26 @@ class PluginRegistryTests(TestCase):
 
     def _write_manifest(self, root, manifest):
         manifest.setdefault("version", "1.0.0")
-        path = Path(root) / "github" / manifest["version"]
+        path = Path(root) / "github"
         path.mkdir(parents=True)
         (path / "plugin.json").write_text(json.dumps(manifest))
         (path / "control.py").write_text("# test entrypoint\n")
         (path / "runtime.py").write_text("# test entrypoint\n")
 
-    def test_discovers_multiple_versions_and_resolves_exact_or_latest(self):
+    def test_resolves_the_installed_version(self):
         with tempfile.TemporaryDirectory() as root:
-            for version in ("1.0.0", "1.1.0"):
-                self._write_manifest(
-                    root,
-                    {
-                        "key": "github",
-                        "version": version,
-                        "protocol_version": 1,
-                        "handlers": {
-                            "runtime": "python_v1",
-                            "datasource": "python_v1",
-                        },
+            self._write_manifest(
+                root,
+                {
+                    "key": "github",
+                    "version": "1.0.0",
+                    "protocol_version": 1,
+                    "handlers": {
+                        "runtime": "python_v1",
+                        "datasource": "python_v1",
                     },
-                )
+                },
+            )
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 PluginRelease.objects.filter(plugin_key="github").delete()
                 reconcile_plugin_releases()
@@ -93,15 +92,15 @@ class PluginRegistryTests(TestCase):
 
         self.assertEqual(
             [(plugin.key, plugin.version) for plugin in plugins],
-            [("github", "1.0.0"), ("github", "1.1.0")],
+            [("github", "1.0.0")],
         )
         self.assertEqual(exact.version, "1.0.0")
-        self.assertEqual(latest.version, "1.1.0")
+        self.assertEqual(latest.version, "1.0.0")
 
-    def test_rejects_manifest_version_that_differs_from_directory(self):
+    def test_rejects_manifest_key_that_differs_from_directory(self):
         manifest = {
-            "key": "github",
-            "version": "1.1.0",
+            "key": "gitlab",
+            "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
                 "runtime": "python_v1",
@@ -109,7 +108,7 @@ class PluginRegistryTests(TestCase):
             },
         }
         with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "github" / "1.0.0"
+            path = Path(root) / "github"
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
             (path / "control.py").write_text("# test entrypoint\n")
@@ -117,7 +116,7 @@ class PluginRegistryTests(TestCase):
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
                 with self.assertRaisesMessage(
                     PluginRegistryError,
-                    "version directory",
+                    "directory identity",
                 ):
                     discover_plugins()
 

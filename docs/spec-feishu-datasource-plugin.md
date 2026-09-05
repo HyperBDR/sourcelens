@@ -34,7 +34,7 @@ Confirmed scope:
 
 - Django and Django REST Framework for Plugin registry, Connection validation,
   and execution snapshots.
-- Python Plugin entrypoints under `plugins/feishu/1.0.0/` for the control-plane
+- Python Plugin entrypoints under `plugins/feishu/` for the control-plane
   Provider and LensNode datasource command builder.
 - Existing LensNode Feishu synchronization adapter for file ingestion and
   post-sync conversion.
@@ -62,7 +62,7 @@ git diff --check
 ## Project Structure
 
 ```text
-plugins/feishu/1.0.0/
+plugins/feishu/
   plugin.json       Manifest, Connection schema, and DataSource schema
   control.py        Endpoint, credential, and resource validation
   runtime.py        Snapshot/material validation and sync command construction

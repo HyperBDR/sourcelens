@@ -121,7 +121,7 @@ class AssistantPluginBindingTests(TestCase):
             ],
         }
         with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "github" / "1.0.0"
+            path = Path(root) / "github"
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
             (path / "control.py").write_text("PLUGIN_API_VERSION = 1\n")

@@ -10,7 +10,7 @@ Datasource 同步或面向大模型的 Tool；声明的能力都必须由宿主�
 宿主只从受控目录发现 Plugin，目录身份必须与 Manifest 一致：
 
 ```text
-/opt/plugins/<key>/<version>/
+/opt/plugins/<key>/
   plugin.json
   control.py
   runtime.py
@@ -266,7 +266,7 @@ Provider 的并发、超时、deadline、取消、Retry-After 和部分失败处
 
 - `protocol_version` 只代表宿主与 Plugin 的接口版本，不代表业务 capability 版本；
 - `plugin_version` 是 SemVer 业务发布版本，当前四个内置 Plugin 均为 `1.0.0`；
-- 安装布局为 `plugins/<key>/<version>/`，允许同一 `key` 的多个版本共存；新发现
+- 安装布局为 `plugins/<key>/`，物理目录不体现版本；新发现
   版本保持 `debugging`，不会因为 SemVer 更高而自动用于生产；
 - 正常 Connection、Datasource、Assistant 和新执行快照只解析
   `published + active` 版本；候选验证显式解析 `published + candidate` 版本；
