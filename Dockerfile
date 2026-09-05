@@ -170,6 +170,7 @@ WORKDIR /opt/backend
 
 COPY --from=backend-builder /opt/venv /opt/venv
 COPY --from=backend-builder /opt/backend /opt/backend
+COPY --from=backend-builder /opt/plugins /opt/plugins
 
 # Verify neither the system install nor the copied venv resurrected pip.
 RUN set -eux; \

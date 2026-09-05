@@ -41,8 +41,11 @@ from lens.document_attachments import (
 )
 from lens.models import (
     Assistant,
+    CredentialLease,
+    ExecutionSnapshot,
     Message,
     MessageAttachment,
+    PluginInvocation,
     Run,
     RunDiagnostic,
     RunExecution,
@@ -231,13 +234,32 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Delete protected dependents in dependency order.
 
         Django's deletion collector checks PROTECT constraints while it
-        collects related objects. Delete diagnostics before their evidence
-        cascades from Run, then delete Runs before Messages cascade from the
-        Session.
+        collects related objects. Delete Plugin execution audit records and
+        diagnostics before their evidence cascades from Run, then delete Runs
+        before Messages cascade from the Session.
         """
         session_uuid = instance.uuid
         user_id = instance.user_id
         with transaction.atomic():
+            run_ids = list(
+                instance.run_set.values_list("id", flat=True)
+            )
+            snapshot_ids = list(
+                ExecutionSnapshot.objects.filter(
+                    run_id__in=run_ids,
+                ).values_list("id", flat=True)
+            )
+            if snapshot_ids:
+                CredentialLease.objects.filter(
+                    snapshot_id__in=snapshot_ids,
+                ).delete()
+                PluginInvocation.objects.filter(
+                    snapshot_id__in=snapshot_ids,
+                ).delete()
+                ExecutionSnapshot.objects.filter(
+                    id__in=snapshot_ids,
+                ).delete()
+            PluginInvocation.objects.filter(run_id__in=run_ids).delete()
             RunDiagnostic.objects.filter(run__session=instance).delete()
             instance.run_set.all().delete()
             instance.delete()

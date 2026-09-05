@@ -3443,7 +3443,9 @@ async function handleSessionAction(session, action) {
   else if (action === 'unpin') await setSessionPinned(session, false)
   else if (action === 'archive') await archiveManagedSession(session)
   else if (action === 'restore') await restoreManagedSession(session)
-  else if (action === 'delete') deleteSessionTarget.value = session
+  else if (action === 'delete' && !deletingSession.value) {
+    deleteSessionTarget.value = session
+  }
 }
 
 async function setSessionPinned(session, pinned) {
@@ -4547,6 +4549,8 @@ async function doDeleteSession() {
     if (clearUnreadSession(window.localStorage, session.uuid)) {
       refreshUnreadSessions()
     }
+    deleteSessionTarget.value = null
+    showSuccess(t('lens.chat.sessionDeleted'))
     if (selectedSessionUuid.value === session.uuid) {
       const next = sessions.value[0]
       if (next) {
@@ -4555,8 +4559,6 @@ async function doDeleteSession() {
         clearSessionSelection()
       }
     }
-    deleteSessionTarget.value = null
-    showSuccess(t('lens.chat.sessionDeleted'))
   } catch {
     showError(t('lens.chat.deleteFailed'))
   } finally {
