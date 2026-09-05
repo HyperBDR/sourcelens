@@ -130,7 +130,7 @@ jobs:
             file: ./frontend/Dockerfile
             target: ''
           - image_name: sourcelens-lensnode
-            context: ./lensnode
+            context: .
             file: ./lensnode/Dockerfile
             target: ''
     steps:
