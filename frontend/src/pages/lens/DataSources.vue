@@ -1147,7 +1147,24 @@ function formFromRow(row) {
 
 function datasourceConfigFromRow(row) {
   if (row.plugin_key && row.connection) {
-    return { ...(row.datasource_config || {}) }
+    const config = { ...(row.datasource_config || {}) }
+    if (
+      row.plugin_key === 'github' &&
+      config.repository &&
+      !Array.isArray(config.repositories)
+    ) {
+      config.repositories = [config.repository]
+      delete config.repository
+    }
+    if (
+      row.plugin_key === 'gitlab' &&
+      config.project &&
+      !Array.isArray(config.projects)
+    ) {
+      config.projects = [config.project]
+      delete config.project
+    }
+    return config
   }
   if (row.source_type === 'feishu') {
     return {

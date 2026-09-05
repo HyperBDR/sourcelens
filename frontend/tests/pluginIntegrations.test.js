@@ -17,6 +17,8 @@ test('Plugin data sources use installed manifests and Connections', async () => 
   assert.match(page, /payload\.plugin_key = form\.value\.plugin_key/)
   assert.match(page, /payload\.connection_uuid = form\.value\.connection_uuid/)
   assert.match(page, /payload\.datasource_config = buildPluginDatasourceConfig/)
+  assert.match(page, /config\.repositories = \[config\.repository\]/)
+  assert.match(page, /config\.projects = \[config\.project\]/)
   assert.match(page, /payload\.credential_uuid = null/)
   assert.match(page, /getConnectionResources/)
   assert.doesNotMatch(page, /GitHub resources are available/)
